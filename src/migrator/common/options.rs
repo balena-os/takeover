@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use structopt::StructOpt;
 use crate::{common::{MigError, MigErrorKind}};
 
-#[derive(StructOpt, Debug, Copy, Clone)]
+#[derive(StructOpt, Debug, Copy, Clone, PartialEq)]
 pub enum Action {
     /// migrate the device
     Migrate,
@@ -32,6 +32,8 @@ pub struct Options {
     log_to: Option<PathBuf>,
     #[structopt(short,long,value_name = "INSTALL_DEVICE",parse(from_os_str),)]
     flash_to: Option<PathBuf>,
+    #[structopt(short,long,value_name = "CONFIG_JSON",parse(from_os_str),)]
+    config: Option<PathBuf>,
 }
 
 impl Options {
@@ -46,12 +48,12 @@ impl Options {
         }
     }
 
-    pub fn get_image(&self) -> Result<PathBuf,MigError> {
-        if let Some(image) = &self.image {
-            Ok(image.clone())
-        } else {
-            Err(MigError::from_remark(MigErrorKind::InvState, "Required command line parameter image was not supplied"))
-        }
+    pub fn get_image(&self) -> &Option<PathBuf> {
+        &self.image
+    }
+
+    pub fn get_config(&self) -> &Option<PathBuf> {
+        &self.config
     }
 
     pub fn is_debug(&self) -> bool {

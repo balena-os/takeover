@@ -16,6 +16,8 @@ pub(crate) struct Stage2Config {
     pub log_level: String,
     pub log_dev: Option<PathBuf>,
     pub flash_dev: PathBuf,
+    pub pretend: bool,
+    pub umount_parts: Vec<PathBuf>,
 }
 
 impl Stage2Config {

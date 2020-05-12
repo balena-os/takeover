@@ -23,8 +23,6 @@ use crate::{
 pub(crate) struct MigrateInfo {
     os_name: String,
     assets: Assets,
-    work_path: PathBuf,
-    image_path: PathBuf,
     mounts: Vec<PathBuf>,
     to_dir: Option<PathBuf>,
     log_level: Level
@@ -32,32 +30,9 @@ pub(crate) struct MigrateInfo {
 
 impl MigrateInfo {
     pub fn new(opts: &Options) -> Result<MigrateInfo, MigError> {
-
-        let work_dir = opts.get_work_dir().canonicalize()
-            .context(MigErrCtx::from_remark(MigErrorKind::Upstream,
-                                            &format!("Failed to canonicalize work dir '{}'", opts.get_work_dir().display())))?;
-
-        let image_path = opts.get_image()?;
-        let image_path = if file_exists(&image_path) {
-          image_path.canonicalize()
-              .context(MigErrCtx::from_remark(MigErrorKind::Upstream,
-                                              &format!("Failed to canonicalze path: '{}'", image_path.display())))?
-        } else {
-            let image_path = work_dir.join(&image_path);
-            if file_exists(&image_path) {
-                image_path.canonicalize()
-                    .context(MigErrCtx::from_remark(MigErrorKind::Upstream,
-                                                    &format!("Failed to canonicalze path: '{}'", image_path.display())))?
-            } else {
-                return Err(MigError::from_remark(MigErrorKind::NotFound, &format!("Could not find image: '{}'", opts.get_image()?.display())))
-            }
-        };
-
         Ok(MigrateInfo {
-            work_path: work_dir,
             assets: Assets::new(),
             os_name: get_os_name()?,
-            image_path,
             to_dir: None,
             mounts: Vec::new(),
             log_level: if opts.is_trace() {
@@ -72,14 +47,6 @@ impl MigrateInfo {
 
     pub fn get_assets(&self) -> &Assets {
         &self.assets
-    }
-
-    pub fn get_work_dir(&self) -> &Path {
-        &self.work_path
-    }
-
-    pub fn get_image_path(&self) -> &Path {
-        &self.image_path
     }
 
     pub fn set_to_dir(&mut self, to_dir: &PathBuf) {

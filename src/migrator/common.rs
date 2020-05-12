@@ -1,7 +1,7 @@
 use std::path::{PathBuf, Path};
 use std::process::{Command, Stdio, ExitStatus};
 use std::mem::MaybeUninit;
-use std::fs::read_to_string;
+use std::fs::{read_to_string, read_link};
 
 use failure::{ResultExt};
 use libc::{getuid};
@@ -12,7 +12,7 @@ use log::{trace, debug, warn, error, info};
 pub(crate) mod stage2_config;
 
 pub(crate) mod defs;
-use defs::{UNAME_CMD, MKTEMP_CMD, OSArch};
+use defs::{UNAME_CMD, MKTEMP_CMD, OSArch, DISK_BY_UUID_PATH, DISK_BY_LABEL_PATH, DISK_BY_PARTUUID_PATH};
 pub mod mig_error;
 pub use mig_error::{MigError, MigErrorKind, MigErrCtx};
 
@@ -249,6 +249,27 @@ pub fn file_exists<P: AsRef<Path>>(file: P) -> bool {
     file.as_ref().exists()
 }
 
+pub fn dir_exists<P: AsRef<Path>>(name: P) -> Result<bool, MigError> {
+    let path = name.as_ref();
+    if path.exists() {
+        Ok(name
+            .as_ref()
+            .metadata()
+            .context(MigErrCtx::from_remark(
+                MigErrorKind::Upstream,
+                &format!(
+                    "dir_exists: failed to retrieve metadata for path: '{}'",
+                    path.display()
+                ),
+            ))?
+            .file_type()
+            .is_dir())
+    } else {
+        Ok(false)
+    }
+}
+
+
 pub(crate) fn parse_file<P: AsRef<Path>>(
     fname: P,
     regex: &Regex,
@@ -329,4 +350,67 @@ pub fn get_root_dev() -> Result<Option<PathBuf>, MigError> {
         }
     }
     Ok(None)
+}
+
+pub(crate) fn to_std_device_path(device: &Path) -> Result<PathBuf, MigError> {
+    debug!("to_std_device_path: entered with '{}'", device.display());
+
+    if !file_exists(device) {
+        return Err(MigError::from_remark(
+            MigErrorKind::NotFound,
+            &format!("File does not exist: '{}'", device.display()),
+        ));
+    }
+
+    if !(device.starts_with(DISK_BY_PARTUUID_PATH)
+        || device.starts_with(DISK_BY_UUID_PATH)
+        || device.starts_with(DISK_BY_LABEL_PATH))
+    {
+        return Ok(PathBuf::from(device));
+    }
+
+    trace!(
+        "to_std_device_path: attempting to dereference as link '{}'",
+        device.display()
+    );
+
+    match read_link(device) {
+        Ok(link) => {
+            if let Some(parent) = device.parent() {
+                let dev_path = path_append(parent, link);
+                Ok(dev_path.canonicalize().context(MigErrCtx::from_remark(
+                    MigErrorKind::Upstream,
+                    &format!("failed to canonicalize path from: '{}'", dev_path.display()),
+                ))?)
+            } else {
+                trace!("Failed to retrieve parent from  '{}'", device.display());
+                Ok(PathBuf::from(device))
+            }
+        }
+        Err(why) => {
+            trace!(
+                "Failed to dereference file '{}' : {:?}",
+                device.display(),
+                why
+            );
+            Ok(PathBuf::from(device))
+        }
+    }
+}
+
+pub(crate) fn path_append<P1: AsRef<Path>, P2: AsRef<Path>>(base: P1, append: P2) -> PathBuf {
+    let base = base.as_ref();
+    let append = append.as_ref();
+
+    if append.is_absolute() {
+        let mut components = append.components();
+        let mut curr = PathBuf::from(base);
+        components.next();
+        for comp in components {
+            curr = curr.join(comp);
+        }
+        curr
+    } else {
+        base.join(append)
+    }
 }

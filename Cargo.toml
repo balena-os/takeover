@@ -19,7 +19,7 @@ mod_logger = { git = "https://github.com/samothx/ModuleLogger.git" }
 libc = { git = "https://github.com/rust-lang/libc" }
 
 regex = "1"
-nix = "*"#
+nix = "*"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8"
 flate2 = "1.0.14"

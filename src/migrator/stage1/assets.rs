@@ -13,18 +13,18 @@ use crate::{
         call,
     },
 };
+use crate::common::defs::OLD_ROOT_MP;
 
 const RPI3_BUSYBOX: &[u8] = include_bytes!("../../../assets/armv7/busybox");
 const X86_64_BUSYBOX: &[u8] = include_bytes!("../../../assets/x86_64/busybox");
 
-const STAGE2_SCRIPT: &str = r###"
-#!__TO__/busybox sh
+const STAGE2_SCRIPT: &str = r###"#!__TO__/busybox sh
 exec <"__TO____TTY__" >"__TO____TTY__" 2>"__TO____TTY__"
 cd "__TO__"
 ./busybox echo "Init takeover successful"
 ./busybox echo "Pivoting root..."
 ./busybox mount --make-rprivate /
-./busybox pivot_root . old_root
+./busybox pivot_root . mnt/old_root
 ./busybox echo "Chrooting and running init..."
 exec ./busybox chroot . /takeover stage2
 "###;
