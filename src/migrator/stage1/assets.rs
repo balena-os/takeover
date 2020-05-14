@@ -55,13 +55,10 @@ impl Assets {
     ) -> Result<(), MigError> {
         let s2_script = STAGE2_SCRIPT.replace("__TO__", &*to_dir.as_ref().to_string_lossy());
         let s2_script = s2_script.replace("__TTY__", &*tty.as_ref().to_string_lossy());
-        write(out_path.as_ref(), &s2_script).context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            &format!(
-                "Failed to write stage 2 script to: '{}'",
-                out_path.as_ref().display()
-            ),
-        ))?;
+        write(out_path.as_ref(), &s2_script).context(upstream_context!(&format!(
+            "Failed to write stage 2 script to: '{}'",
+            out_path.as_ref().display()
+        )))?;
         let cmd_res = call(
             CHMOD_CMD,
             &["+x", &*out_path.as_ref().to_string_lossy()],
@@ -97,28 +94,25 @@ impl Assets {
                 .write(true)
                 .read(false)
                 .open(&target_path)
-                .context(MigErrCtx::from_remark(
-                    MigErrorKind::Upstream,
-                    &format!(
-                        "Failed to open file for writing: '{}'",
-                        target_path.display()
-                    ),
-                ))?;
+                .context(upstream_context!(&format!(
+                    "Failed to open file for writing: '{}'",
+                    target_path.display()
+                )))?;
             target_file
                 .write(self.busybox)
-                .context(MigErrCtx::from_remark(
-                    MigErrorKind::Upstream,
-                    &format!("Failed to write to file: '{}'", target_path.display()),
-                ))?;
+                .context(upstream_context!(&format!(
+                    "Failed to write to file: '{}'",
+                    target_path.display()
+                )))?;
         }
 
         /*
         let mut busybox_file = OpenOptions::new().create(false).write(true).open(&target_path)
-            .context(MigErrCtx::from_remark(MigErrorKind::Upstream,
+            .context(MigErrCtx::from_remark(upstream_context!(
                                             &format!("Failed to set open '{}'", target_path.display())))?;
 
         let metadata = busybox_file.metadata()
-            .context(MigErrCtx::from_remark(MigErrorKind::Upstream,
+            .context(upstream_context!(
                                             &format!("Failed to get metadata for '{}'", target_path.display())))?;
         let mut permissions = metadata.permissions();
         permissions.set_mode(0o755);

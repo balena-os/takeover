@@ -52,8 +52,6 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
         }
     }
 
-    let bla = vecco![1, 2, 3];
-
     // *********************************************************
     // calculate required memory
     let mut req_size: u64 = mig_info.get_assets().busybox_size() as u64 + XTRA_FS_SIZE;

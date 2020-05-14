@@ -1,4 +1,6 @@
 #[macro_use]
+pub(crate) mod macros;
+
 pub(crate) mod common;
 pub use common::{options::Options, MigError, MigErrorKind};
 

@@ -15,7 +15,7 @@ pub(crate) mod defs;
 use defs::{
     OSArch, DISK_BY_LABEL_PATH, DISK_BY_PARTUUID_PATH, DISK_BY_UUID_PATH, MKTEMP_CMD, UNAME_CMD,
 };
-#[macro_use]
+
 pub mod mig_error;
 pub use mig_error::{MigErrCtx, MigError, MigErrorKind};
 
@@ -104,9 +104,8 @@ pub(crate) fn mktemp(
 pub(crate) fn get_os_arch() -> Result<OSArch, MigError> {
     const UNAME_ARGS_OS_ARCH: [&str; 1] = ["-m"];
     trace!("get_os_arch: entered");
-    let cmd_res = call(UNAME_CMD, &UNAME_ARGS_OS_ARCH, true).context(MigErrCtx::from_remark(
-        MigErrorKind::Upstream,
-        &format!("get_os_arch: call {}", UNAME_CMD),
+    let cmd_res = call(UNAME_CMD, &UNAME_ARGS_OS_ARCH, true).context(upstream_context!(
+        &format!("get_os_arch: call {}", UNAME_CMD)
     ))?;
 
     if cmd_res.status.success() {
@@ -159,13 +158,10 @@ pub(crate) fn get_dev_type() -> Result<DeviceType, MigError> {
 
             let dev_tree_model = String::from(
                 read_to_string(DEVICE_TREE_MODEL)
-                    .context(MigErrCtx::from_remark(
-                        MigErrorKind::Upstream,
-                        &format!(
-                            "get_device: unable to determine model due to inaccessible file '{}'",
-                            DEVICE_TREE_MODEL
-                        ),
-                    ))?
+                    .context(upstream_context!(&format!(
+                        "get_device: unable to determine model due to inaccessible file '{}'",
+                        DEVICE_TREE_MODEL
+                    )))?
                     .trim_end_matches('\0')
                     .trim_end(),
             );
@@ -269,13 +265,10 @@ pub fn dir_exists<P: AsRef<Path>>(name: P) -> Result<bool, MigError> {
         Ok(name
             .as_ref()
             .metadata()
-            .context(MigErrCtx::from_remark(
-                MigErrorKind::Upstream,
-                &format!(
-                    "dir_exists: failed to retrieve metadata for path: '{}'",
-                    path.display()
-                ),
-            ))?
+            .context(upstream_context!(&format!(
+                "dir_exists: failed to retrieve metadata for path: '{}'",
+                path.display()
+            )))?
             .file_type()
             .is_dir())
     } else {
@@ -288,10 +281,10 @@ pub(crate) fn parse_file<P: AsRef<Path>>(
     regex: &Regex,
 ) -> Result<Option<Vec<String>>, MigError> {
     let path = fname.as_ref();
-    let os_info = read_to_string(path).context(MigErrCtx::from_remark(
-        MigErrorKind::Upstream,
-        &format!("File read '{}'", path.display()),
-    ))?;
+    let os_info = read_to_string(path).context(upstream_context!(&format!(
+        "File read '{}'",
+        path.display()
+    )))?;
 
     for line in os_info.lines() {
         debug!("parse_file: line: '{}'", line);
@@ -330,10 +323,8 @@ pub fn format_size_with_unit(size: u64) -> String {
 
 pub fn get_mountpoint<P: AsRef<Path>>(device: P) -> Result<Option<PathBuf>, MigError> {
     let device_str = &*device.as_ref().to_string_lossy();
-    let mtab = read_to_string("/etc/mtab").context(MigErrCtx::from_remark(
-        MigErrorKind::Upstream,
-        "Failed to read /etc/mtab",
-    ))?;
+    let mtab =
+        read_to_string("/etc/mtab").context(upstream_context!("Failed to read /etc/mtab"))?;
     for line in mtab.lines() {
         let words: Vec<&str> = line.split_whitespace().collect();
         if let Some(device) = words.get(0) {
@@ -356,10 +347,8 @@ pub fn get_mountpoint<P: AsRef<Path>>(device: P) -> Result<Option<PathBuf>, MigE
 
 #[allow(dead_code)]
 pub fn get_root_dev() -> Result<Option<PathBuf>, MigError> {
-    let mtab = read_to_string("/etc/mtab").context(MigErrCtx::from_remark(
-        MigErrorKind::Upstream,
-        "Failed to read /etc/mtab",
-    ))?;
+    let mtab =
+        read_to_string("/etc/mtab").context(upstream_context!("Failed to read /etc/mtab"))?;
     for line in mtab.lines() {
         let words: Vec<&str> = line.split_whitespace().collect();
         if let Some(mountpoint) = words.get(1) {
@@ -399,10 +388,10 @@ pub(crate) fn to_std_device_path(device: &Path) -> Result<PathBuf, MigError> {
         Ok(link) => {
             if let Some(parent) = device.parent() {
                 let dev_path = path_append(parent, link);
-                Ok(dev_path.canonicalize().context(MigErrCtx::from_remark(
-                    MigErrorKind::Upstream,
-                    &format!("failed to canonicalize path from: '{}'", dev_path.display()),
-                ))?)
+                Ok(dev_path.canonicalize().context(upstream_context!(&format!(
+                    "failed to canonicalize path from: '{}'",
+                    dev_path.display()
+                )))?)
             } else {
                 trace!("Failed to retrieve parent from  '{}'", device.display());
                 Ok(PathBuf::from(device))

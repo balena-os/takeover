@@ -38,19 +38,13 @@ impl Stage2Config {
     }
 
     pub fn serialize(&self) -> Result<String, MigError> {
-        Ok(serde_yaml::to_string(self).context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            "Failed to deserialize stage2 config",
-        ))?)
+        Ok(serde_yaml::to_string(self)
+            .context(upstream_context!("Failed to deserialize stage2 config"))?)
     }
 
     pub fn deserialze(config_str: &str) -> Result<Stage2Config, MigError> {
-        Ok(
-            serde_yaml::from_str(&config_str).context(MigErrCtx::from_remark(
-                MigErrorKind::Upstream,
-                "Failed to parse stage2 config",
-            ))?,
-        )
+        Ok(serde_yaml::from_str(&config_str)
+            .context(upstream_context!("Failed to parse stage2 config"))?)
     }
 
     pub fn get_flash_dev(&self) -> &PathBuf {

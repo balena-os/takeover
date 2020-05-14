@@ -162,10 +162,10 @@ impl<'a> LsblkInfo {
     ) -> Result<(&'a LsblkDevice, &'a LsblkPartition), MigError> {
         let path = path.as_ref();
         debug!("get_path_devs: '{}", path.display());
-        let abs_path = path.canonicalize().context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            &format!("failed to canonicalize path: '{}'", path.display()),
-        ))?;
+        let abs_path = path.canonicalize().context(upstream_context!(&format!(
+            "failed to canonicalize path: '{}'",
+            path.display()
+        )))?;
 
         let mut mp_match: Option<(&LsblkDevice, &LsblkPartition)> = None;
 
@@ -343,9 +343,8 @@ impl<'a> LsblkInfo {
 
             let get_u64 = |p: &HashMap<String, String>, s: &str| -> Result<Option<u64>, MigError> {
                 if let Some(res) = p.get(s) {
-                    Ok(Some(res.parse::<u64>().context(MigErrCtx::from_remark(
-                        MigErrorKind::Upstream,
-                        &format!("Failed to parse u64 from '{}'", s),
+                    Ok(Some(res.parse::<u64>().context(upstream_context!(
+                        &format!("Failed to parse u64 from '{}'", s)
                     ))?))
                 } else {
                     Ok(None)
