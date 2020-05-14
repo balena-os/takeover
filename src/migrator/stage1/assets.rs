@@ -22,7 +22,7 @@ cd "__TO__"
 ./busybox mount --make-rprivate /
 ./busybox pivot_root . mnt/old_root
 ./busybox echo "Chrooting and running init..."
-exec ./busybox chroot . /takeover stage2
+exec ./busybox chroot . /takeover --stage2
 "###;
 
 #[derive(Debug)]

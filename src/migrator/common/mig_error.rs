@@ -155,3 +155,23 @@ impl From<Context<MigErrCtx>> for MigError {
         MigError { inner }
     }
 }
+
+#[macro_export]
+macro_rules! upstream_context {
+    (  $x:expr  ) => {{
+        MigErrCtx::from_remark(MigErrorKind::Upstream, $x)
+    }};
+}
+
+#[macro_export]
+macro_rules! vecco {
+    ( $( $x:expr ),* ) => {
+        {
+            let mut temp_vec = Vec::new();
+            $(
+                temp_vec.push($x);
+            )*
+            temp_vec
+        }
+    };
+}

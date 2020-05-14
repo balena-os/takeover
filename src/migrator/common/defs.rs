@@ -24,6 +24,7 @@ pub const DISK_BY_UUID_PATH: &str = "/dev/disk/by-uuid";
 pub const BALENA_BOOT_PART: &str = "resin-boot";
 pub const BALENA_BOOT_FSTYPE: &str = "vfat";
 
+pub const NIX_NONE: Option<&'static [u8]> = None;
 /*pub const BALENA_ROOTA_PART: &str = "resin-rootA";
 pub const BALENA_ROOTA_FSTYPE: &str = "ext4";
 pub const BALENA_ROOTB_PART: &str = "resin-rootB";

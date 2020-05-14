@@ -2,43 +2,37 @@ use std::path::PathBuf;
 
 use structopt::StructOpt;
 
-#[derive(StructOpt, Debug, Copy, Clone, PartialEq)]
-pub enum Action {
-    /// migrate the device
-    Migrate,
-    /// check configuration but do not migrate
-    Pretend,
-    /// run as stage 2 instead of as stage 1 executable.
-    Stage2,
-}
-
 #[derive(StructOpt, Debug, Clone)]
 #[structopt(name = env!("CARGO_PKG_NAME"), author, about)]
 pub struct Options {
     /// what to do
-    #[structopt(subcommand)]
-    command: Action,
-    /// The working directory
     #[structopt(short, long, value_name = "DIRECTORY", parse(from_os_str))]
     work_dir: Option<PathBuf>,
     #[structopt(short, long, value_name = "IMAGE", parse(from_os_str))]
     image: Option<PathBuf>,
-    #[structopt(short)]
+    #[structopt(short, long, value_name = "VERSION")]
+    version: Option<String>,
+    #[structopt(short, long, value_name = "CONFIG_JSON", parse(from_os_str))]
+    config: Option<PathBuf>,
+    #[structopt(long)]
+    pretend: bool,
+    #[structopt(long)]
     debug: bool,
-    #[structopt(short)]
+    #[structopt(long)]
     trace: bool,
+    #[structopt(long)]
+    stage2: bool,
     #[structopt(short, long, value_name = "LOG_DEVICE", parse(from_os_str))]
     log_to: Option<PathBuf>,
     #[structopt(short, long, value_name = "INSTALL_DEVICE", parse(from_os_str))]
     flash_to: Option<PathBuf>,
-    #[structopt(short, long, value_name = "CONFIG_JSON", parse(from_os_str))]
-    config: Option<PathBuf>,
 }
 
 impl Options {
-    pub fn get_cmd(&self) -> &Action {
-        &self.command
+    pub fn is_stage2(&self) -> bool {
+        self.stage2
     }
+
     pub fn get_work_dir(&self) -> PathBuf {
         if let Some(work_dir) = &self.work_dir {
             work_dir.clone()
@@ -51,8 +45,16 @@ impl Options {
         &self.image
     }
 
+    pub fn get_version(&self) -> &Option<String> {
+        &self.version
+    }
+
     pub fn get_config(&self) -> &Option<PathBuf> {
         &self.config
+    }
+
+    pub fn is_pretend(&self) -> bool {
+        self.pretend
     }
 
     pub fn is_debug(&self) -> bool {

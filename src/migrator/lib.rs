@@ -1,8 +1,6 @@
+#[macro_use]
 pub(crate) mod common;
-pub use common::{
-    options::{Action, Options},
-    MigError, MigErrorKind,
-};
+pub use common::{options::Options, MigError, MigErrorKind};
 
 pub mod stage1;
 pub use stage1::stage1;

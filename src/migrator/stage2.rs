@@ -33,19 +33,23 @@ use crate::common::{
     stage2_config::Stage2Config,
 };
 
-use crate::common::defs::{
-    BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART, BALENA_CONFIG_PATH, BALENA_PART_MP,
-    DISK_BY_LABEL_PATH,
+use crate::{
+    common::{
+        defs::{
+            BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART, BALENA_CONFIG_PATH,
+            BALENA_PART_MP, DISK_BY_LABEL_PATH, NIX_NONE,
+        },
+        get_mountpoint, path_append,
+    },
+    stage2::disk_util::DEF_BLOCK_SIZE,
 };
-use crate::common::{get_mountpoint, path_append};
+
 use std::fs::{create_dir_all, read_to_string};
 
 mod disk_util;
-use crate::stage2::disk_util::DEF_BLOCK_SIZE;
 use disk_util::{Disk, PartitionIterator};
 
 const DD_BLOCK_SIZE: usize = 128 * 1024; // 4_194_304;
-pub const NIX_NONE: Option<&'static [u8]> = None;
 
 pub const BUSYBOX_CMD: &str = "/busybox";
 
@@ -82,9 +86,8 @@ fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<(), MigError> {
             }
         }
 
-        create_dir_all("/mnt/log").context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            "Failed to create log mount directory /mnt/log",
+        create_dir_all("/mnt/log").context(upstream_context!(
+            "Failed to create log mount directory /mnt/log"
         ))?;
 
         trace!("Created log mountpoint: '/mnt/log'");
@@ -95,10 +98,10 @@ fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<(), MigError> {
             MsFlags::empty(),
             NIX_NONE,
         )
-        .context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            &format!("Failed to mount '{}' on /mnt/log", log_dev.display()),
-        ))?;
+        .context(upstream_context!(&format!(
+            "Failed to mount '{}' on /mnt/log",
+            log_dev.display()
+        )))?;
 
         trace!(
             "Mounted '{}' to log mountpoint: '/mnt/log'",
@@ -110,9 +113,8 @@ fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<(), MigError> {
             &PathBuf::from("/mnt/log/stage2.log"),
             false,
         )
-        .context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            "Failed set log file to  '/mnt/log/stage2.log'",
+        .context(upstream_context!(
+            "Failed set log file to  '/mnt/log/stage2.log'"
         ))?;
         info!(
             "Now logging to /mnt/log/stage2.log on '{}'",
@@ -227,13 +229,10 @@ fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
     let part_iterator = PartitionIterator::new(&mut disk)?;
 
     if !dir_exists(BALENA_PART_MP)? {
-        create_dir(BALENA_PART_MP).context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            &format!(
-                "Failed to create balena partition mountpoint: '{}'",
-                BALENA_PART_MP
-            ),
-        ))?;
+        create_dir(BALENA_PART_MP).context(upstream_context!(&format!(
+            "Failed to create balena partition mountpoint: '{}'",
+            BALENA_PART_MP
+        )))?;
     }
 
     for partition in part_iterator {
@@ -277,11 +276,10 @@ fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
                         MsFlags::empty(),
                         NIX_NONE,
                     )
-                    .context(MigErrCtx::from_remark(
-                        MigErrorKind::Upstream,
-                        &format!("Failed to mount {} on {}", loop_dev, BALENA_PART_MP),
-                    ))?;
-
+                    .context(upstream_context!(&format!(
+                        "Failed to mount {} on {}",
+                        loop_dev, BALENA_PART_MP
+                    )))?;
 
                     info!(
                         "Mounted boot partition as {} on {}",
@@ -290,23 +288,18 @@ fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
                     // TODO: copy files
 
                     let target_path = path_append(BALENA_PART_MP, BALENA_CONFIG_PATH);
-                    copy(BALENA_CONFIG_PATH, &target_path).context(MigErrCtx::from_remark(
-                        MigErrorKind::Upstream,
-                        &format!(
-                            "Failed to copy {} to {}",
-                            BALENA_CONFIG_PATH,
-                            target_path.display()
-                        ),
-                    ))?;
+                    copy(BALENA_CONFIG_PATH, &target_path).context(upstream_context!(&format!(
+                        "Failed to copy {} to {}",
+                        BALENA_CONFIG_PATH,
+                        target_path.display()
+                    )))?;
 
-                    info!(
-                        "Successfully copied config.json to boot partition",
-                    );
+                    info!("Successfully copied config.json to boot partition",);
 
-                    umount(BALENA_PART_MP).context(MigErrCtx::from_remark(
-                        MigErrorKind::Upstream,
-                        &format!("Failed to unmount {}", BALENA_PART_MP),
-                    ))?;
+                    umount(BALENA_PART_MP).context(upstream_context!(&format!(
+                        "Failed to unmount {}",
+                        BALENA_PART_MP
+                    )))?;
 
                     let cmd_res = call(BUSYBOX_CMD, &["losetup", "-d", loop_dev.as_str()], true)?;
                     if !cmd_res.status.success() {
@@ -342,13 +335,10 @@ fn sys_mount_balena() -> Result<(), MigError> {
         );
         return Err(MigError::displayed());
     }
-    create_dir(BALENA_BOOT_MP).context(MigErrCtx::from_remark(
-        MigErrorKind::Upstream,
-        &format!(
-            "Failed to create balena-boot mountpoint: '{}'",
-            BALENA_BOOT_MP
-        ),
-    ))?;
+    create_dir(BALENA_BOOT_MP).context(upstream_context!(&format!(
+        "Failed to create balena-boot mountpoint: '{}'",
+        BALENA_BOOT_MP
+    )))?;
 
     if let Err(why) = mount(
         Some(&part_label),

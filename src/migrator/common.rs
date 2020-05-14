@@ -15,11 +15,12 @@ pub(crate) mod defs;
 use defs::{
     OSArch, DISK_BY_LABEL_PATH, DISK_BY_PARTUUID_PATH, DISK_BY_UUID_PATH, MKTEMP_CMD, UNAME_CMD,
 };
+#[macro_use]
 pub mod mig_error;
 pub use mig_error::{MigErrCtx, MigError, MigErrorKind};
 
 pub mod options;
-pub use options::{Action, Options};
+pub use options::Options;
 
 const OS_NAME_REGEX: &str = r#"^PRETTY_NAME="([^"]+)"$"#;
 const OS_RELEASE_FILE: &str = "/etc/os-release";
