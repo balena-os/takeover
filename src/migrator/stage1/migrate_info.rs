@@ -1,23 +1,14 @@
-use std::path::{PathBuf, Path};
 use std::fs::remove_dir_all;
+use std::path::{Path, PathBuf};
 
-use failure::{ResultExt, Fail};
-use nix::{
-    mount::{umount},
-};
 use log::warn;
 use mod_logger::Level;
-
+use nix::mount::umount;
 
 use crate::{
-    common::{
-        options::Options,
-        get_os_name, file_exists,
-        mig_error::{MigError, MigErrCtx, MigErrorKind},
-        },
+    common::{get_os_name, mig_error::MigError, options::Options},
     stage1::assets::Assets,
 };
-
 
 #[derive(Debug)]
 pub(crate) struct MigrateInfo {
@@ -25,9 +16,10 @@ pub(crate) struct MigrateInfo {
     assets: Assets,
     mounts: Vec<PathBuf>,
     to_dir: Option<PathBuf>,
-    log_level: Level
+    log_level: Level,
 }
 
+#[allow(dead_code)]
 impl MigrateInfo {
     pub fn new(opts: &Options) -> Result<MigrateInfo, MigError> {
         Ok(MigrateInfo {
@@ -41,7 +33,7 @@ impl MigrateInfo {
                 Level::Debug
             } else {
                 Level::Info
-            }
+            },
         })
     }
 
@@ -69,11 +61,15 @@ impl MigrateInfo {
         &self.mounts
     }
 
-    pub fn umount_all(&mut self)  {
+    pub fn umount_all(&mut self) {
         loop {
             if let Some(mountpoint) = self.mounts.pop() {
                 if let Err(why) = umount(&mountpoint) {
-                    warn!("Failed to unmount mountpoint: '{}', error : {:?}", mountpoint.display(), why);
+                    warn!(
+                        "Failed to unmount mountpoint: '{}', error : {:?}",
+                        mountpoint.display(),
+                        why
+                    );
                 }
             } else {
                 break;
@@ -82,7 +78,11 @@ impl MigrateInfo {
 
         if let Some(takeover_dir) = &self.to_dir {
             if let Err(why) = remove_dir_all(takeover_dir) {
-                warn!("Failed to remove takeover directory: '{}', error : {:?}", takeover_dir.display(), why);
+                warn!(
+                    "Failed to remove takeover directory: '{}', error : {:?}",
+                    takeover_dir.display(),
+                    why
+                );
             }
         }
     }

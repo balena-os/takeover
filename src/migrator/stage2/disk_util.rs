@@ -3,9 +3,7 @@ use std::io::{Error, ErrorKind, Read};
 use std::mem;
 use std::path::{Path, PathBuf};
 
-use crate::{
-    common::{MigError, MigErrorKind},
-};
+use crate::common::{MigError, MigErrorKind};
 
 mod image_file;
 pub(crate) use image_file::ImageFile;
@@ -33,7 +31,7 @@ pub(crate) enum LabelType {
     Dos,
     Other,
 }
-
+#[allow(dead_code)]
 impl LabelType {
     pub fn from_device<P: AsRef<Path>>(device_path: P) -> Result<LabelType, MigError> {
         let device_path = device_path.as_ref();
@@ -52,6 +50,7 @@ pub(crate) enum PartitionType {
     Other,
 }
 
+#[allow(dead_code)]
 impl PartitionType {
     pub fn from_ptype(ptype: u8) -> PartitionType {
         // TODO: to be completed - currently only contains common, known partition types occurring in
@@ -123,6 +122,7 @@ pub(crate) struct PartInfo {
     pub start_lba: u64,
     pub num_sectors: u64,
 }
+#[allow(dead_code)]
 impl PartInfo {
     pub fn is_bootable(&self) -> bool {
         (self.status & 0x80) == 0x80
@@ -135,6 +135,7 @@ pub(crate) struct Disk {
     block_size: u64,
 }
 
+#[allow(dead_code)]
 impl Disk {
     pub fn from_gzip_stream<R: Read + 'static>(stream: R) -> Result<Disk, MigError> {
         Ok(Disk {
@@ -460,12 +461,14 @@ impl<'a> Iterator for PartitionIterator<'a> {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) struct PartitionReader<'a> {
     disk: &'a mut Disk,
     offset: u64,
     bytes_left: u64,
 }
 
+#[allow(dead_code)]
 impl<'a> PartitionReader<'a> {
     pub fn from_part_iterator(
         part: &PartInfo,

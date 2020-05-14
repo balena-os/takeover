@@ -1,46 +1,48 @@
+use std::fs::{copy, create_dir, File, OpenOptions};
+use std::io::{Read, Write};
 use std::mem::MaybeUninit;
 use std::os::raw::c_int;
-use std::thread::{self, sleep};
-use std::process::exit;
-use std::time::{Duration, Instant};
-use std::fs::{File, OpenOptions, create_dir, copy};
-use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
+use std::process::exit;
+use std::thread::{self, sleep};
+use std::time::{Duration, Instant};
 
 use nix::{
-    mount::{mount, umount, umount2, MsFlags, MntFlags},
-    unistd::{sync},
     errno::errno,
     ioctl_none,
+    mount::{mount, umount, umount2, MntFlags, MsFlags},
+    unistd::sync,
 };
 
-use std::path::{PathBuf, Path};
-use std::collections::hash_set::HashSet;
+use std::path::{Path, PathBuf};
 
-use libc::{SIG_BLOCK, sigset_t, sigfillset, sigprocmask, close, wait, getpid, kill, MNT_FORCE, MNT_DETACH };
-use mod_logger::{Logger, LogDestination, NO_STREAM};
-use regex::Regex;
-use flate2::read::GzDecoder;
-use log::{trace, debug, warn , error, info};
 use failure::ResultExt;
+use flate2::read::GzDecoder;
+use libc::{
+    close, getpid, sigfillset, sigprocmask, sigset_t, wait, MNT_DETACH, MNT_FORCE, SIG_BLOCK,
+};
+use log::{debug, error, info, trace, warn};
+use mod_logger::{LogDestination, Logger};
 
-use crate::{
-    common::{
-        defs::{STAGE2_CONFIG_NAME, REBOOT_CMD, UMOUNT_CMD, DD_CMD, BALENA_IMAGE_PATH, OLD_ROOT_MP},
-        call, file_exists, format_size_with_unit,
-        options::{Options, Action},
-        mig_error::{MigError, MigErrCtx, MigErrorKind},
-        stage2_config::Stage2Config,
-    }
+use crate::common::{
+    call,
+    defs::{BALENA_IMAGE_PATH, OLD_ROOT_MP, REBOOT_CMD, STAGE2_CONFIG_NAME, UMOUNT_CMD},
+    dir_exists, file_exists, format_size_with_unit,
+    mig_error::{MigErrCtx, MigError, MigErrorKind},
+    options::Options,
+    stage2_config::Stage2Config,
 };
 
-use std::fs::{read_to_string, create_dir_all};
+use crate::common::defs::{
+    BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART, BALENA_CONFIG_PATH, BALENA_PART_MP,
+    DISK_BY_LABEL_PATH,
+};
 use crate::common::{get_mountpoint, path_append};
-use std::collections::HashMap;
-use crate::common::defs::{DISK_BY_LABEL_PATH, BALENA_BOOT_PART, BALENA_BOOT_MP, BALENA_BOOT_FSTYPE, PARTPROBE_CMD, BALENA_CONFIG_PATH};
+use std::fs::{create_dir_all, read_to_string};
 
 mod disk_util;
-
+use crate::stage2::disk_util::DEF_BLOCK_SIZE;
+use disk_util::{Disk, PartitionIterator};
 
 const DD_BLOCK_SIZE: usize = 128 * 1024; // 4_194_304;
 pub const NIX_NONE: Option<&'static [u8]> = None;
@@ -51,7 +53,6 @@ const BLK_IOC_MAGIC: u8 = 0x12;
 const BLK_RRPART: u8 = 95;
 
 ioctl_none!(blk_reread, BLK_IOC_MAGIC, BLK_RRPART);
-
 
 fn reboot() {
     trace!("reboot entered");
@@ -70,24 +71,53 @@ fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<(), MigError> {
     if log_dev.exists() {
         if let Some(mountpoint) = get_mountpoint(log_dev)? {
             if let Err(why) = umount(&mountpoint) {
-                warn!("Failed to unmount log device '{}' from '{}', error: {:?}", log_dev.display(), mountpoint.display(), why);
+                warn!(
+                    "Failed to unmount log device '{}' from '{}', error: {:?}",
+                    log_dev.display(),
+                    mountpoint.display(),
+                    why
+                );
             } else {
                 trace!("Unmounted '{}'", mountpoint.display())
             }
         }
 
-        create_dir_all("/mnt/log")
-            .context(MigErrCtx::from_remark(MigErrorKind::Upstream, "Failed to create log mount directory /mnt/log"))?;
+        create_dir_all("/mnt/log").context(MigErrCtx::from_remark(
+            MigErrorKind::Upstream,
+            "Failed to create log mount directory /mnt/log",
+        ))?;
 
         trace!("Created log mountpoint: '/mnt/log'");
-        mount(Some(log_dev), "/mnt/log", Some("vfat"), MsFlags::empty(), NIX_NONE)
-            .context(MigErrCtx::from_remark(MigErrorKind::Upstream, &format!("Failed to mount '{}' on /mnt/log", log_dev.display())))?;
+        mount(
+            Some(log_dev),
+            "/mnt/log",
+            Some("vfat"),
+            MsFlags::empty(),
+            NIX_NONE,
+        )
+        .context(MigErrCtx::from_remark(
+            MigErrorKind::Upstream,
+            &format!("Failed to mount '{}' on /mnt/log", log_dev.display()),
+        ))?;
 
-        trace!("Mounted '{}' to log mountpoint: '/mnt/log'", log_dev.display());
+        trace!(
+            "Mounted '{}' to log mountpoint: '/mnt/log'",
+            log_dev.display()
+        );
         // TODO: remove this later
-        Logger::set_log_file(&LogDestination::Stderr, &PathBuf::from("/mnt/log/stage2.log"), false)
-            .context(MigErrCtx::from_remark(MigErrorKind::Upstream, "Failed set log file to  '/mnt/log/stage2.log'"))?;
-        info!("Now logging to /mnt/log/stage2.log on '{}'", log_dev.display());
+        Logger::set_log_file(
+            &LogDestination::Stderr,
+            &PathBuf::from("/mnt/log/stage2.log"),
+            false,
+        )
+        .context(MigErrCtx::from_remark(
+            MigErrorKind::Upstream,
+            "Failed set log file to  '/mnt/log/stage2.log'",
+        ))?;
+        info!(
+            "Now logging to /mnt/log/stage2.log on '{}'",
+            log_dev.display()
+        );
         Ok(())
     } else {
         warn!("Log device does not exist: '{}'", log_dev.display());
@@ -95,35 +125,56 @@ fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<(), MigError> {
     }
 }
 
-fn kill_procs(signal: &str) -> Result<(),MigError> {
+fn kill_procs(signal: &str) -> Result<(), MigError> {
     /*
     let cmd_res = call(BUSYBOX_CMD, &["fuser", "-m", OLD_ROOT_MP], true)?;
     if cmd_res.status.success() {
         info!("fuser: {}", cmd_res.stdout);
     }
     */
-    let cmd_res = call(BUSYBOX_CMD, &["fuser", "-k", &format!("-{}", signal), "-m", OLD_ROOT_MP], true)?;
+    let cmd_res = call(
+        BUSYBOX_CMD,
+        &["fuser", "-k", &format!("-{}", signal), "-m", OLD_ROOT_MP],
+        true,
+    )?;
     if !cmd_res.status.success() {
-        warn!("Failed to kill processes using '{}', stderr: {}", OLD_ROOT_MP, cmd_res.stderr);
+        warn!(
+            "Failed to kill processes using '{}', stderr: {}",
+            OLD_ROOT_MP, cmd_res.stderr
+        );
     }
     Ok(())
 }
 
-
 fn unmount_partitions(mountpoints: &Vec<PathBuf>) -> Result<(), MigError> {
     for mpoint in mountpoints {
-        let mountpoint = path_append(OLD_ROOT_MP, mpoint, );
+        let mountpoint = path_append(OLD_ROOT_MP, mpoint);
 
-        match umount2(&mountpoint, MntFlags::from_bits(MNT_FORCE | MNT_DETACH).unwrap()) {
+        match umount2(
+            &mountpoint,
+            MntFlags::from_bits(MNT_FORCE | MNT_DETACH).unwrap(),
+        ) {
             Ok(_) => {
                 info!("Successfully unmounted '{}", mountpoint.display());
-            },
+            }
             Err(why) => {
-                error!("Failed to unmount partition '{}', error : {:?} ", mountpoint.display(), why);
-                let cmd_res = call(BUSYBOX_CMD, &[UMOUNT_CMD, "-l", &*mountpoint.to_string_lossy()],true )?;
+                error!(
+                    "Failed to unmount partition '{}', error : {:?} ",
+                    mountpoint.display(),
+                    why
+                );
+                let cmd_res = call(
+                    BUSYBOX_CMD,
+                    &[UMOUNT_CMD, "-l", &*mountpoint.to_string_lossy()],
+                    true,
+                )?;
                 if !cmd_res.status.success() {
-                    error!("Failed to unmount '{}', stderr: '{}'", mountpoint.display(), cmd_res.stderr);
-                    return Err(MigError::displayed())
+                    error!(
+                        "Failed to unmount '{}', stderr: '{}'",
+                        mountpoint.display(),
+                        cmd_res.stderr
+                    );
+                    return Err(MigError::displayed());
                 } else {
                     info!("Successfully unmounted '{}'", mountpoint.display());
                 }
@@ -133,46 +184,171 @@ fn unmount_partitions(mountpoints: &Vec<PathBuf>) -> Result<(), MigError> {
     Ok(())
 }
 
-
-fn part_reread(device: &Path) -> Result<i32,MigError> {
+fn part_reread(device: &Path) -> Result<i32, MigError> {
     // try ioctrl #define BLKRRPART  _IO(0x12,95)	/* re-read partition table */
     match OpenOptions::new()
         .read(true)
         .write(true)
         .create(false)
-        .open(device) {
-        Ok(file) => {
-            match unsafe { blk_reread(file.as_raw_fd()) } {
-                Ok(res) => {
-                    debug!("Device BLKRRPART IOCTRL to '{}' returned {}", device.display(), res);
-                    Ok(res)
-                },
-                Err(why) => {
-                    error!("Device BLKRRPART IOCTRL to '{}' failed with error: {:?}", device.display(), why);
-                    Err(MigError::displayed())
-                }
+        .open(device)
+    {
+        Ok(file) => match unsafe { blk_reread(file.as_raw_fd()) } {
+            Ok(res) => {
+                debug!(
+                    "Device BLKRRPART IOCTRL to '{}' returned {}",
+                    device.display(),
+                    res
+                );
+                Ok(res)
             }
-        }, Err(why) => {
-            error!("Failed to open device '{}', error: {:?}", device.display(), why);
+            Err(why) => {
+                error!(
+                    "Device BLKRRPART IOCTRL to '{}' failed with error: {:?}",
+                    device.display(),
+                    why
+                );
+                Err(MigError::displayed())
+            }
+        },
+        Err(why) => {
+            error!(
+                "Failed to open device '{}', error: {:?}",
+                device.display(),
+                why
+            );
             Err(MigError::displayed())
         }
     }
 }
 
-fn mount_balena(device: &Path) -> Result<(),MigError> {
+fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
+    debug!("raw_mount_balena called");
+    let mut disk = Disk::from_drive_file(device, None)?;
+    let part_iterator = PartitionIterator::new(&mut disk)?;
 
-    part_reread(device)?;
+    if !dir_exists(BALENA_PART_MP)? {
+        create_dir(BALENA_PART_MP).context(MigErrCtx::from_remark(
+            MigErrorKind::Upstream,
+            &format!(
+                "Failed to create balena partition mountpoint: '{}'",
+                BALENA_PART_MP
+            ),
+        ))?;
+    }
 
+    for partition in part_iterator {
+        debug!(
+            "partition: {}, start: {}, sectors: {}",
+            partition.index, partition.start_lba, partition.num_sectors
+        );
+
+        match partition.index {
+            1 => {
+                // boot partition
+                // losetup -o offset --sizelimit size --show -f log.img
+
+                let cmd_res = call(BUSYBOX_CMD, &["losetup", "-f"], true)?;
+                let loop_dev = if cmd_res.status.success() {
+                    cmd_res.stdout
+                } else {
+                    error!(
+                        "Failed determine next free loop device, stderr: {}",
+                        cmd_res.stderr
+                    );
+                    return Err(MigError::displayed());
+                };
+
+                let byte_offset = (partition.start_lba * DEF_BLOCK_SIZE as u64).to_string();
+                let args = &[
+                    "losetup",
+                    "-o",
+                    byte_offset.as_str(),
+                    "-f",
+                    &*device.to_string_lossy(),
+                ];
+
+                let cmd_res = call(BUSYBOX_CMD, args, true)?;
+                if cmd_res.status.success() {
+                    info!("Loop-mounted boot partition on '{}'", loop_dev);
+                    mount(
+                        Some(loop_dev.as_str()),
+                        BALENA_PART_MP,
+                        Some(BALENA_BOOT_FSTYPE.as_bytes()),
+                        MsFlags::empty(),
+                        NIX_NONE,
+                    )
+                    .context(MigErrCtx::from_remark(
+                        MigErrorKind::Upstream,
+                        &format!("Failed to mount {} on {}", loop_dev, BALENA_PART_MP),
+                    ))?;
+
+
+                    info!(
+                        "Mounted boot partition as {} on {}",
+                        loop_dev, BALENA_PART_MP
+                    );
+                    // TODO: copy files
+
+                    let target_path = path_append(BALENA_PART_MP, BALENA_CONFIG_PATH);
+                    copy(BALENA_CONFIG_PATH, &target_path).context(MigErrCtx::from_remark(
+                        MigErrorKind::Upstream,
+                        &format!(
+                            "Failed to copy {} to {}",
+                            BALENA_CONFIG_PATH,
+                            target_path.display()
+                        ),
+                    ))?;
+
+                    info!(
+                        "Successfully copied config.json to boot partition",
+                    );
+
+                    umount(BALENA_PART_MP).context(MigErrCtx::from_remark(
+                        MigErrorKind::Upstream,
+                        &format!("Failed to unmount {}", BALENA_PART_MP),
+                    ))?;
+
+                    let cmd_res = call(BUSYBOX_CMD, &["losetup", "-d", loop_dev.as_str()], true)?;
+                    if !cmd_res.status.success() {
+                        error!(
+                            "Failed to remove loop device {}, stderr: {}",
+                            loop_dev, cmd_res.stderr
+                        );
+                        return Err(MigError::displayed());
+                    }
+                } else {
+                    error!("Failed to mount boot partition, stderr: {}", cmd_res.stderr);
+                    return Err(MigError::displayed());
+                }
+            }
+            _ => {
+                error!("Invalid partition index encountered: {}", partition.index);
+                return Err(MigError::displayed());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn sys_mount_balena() -> Result<(), MigError> {
+    debug!("sys_mount_balena called");
     sleep(Duration::from_secs(1));
 
-    let mut part_label = path_append(DISK_BY_LABEL_PATH, BALENA_BOOT_PART);
+    let part_label = path_append(DISK_BY_LABEL_PATH, BALENA_BOOT_PART);
     if !file_exists(&part_label) {
-        error!("Failed to locate path to boot partition in '{}'", part_label.display());
-        return Err(MigError::displayed())
+        error!(
+            "Failed to locate path to boot partition in '{}'",
+            part_label.display()
+        );
+        return Err(MigError::displayed());
     }
-    create_dir(BALENA_BOOT_MP)
-        .context(MigErrCtx::from_remark(MigErrorKind::Upstream,
-                                        &format!("Failed to create balena-boot mountpoint: '{}'", BALENA_BOOT_MP)))?;
+    create_dir(BALENA_BOOT_MP).context(MigErrCtx::from_remark(
+        MigErrorKind::Upstream,
+        &format!(
+            "Failed to create balena-boot mountpoint: '{}'",
+            BALENA_BOOT_MP
+        ),
+    ))?;
 
     if let Err(why) = mount(
         Some(&part_label),
@@ -181,20 +357,36 @@ fn mount_balena(device: &Path) -> Result<(),MigError> {
         MsFlags::empty(),
         NIX_NONE,
     ) {
-        error!("Failed to mount '{}' to '{}', errr: {:?}", part_label.display(), BALENA_BOOT_MP, why);
-        return Err(MigError::displayed())
+        error!(
+            "Failed to mount '{}' to '{}', errr: {:?}",
+            part_label.display(),
+            BALENA_BOOT_MP,
+            why
+        );
+        return Err(MigError::displayed());
     }
 
     Ok(())
 }
 
+fn mount_balena(device: &Path) -> Result<(), MigError> {
+    match part_reread(device) {
+        Ok(_) => {
+            if file_exists(path_append(DISK_BY_LABEL_PATH, BALENA_BOOT_PART)) {
+                sys_mount_balena()
+            } else {
+                raw_mount_balena(device)
+            }
+        }
+        Err(_) => raw_mount_balena(device),
+    }
+}
+
 enum FlashState {
     Success,
     FailRecoverable,
-    FailNonRecoverable
+    FailNonRecoverable,
 }
-
-
 
 fn flash_gzip_internal(target_path: &Path, image_path: &Path) -> FlashState {
     debug!("opening: '{}'", image_path.display());
@@ -333,8 +525,7 @@ fn flash_gzip_internal(target_path: &Path, image_path: &Path) -> FlashState {
     FlashState::Success
 }
 
-
-fn migrate_worker(opts: Options, s2_config: &Stage2Config) {
+fn migrate_worker(_opts: Options, s2_config: &Stage2Config) {
     info!("Stage 2 migrate_worker entered");
 
     //match kill_procs1(&["takeover"], 15) {
@@ -342,7 +533,6 @@ fn migrate_worker(opts: Options, s2_config: &Stage2Config) {
         Ok(_) => (),
         Err(why) => {
             if let MigErrorKind::Displayed = why.kind() {
-
             } else {
                 error!("kill_procs first attempt failed with error: {:?} ", why);
             }
@@ -352,13 +542,11 @@ fn migrate_worker(opts: Options, s2_config: &Stage2Config) {
 
     sleep(Duration::from_secs(5));
 
-
     // match kill_procs(&[], 9) {
     match kill_procs("KILL") {
         Ok(_) => (),
         Err(why) => {
             if let MigErrorKind::Displayed = why.kind() {
-
             } else {
                 error!("kill_procs second attempt failed with error: {:?} ", why);
             }
@@ -407,7 +595,12 @@ fn migrate_worker(opts: Options, s2_config: &Stage2Config) {
 
     let target_path = path_append(BALENA_BOOT_MP, BALENA_CONFIG_PATH);
     if let Err(why) = copy(BALENA_CONFIG_PATH, &target_path) {
-        error!("Failed to copy '{}' to '{}, error: {:?}", BALENA_CONFIG_PATH, target_path.display(), why );
+        error!(
+            "Failed to copy '{}' to '{}, error: {:?}",
+            BALENA_CONFIG_PATH,
+            target_path.display(),
+            why
+        );
         sleep(Duration::from_secs(10));
         reboot();
         return;
@@ -435,12 +628,16 @@ pub fn stage2(opts: Options) -> Result<(), MigError> {
 
     info!("Stage 2 closed fd's {} to 1024", START_FD);
 
-    let s2_cfg_path = PathBuf::from(&format!("/{}",STAGE2_CONFIG_NAME));
+    let s2_cfg_path = PathBuf::from(&format!("/{}", STAGE2_CONFIG_NAME));
     let s2_config = if file_exists(&s2_cfg_path) {
         let s2_cfg_txt = match read_to_string(&s2_cfg_path) {
             Ok(s2_config_txt) => s2_config_txt,
             Err(why) => {
-                error!("Failed to read stage 2 config from '{}'", s2_cfg_path.display());
+                error!(
+                    "Failed to read stage 2 config from '{}', error: {}",
+                    s2_cfg_path.display(),
+                    why
+                );
                 reboot();
                 return Err(MigError::displayed());
             }
@@ -448,13 +645,16 @@ pub fn stage2(opts: Options) -> Result<(), MigError> {
         match Stage2Config::deserialze(&s2_cfg_txt) {
             Ok(s2_config) => s2_config,
             Err(why) => {
-                error!("Failed to deserialize stage 2 config");
+                error!("Failed to deserialize stage 2 config: error {}", why);
                 reboot();
                 return Err(MigError::displayed());
             }
         }
     } else {
-        error!("Stage2 config file could not be found in '{}',", s2_cfg_path.display());
+        error!(
+            "Stage2 config file could not be found in '{}',",
+            s2_cfg_path.display()
+        );
         reboot();
         return Err(MigError::displayed());
     };
@@ -464,7 +664,6 @@ pub fn stage2(opts: Options) -> Result<(), MigError> {
     Logger::set_default_level(&s2_config.get_log_level());
 
     info!("Stage 2 log level set to {:?}", s2_config.get_log_level());
-
 
     let ext_log = if let Some(log_dev) = s2_config.get_log_dev() {
         match setup_log(log_dev) {
@@ -480,12 +679,11 @@ pub fn stage2(opts: Options) -> Result<(), MigError> {
 
     info!("Stage 2 setup_log success!, ext_log = {}", ext_log);
 
-
     Logger::flush();
     sync();
 
     let worker_opts = opts.clone();
-    thread::spawn( move || {
+    thread::spawn(move || {
         migrate_worker(worker_opts, &s2_config);
     });
 
@@ -494,7 +692,6 @@ pub fn stage2(opts: Options) -> Result<(), MigError> {
     unsafe {
         let mut signals: sigset_t = MaybeUninit::<sigset_t>::zeroed().assume_init();
         let mut old_signals: sigset_t = MaybeUninit::<sigset_t>::zeroed().assume_init();
-
 
         sigfillset(&mut signals);
         sigprocmask(SIG_BLOCK, &signals, &mut old_signals);
@@ -512,9 +709,13 @@ pub fn stage2(opts: Options) -> Result<(), MigError> {
                     sleep(Duration::from_secs(1));
                 }
             } else {
-                trace!("Stage 2 wait loop {}, status: {}, pid: {}", loop_count, status, pid);
+                trace!(
+                    "Stage 2 wait loop {}, status: {}, pid: {}",
+                    loop_count,
+                    status,
+                    pid
+                );
             }
-
         }
     }
 

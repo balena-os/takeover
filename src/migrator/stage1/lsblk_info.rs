@@ -4,11 +4,10 @@ use regex::Regex;
 
 use std::path::{Path, PathBuf};
 
-use crate::{
-    common::{
-        call, to_std_device_path, path_append, MigErrCtx, MigError, MigErrorKind,
-        defs::{DISK_BY_LABEL_PATH, DISK_BY_PARTUUID_PATH, DISK_BY_UUID_PATH, LSBLK_CMD}
-    },
+use crate::common::{
+    call,
+    defs::{DISK_BY_LABEL_PATH, DISK_BY_PARTUUID_PATH, DISK_BY_UUID_PATH, LSBLK_CMD},
+    path_append, to_std_device_path, MigErrCtx, MigError, MigErrorKind,
 };
 use std::collections::HashMap;
 
@@ -37,6 +36,7 @@ pub(crate) struct LsblkPartition {
     pub index: Option<u16>,
 }
 
+#[allow(dead_code)]
 impl LsblkPartition {
     pub fn get_path(&self) -> PathBuf {
         path_append("/dev", &self.name)
@@ -100,6 +100,7 @@ pub(crate) struct LsblkInfo {
     blockdevices: Vec<LsblkDevice>,
 }
 
+#[allow(dead_code)]
 impl<'a> LsblkInfo {
     pub fn for_device(device: &Path) -> Result<LsblkDevice, MigError> {
         let lsblk_info = LsblkInfo::call_lsblk(Some(device))?;

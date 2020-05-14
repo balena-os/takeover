@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use structopt::StructOpt;
-use crate::{common::{MigError, MigErrorKind}};
 
 #[derive(StructOpt, Debug, Copy, Clone, PartialEq)]
 pub enum Action {
@@ -20,19 +19,19 @@ pub struct Options {
     #[structopt(subcommand)]
     command: Action,
     /// The working directory
-    #[structopt(short,long,value_name = "DIRECTORY",parse(from_os_str),)]
+    #[structopt(short, long, value_name = "DIRECTORY", parse(from_os_str))]
     work_dir: Option<PathBuf>,
-    #[structopt(short,long,value_name = "IMAGE",parse(from_os_str),)]
+    #[structopt(short, long, value_name = "IMAGE", parse(from_os_str))]
     image: Option<PathBuf>,
     #[structopt(short)]
     debug: bool,
     #[structopt(short)]
     trace: bool,
-    #[structopt(short,long,value_name = "LOG_DEVICE",parse(from_os_str),)]
+    #[structopt(short, long, value_name = "LOG_DEVICE", parse(from_os_str))]
     log_to: Option<PathBuf>,
-    #[structopt(short,long,value_name = "INSTALL_DEVICE",parse(from_os_str),)]
+    #[structopt(short, long, value_name = "INSTALL_DEVICE", parse(from_os_str))]
     flash_to: Option<PathBuf>,
-    #[structopt(short,long,value_name = "CONFIG_JSON",parse(from_os_str),)]
+    #[structopt(short, long, value_name = "CONFIG_JSON", parse(from_os_str))]
     config: Option<PathBuf>,
 }
 
@@ -71,5 +70,4 @@ impl Options {
     pub fn get_flash_to(&self) -> &Option<PathBuf> {
         &self.flash_to
     }
-
 }

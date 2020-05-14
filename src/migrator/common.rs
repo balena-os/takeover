@@ -1,23 +1,25 @@
-use std::path::{PathBuf, Path};
-use std::process::{Command, Stdio, ExitStatus};
+use std::fs::{read_link, read_to_string};
 use std::mem::MaybeUninit;
-use std::fs::{read_to_string, read_link};
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitStatus, Stdio};
 
-use failure::{ResultExt};
-use libc::{getuid};
+use failure::ResultExt;
+use libc::getuid;
 use regex::Regex;
 
-use log::{trace, debug, warn, error, info};
+use log::{debug, error, info, trace, warn};
 
 pub(crate) mod stage2_config;
 
 pub(crate) mod defs;
-use defs::{UNAME_CMD, MKTEMP_CMD, OSArch, DISK_BY_UUID_PATH, DISK_BY_LABEL_PATH, DISK_BY_PARTUUID_PATH};
+use defs::{
+    OSArch, DISK_BY_LABEL_PATH, DISK_BY_PARTUUID_PATH, DISK_BY_UUID_PATH, MKTEMP_CMD, UNAME_CMD,
+};
 pub mod mig_error;
-pub use mig_error::{MigError, MigErrorKind, MigErrCtx};
+pub use mig_error::{MigErrCtx, MigError, MigErrorKind};
 
 pub mod options;
-pub use options::{Options, Action};
+pub use options::{Action, Options};
 
 const OS_NAME_REGEX: &str = r#"^PRETTY_NAME="([^"]+)"$"#;
 const OS_RELEASE_FILE: &str = "/etc/os-release";
@@ -60,6 +62,7 @@ pub(crate) fn call(cmd: &str, args: &[&str], trim_stdout: bool) -> Result<CmdRes
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn mktemp(
     dir: bool,
     pattern: Option<&str>,
@@ -127,7 +130,6 @@ pub(crate) fn get_os_arch() -> Result<OSArch, MigError> {
     }
 }
 
-
 pub(crate) fn get_mem_info() -> Result<(u64, u64), MigError> {
     trace!("get_mem_info: entered");
     // TODO: could add loads, uptime if needed
@@ -140,11 +142,13 @@ pub(crate) fn get_mem_info() -> Result<(u64, u64), MigError> {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) enum DeviceType {
     RPI3(String),
-    X86_64(String)
+    X86_64(String),
 }
 
+#[allow(dead_code)]
 pub(crate) fn get_dev_type() -> Result<DeviceType, MigError> {
     let os_arch = get_os_arch()?;
     match os_arch {
@@ -165,7 +169,10 @@ pub(crate) fn get_dev_type() -> Result<DeviceType, MigError> {
                     .trim_end(),
             );
 
-            if let Some(captures) = Regex::new(RPI_MODEL_REGEX).unwrap().captures(&dev_tree_model) {
+            if let Some(captures) = Regex::new(RPI_MODEL_REGEX)
+                .unwrap()
+                .captures(&dev_tree_model)
+            {
                 let pitype = captures.get(1).unwrap().as_str();
                 let model = captures
                     .get(2)
@@ -188,24 +195,29 @@ pub(crate) fn get_dev_type() -> Result<DeviceType, MigError> {
                     }
                     "4" => {
                         info!("Identified RaspberryPi4: model {}", model);
-                        Err(MigError::from_remark(MigErrorKind::NotImpl, &format!("Migration is not implemented for os arch {:?}, device tree model: {}", os_arch, dev_tree_model)))                    }
+                        Err(MigError::from_remark(MigErrorKind::NotImpl, &format!("Migration is not implemented for os arch {:?}, device tree model: {}", os_arch, dev_tree_model)))
+                    }
                     _ => {
                         let message = format!("The raspberry pi type reported by your device ('{} {}') is not supported by balena-migrate", pitype, model);
                         error!("{}", message);
                         Err(MigError::from_remark(MigErrorKind::InvParam, &message))
                     }
                 }
-
-            } else  {
-                Err(MigError::from_remark(MigErrorKind::NotImpl, &format!("Migration is not implemented for os arch {:?}, device tree model: {}", os_arch, dev_tree_model)))
+            } else {
+                Err(MigError::from_remark(
+                    MigErrorKind::NotImpl,
+                    &format!(
+                        "Migration is not implemented for os arch {:?}, device tree model: {}",
+                        os_arch, dev_tree_model
+                    ),
+                ))
             }
-        },
-        OSArch::AMD64 => {
-            Ok(DeviceType::X86_64(String::from("intel-nuc")))
         }
-        _ => {
-            Err(MigError::from_remark(MigErrorKind::NotImpl, &format!("Migration is not implemented for os arch {:?}", os_arch)))
-        }
+        OSArch::AMD64 => Ok(DeviceType::X86_64(String::from("intel-nuc"))),
+        _ => Err(MigError::from_remark(
+            MigErrorKind::NotImpl,
+            &format!("Migration is not implemented for os arch {:?}", os_arch),
+        )),
     }
 }
 
@@ -249,6 +261,7 @@ pub fn file_exists<P: AsRef<Path>>(file: P) -> bool {
     file.as_ref().exists()
 }
 
+#[allow(dead_code)]
 pub fn dir_exists<P: AsRef<Path>>(name: P) -> Result<bool, MigError> {
     let path = name.as_ref();
     if path.exists() {
@@ -268,7 +281,6 @@ pub fn dir_exists<P: AsRef<Path>>(name: P) -> Result<bool, MigError> {
         Ok(false)
     }
 }
-
 
 pub(crate) fn parse_file<P: AsRef<Path>>(
     fname: P,
@@ -317,16 +329,21 @@ pub fn format_size_with_unit(size: u64) -> String {
 
 pub fn get_mountpoint<P: AsRef<Path>>(device: P) -> Result<Option<PathBuf>, MigError> {
     let device_str = &*device.as_ref().to_string_lossy();
-    let mtab = read_to_string("/etc/mtab")
-        .context(MigErrCtx::from_remark(MigErrorKind::Upstream, "Failed to read /etc/mtab"))?;
+    let mtab = read_to_string("/etc/mtab").context(MigErrCtx::from_remark(
+        MigErrorKind::Upstream,
+        "Failed to read /etc/mtab",
+    ))?;
     for line in mtab.lines() {
         let words: Vec<&str> = line.split_whitespace().collect();
         if let Some(device) = words.get(0) {
             if device == &device_str {
                 if let Some(mountpoint) = words.get(1) {
-                    return Ok(Some(PathBuf::from(mountpoint)))
+                    return Ok(Some(PathBuf::from(mountpoint)));
                 } else {
-                    return Err(MigError::from_remark(MigErrorKind::InvState, &format!("Encountered invalid line in /etc/mtab '{}'", line)));
+                    return Err(MigError::from_remark(
+                        MigErrorKind::InvState,
+                        &format!("Encountered invalid line in /etc/mtab '{}'", line),
+                    ));
                 }
             }
         } else {
@@ -336,14 +353,17 @@ pub fn get_mountpoint<P: AsRef<Path>>(device: P) -> Result<Option<PathBuf>, MigE
     Ok(None)
 }
 
+#[allow(dead_code)]
 pub fn get_root_dev() -> Result<Option<PathBuf>, MigError> {
-    let mtab = read_to_string("/etc/mtab")
-        .context(MigErrCtx::from_remark(MigErrorKind::Upstream, "Failed to read /etc/mtab"))?;
+    let mtab = read_to_string("/etc/mtab").context(MigErrCtx::from_remark(
+        MigErrorKind::Upstream,
+        "Failed to read /etc/mtab",
+    ))?;
     for line in mtab.lines() {
         let words: Vec<&str> = line.split_whitespace().collect();
         if let Some(mountpoint) = words.get(1) {
             if *mountpoint == "/" {
-                return Ok(Some(PathBuf::from(&words.get(0).unwrap())))
+                return Ok(Some(PathBuf::from(&words.get(0).unwrap())));
             }
         } else {
             warn!("Encountered empty line in /etc/mtab");
