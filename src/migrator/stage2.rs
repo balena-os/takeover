@@ -1,4 +1,4 @@
-use std::fs::{copy, create_dir, File, OpenOptions};
+use std::fs::{copy, create_dir, create_dir_all, read_to_string, File, OpenOptions};
 use std::io::{Read, Write};
 use std::mem::MaybeUninit;
 use std::os::raw::c_int;
@@ -8,7 +8,8 @@ use std::thread::{self, sleep};
 use std::time::{Duration, Instant};
 
 use nix::{
-    errno::errno,
+    errno::{errno, Errno},
+    fcntl::{fcntl, F_GETFD},
     ioctl_none,
     mount::{mount, umount, umount2, MntFlags, MsFlags},
     unistd::sync,
@@ -33,21 +34,14 @@ use crate::common::{
     stage2_config::Stage2Config,
 };
 
-use crate::{
-    common::{
-        defs::{
-            BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART, BALENA_CONFIG_PATH,
-            BALENA_PART_MP, DISK_BY_LABEL_PATH, NIX_NONE,
-        },
-        get_mountpoint, path_append,
+use crate::common::{
+    defs::{
+        BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART, BALENA_CONFIG_PATH, BALENA_PART_MP,
+        DISK_BY_LABEL_PATH, NIX_NONE,
     },
-    stage2::disk_util::DEF_BLOCK_SIZE,
+    disk_util::{Disk, PartitionIterator, DEF_BLOCK_SIZE},
+    get_mountpoint, path_append,
 };
-
-use std::fs::{create_dir_all, read_to_string};
-
-mod disk_util;
-use disk_util::{Disk, PartitionIterator};
 
 const DD_BLOCK_SIZE: usize = 128 * 1024; // 4_194_304;
 
@@ -605,18 +599,37 @@ pub fn stage2(opts: Options) -> Result<(), MigError> {
     info!("Stage 2 entered");
 
     if unsafe { getpid() } != 1 {
-        error!("Process must be pid 1 to run action stage2");
+        error!("Process must be pid 1 to run stage2");
         reboot()
     }
 
     info!("Stage 2 check pid success!");
 
     const START_FD: i32 = 0;
-    for i in START_FD..1024 {
-        unsafe { close(i) };
+    let mut close_count = 0;
+    for fd in START_FD..1024 {
+        unsafe {
+            match fcntl(fd, F_GETFD) {
+                Ok(_) => {
+                    close(fd);
+                    close_count += 1;
+                }
+                Err(why) => {
+                    if let Some(err_no) = why.as_errno() {
+                        if let Errno::EBADF = err_no {
+                            ()
+                        } else {
+                            warn!("Unexpected error from fcntl({},F_GETFD) : {}", fd, err_no);
+                        }
+                    } else {
+                        warn!("Unexpected error from fcntl({},F_GETFD) : {}", fd, why);
+                    }
+                }
+            }
+        };
     }
 
-    info!("Stage 2 closed fd's {} to 1024", START_FD);
+    info!("Stage 2 closed {} fd's", close_count);
 
     let s2_cfg_path = PathBuf::from(&format!("/{}", STAGE2_CONFIG_NAME));
     let s2_config = if file_exists(&s2_cfg_path) {
@@ -651,7 +664,7 @@ pub fn stage2(opts: Options) -> Result<(), MigError> {
 
     info!("Stage 2 config was read successfully");
 
-    Logger::set_default_level(&s2_config.get_log_level());
+    Logger::set_default_level(s2_config.get_log_level());
 
     info!("Stage 2 log level set to {:?}", s2_config.get_log_level());
 
@@ -694,9 +707,10 @@ pub fn stage2(opts: Options) -> Result<(), MigError> {
             loop_count += 1;
             if pid == -1 {
                 let sys_error = errno();
-                warn!("wait returned error, errno: {}", sys_error);
                 if sys_error == 10 {
                     sleep(Duration::from_secs(1));
+                } else {
+                    warn!("wait returned error, errno: {}", sys_error);
                 }
             } else {
                 trace!(
@@ -708,8 +722,4 @@ pub fn stage2(opts: Options) -> Result<(), MigError> {
             }
         }
     }
-
-    // should be unreachable
-    reboot();
-    Ok(())
 }

@@ -22,12 +22,19 @@ use migrate_info::MigrateInfo;
 pub(crate) mod assets;
 use assets::Assets;
 
-use crate::common::defs::NIX_NONE;
-use crate::common::defs::{BALENA_CONFIG_PATH, BALENA_IMAGE_NAME, OLD_ROOT_MP, STAGE2_CONFIG_NAME};
+mod api_calls;
+mod defs;
+mod device;
+mod device_impl;
+mod image_retrieval;
+mod utils;
 
 use crate::common::{
     call,
-    defs::{CP_CMD, MKTEMP_CMD, MOUNT_CMD, SWAPOFF_CMD, TELINIT_CMD},
+    defs::{
+        BALENA_CONFIG_PATH, BALENA_IMAGE_NAME, CP_CMD, MKTEMP_CMD, MOUNT_CMD, NIX_NONE,
+        OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD, TELINIT_CMD,
+    },
     format_size_with_unit, get_mem_info, is_admin,
     mig_error::{MigErrCtx, MigError, MigErrorKind},
     options::Options,
@@ -40,20 +47,7 @@ use std::io::Write;
 const XTRA_FS_SIZE: u64 = 10 * 1024 * 1024; // 10 MB
                                             // const XTRA_MEM_FREE: u64 = 10 * 1024 * 1024; // 10 MB
 
-fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
-    // *********************************************************
-    // turn off swap
-    if let Ok(cmd_res) = call(SWAPOFF_CMD, &["-a"], true) {
-        if cmd_res.status.success() {
-            info!("SWAP was disabled successfully");
-        } else {
-            error!("Failed to disable SWAP, stderr: '{}'", cmd_res.stderr);
-            return Err(MigError::displayed());
-        }
-    }
-
-    // *********************************************************
-    // calculate required memory
+fn get_required_space(opts: &Options, mig_info: &MigrateInfo) -> Result<u64, MigError> {
     let mut req_size: u64 = mig_info.get_assets().busybox_size() as u64 + XTRA_FS_SIZE;
 
     let image_path = if let Some(image_path) = opts.get_image() {
@@ -93,6 +87,25 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
         error!("The required parameter --config/-c was not provided");
         return Err(MigError::displayed());
     };
+
+    // TODO: account for network manager config and backup
+    Ok(req_size)
+}
+
+fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
+    // *********************************************************
+    // turn off swap
+    if let Ok(cmd_res) = call(SWAPOFF_CMD, &["-a"], true) {
+        if cmd_res.status.success() {
+            info!("SWAP was disabled successfully");
+        } else {
+            error!("Failed to disable SWAP, stderr: '{}'", cmd_res.stderr);
+            return Err(MigError::displayed());
+        }
+    }
+
+    // *********************************************************
+    // calculate required memory
 
     let (mem_tot, mem_free) = get_mem_info()?;
     info!(
@@ -323,6 +336,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
     // write balena image to tmpfs
 
     let to_image_path = takeover_dir.join(BALENA_IMAGE_NAME);
+    let image_path = mig_info.get_image_path();
     copy(image_path, &to_image_path).context(upstream_context!(&format!(
         "Failed to copy '{}' to {}",
         image_path.display(),
@@ -334,7 +348,8 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
     // write config.json to tmpfs
 
     let to_cfg_path = path_append(&takeover_dir, BALENA_CONFIG_PATH);
-    copy(&config_path, &to_cfg_path).context(upstream_context!(&format!(
+    let config_path = mig_info.get_balena_cfg().get_path();
+    copy(config_path, &to_cfg_path).context(upstream_context!(&format!(
         "Failed to copy '{}' to {}",
         config_path.display(),
         &to_cfg_path.display()

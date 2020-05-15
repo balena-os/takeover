@@ -5,10 +5,13 @@ use std::path::{Path, PathBuf};
 use failure::ResultExt;
 use log::error;
 
-use crate::common::{
-    call,
-    defs::{OSArch, CHMOD_CMD},
-    mig_error::{MigErrCtx, MigError, MigErrorKind},
+use crate::{
+    common::{
+        call,
+        defs::CHMOD_CMD,
+        mig_error::{MigErrCtx, MigError, MigErrorKind},
+    },
+    stage1::defs::OSArch,
 };
 
 const RPI3_BUSYBOX: &[u8] = include_bytes!("../../../assets/armv7/busybox");

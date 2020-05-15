@@ -1,75 +1,26 @@
+use std::io::Read;
+use std::path::PathBuf;
+
 use flate2::read::GzDecoder;
 use log::{debug, trace};
-use std::fs::{File, OpenOptions};
-use std::io::Read;
-use std::path::{Path, PathBuf};
+
+use crate::common::{disk_util::image_file::ImageFile, MigError, MigErrorKind};
 
 const DEF_READ_BUFFER: usize = 1024 * 1024;
 
-use crate::{
-    common::{MigError, MigErrorKind},
-    stage2::disk_util::image_file::ImageFile,
-};
-
-pub(crate) struct GZipFile {
-    path: PathBuf,
-    decoder: GzDecoder<File>,
+pub(crate) struct GZipStream<R> {
+    decoder: GzDecoder<R>,
     bytes_read: u64,
 }
 
-impl GZipFile {
-    pub fn new(path: &Path) -> Result<GZipFile, MigError> {
-        trace!("new: entered with '{}'", path.display());
-        let file = match OpenOptions::new()
-            .write(false)
-            .read(true)
-            .create(false)
-            .open(path)
-        {
-            Ok(file) => file,
-            Err(why) => {
-                return Err(MigError::from_remark(
-                    MigErrorKind::Upstream,
-                    &format!(
-                        "failed to open file for reading: '{}', error {:?}",
-                        path.display(),
-                        why
-                    ),
-                ));
-            }
-        };
+impl<R: Read> GZipStream<R> {
+    pub fn new(stream: R) -> Result<GZipStream<R>, MigError> {
+        trace!("new: entered ");
 
-        Ok(GZipFile {
-            path: path.to_path_buf(),
-            decoder: GzDecoder::new(file),
+        Ok(GZipStream {
+            decoder: GzDecoder::new(stream),
             bytes_read: 0,
         })
-    }
-
-    fn reset(&mut self) -> Result<(), MigError> {
-        trace!("reset: entered");
-        let file = match OpenOptions::new()
-            .write(false)
-            .read(true)
-            .create(false)
-            .open(&self.path)
-        {
-            Ok(file) => file,
-            Err(why) => {
-                return Err(MigError::from_remark(
-                    MigErrorKind::Upstream,
-                    &format!(
-                        "failed to reopen file for reading: '{}', error {:?}",
-                        self.path.display(),
-                        why
-                    ),
-                ));
-            }
-        };
-
-        self.decoder = GzDecoder::new(file);
-        self.bytes_read = 0;
-        Ok(())
     }
 
     fn seek(&mut self, offset: u64) -> Result<(), MigError> {
@@ -78,9 +29,12 @@ impl GZipFile {
             offset,
             self.bytes_read
         );
+
         let mut to_read = if offset < self.bytes_read {
-            self.reset()?;
-            offset
+            return Err(MigError::from_remark(
+                MigErrorKind::InvState,
+                "cannot seek backwards on stream",
+            ));
         } else {
             offset - self.bytes_read
         };
@@ -109,11 +63,7 @@ impl GZipFile {
                         Err(why) => {
                             return Err(MigError::from_remark(
                                 MigErrorKind::Upstream,
-                                &format!(
-                                    "seek: failed to reopen file for reading: '{}', error {:?}",
-                                    self.path.display(),
-                                    why
-                                ),
+                                &format!("seek: read from stream, error {:?}", why),
                             ));
                         }
                     }
@@ -130,11 +80,7 @@ impl GZipFile {
                     }
                     Err(why) => Err(MigError::from_remark(
                         MigErrorKind::Upstream,
-                        &format!(
-                            "seek: failed to read from file  file '{}', error {:?}",
-                            self.path.display(),
-                            why
-                        ),
+                        &format!("seek: failed to read from stream, error {:?}", why),
                     )),
                 }
             } else {
@@ -146,7 +92,7 @@ impl GZipFile {
     }
 }
 
-impl ImageFile for GZipFile {
+impl<R: Read> ImageFile for GZipStream<R> {
     fn fill(&mut self, offset: u64, buffer: &mut [u8]) -> Result<(), MigError> {
         trace!(
             "fill: entered with offset {}, size {}",
@@ -164,15 +110,11 @@ impl ImageFile for GZipFile {
             }
             Err(why) => Err(MigError::from_remark(
                 MigErrorKind::Upstream,
-                &format!(
-                    "failed to read from file: '{}', error {:?}",
-                    self.path.display(),
-                    why
-                ),
+                &format!("failed to read from stream, error {:?}", why),
             )),
         }
     }
     fn get_path(&self) -> PathBuf {
-        self.path.clone()
+        PathBuf::from("STREAM")
     }
 }

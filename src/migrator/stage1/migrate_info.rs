@@ -1,14 +1,23 @@
 use std::fs::remove_dir_all;
 use std::path::{Path, PathBuf};
 
-use log::warn;
+use log::{error, warn, info};
 use mod_logger::Level;
 use nix::mount::umount;
 
 use crate::{
-    common::{get_os_name, mig_error::MigError, options::Options},
-    stage1::assets::Assets,
+    common::{get_os_name, mig_error::MigError, options::Options, file_exists},
+    stage1::{
+        defs::DeviceType,
+        device_impl::get_device,
+        device::Device,
+        assets::Assets,
+        migrate_info::balena_cfg_json::BalenaCfgJson,
+        image_retrieval::download_image,
+    },
 };
+
+pub(crate) mod balena_cfg_json;
 
 #[derive(Debug)]
 pub(crate) struct MigrateInfo {
@@ -17,11 +26,47 @@ pub(crate) struct MigrateInfo {
     mounts: Vec<PathBuf>,
     to_dir: Option<PathBuf>,
     log_level: Level,
+    image_path: PathBuf,
+    device: Box<dyn Device>,
+    config: BalenaCfgJson,
+    work_dir: PathBuf,
 }
 
 #[allow(dead_code)]
 impl MigrateInfo {
     pub fn new(opts: &Options) -> Result<MigrateInfo, MigError> {
+        let device = get_device(opts)?;
+        info!("Detected device type: {}", device.get_device_type());
+
+        let config = if let Some(balena_cfg) = opts.get_config() {
+            BalenaCfgJson::new(balena_cfg)?
+        } else {
+            error!("The required parameter --config/-c was not provided");
+            return Err(MigError::displayed())
+        };
+        config.check(opts, &*device)?;
+
+        info!("config.json is for device type {}", config.get_device_type()?);
+
+        let work_dir = opts.get_work_dir();
+
+        let image_path = if let Some(image_path) = opts.get_image() {
+            if file_exists(&image_path) {
+                image_path.clone()
+            } else {
+                error!(
+                    "The balena-os image configured as '{}' could not be found",
+                    image_path.display()
+                );
+                return Err(MigError::displayed());
+            }
+        } else  {
+            download_image(&config,
+                           &work_dir,
+                           config.get_device_type()?.as_str(),
+                            opts.get_version())?
+        };
+
         Ok(MigrateInfo {
             assets: Assets::new(),
             os_name: get_os_name()?,
@@ -34,6 +79,10 @@ impl MigrateInfo {
             } else {
                 Level::Info
             },
+            config,
+            image_path,
+            device,
+            work_dir
         })
     }
 
@@ -51,6 +100,14 @@ impl MigrateInfo {
 
     pub fn get_to_dir(&self) -> &Option<PathBuf> {
         &self.to_dir
+    }
+
+    pub fn get_image_path(&self) -> &Path {
+        self.image_path.as_path()
+    }
+
+    pub fn get_balena_cfg(&self) -> &BalenaCfgJson {
+        &self.config
     }
 
     pub fn add_mount<P: AsRef<Path>>(&mut self, mount: P) {

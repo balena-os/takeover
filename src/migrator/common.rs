@@ -12,15 +12,16 @@ use log::{debug, error, info, trace, warn};
 pub(crate) mod stage2_config;
 
 pub(crate) mod defs;
-use defs::{
-    OSArch, DISK_BY_LABEL_PATH, DISK_BY_PARTUUID_PATH, DISK_BY_UUID_PATH, MKTEMP_CMD, UNAME_CMD,
-};
+use defs::{DISK_BY_LABEL_PATH, DISK_BY_PARTUUID_PATH, DISK_BY_UUID_PATH, MKTEMP_CMD, UNAME_CMD};
 
 pub mod mig_error;
 pub use mig_error::{MigErrCtx, MigError, MigErrorKind};
 
 pub mod options;
 pub use options::Options;
+
+pub(crate) mod disk_util;
+pub(crate) mod stream_progress;
 
 const OS_NAME_REGEX: &str = r#"^PRETTY_NAME="([^"]+)"$"#;
 const OS_RELEASE_FILE: &str = "/etc/os-release";
@@ -101,35 +102,6 @@ pub(crate) fn mktemp(
     }
 }
 
-pub(crate) fn get_os_arch() -> Result<OSArch, MigError> {
-    const UNAME_ARGS_OS_ARCH: [&str; 1] = ["-m"];
-    trace!("get_os_arch: entered");
-    let cmd_res = call(UNAME_CMD, &UNAME_ARGS_OS_ARCH, true).context(upstream_context!(
-        &format!("get_os_arch: call {}", UNAME_CMD)
-    ))?;
-
-    if cmd_res.status.success() {
-        if cmd_res.stdout.to_lowercase() == "x86_64" {
-            Ok(OSArch::AMD64)
-        } else if cmd_res.stdout.to_lowercase() == "i386" {
-            Ok(OSArch::I386)
-        } else if cmd_res.stdout.to_lowercase() == "armv7l" {
-            // TODO: try to determine the CPU Architecture
-            Ok(OSArch::ARMHF)
-        } else {
-            Err(MigError::from_remark(
-                MigErrorKind::InvParam,
-                &format!("get_os_arch: unsupported architectute '{}'", cmd_res.stdout),
-            ))
-        }
-    } else {
-        Err(MigError::from_remark(
-            MigErrorKind::ExecProcess,
-            &format!("get_os_arch: command failed: {} {:?}", UNAME_CMD, cmd_res),
-        ))
-    }
-}
-
 pub(crate) fn get_mem_info() -> Result<(u64, u64), MigError> {
     trace!("get_mem_info: entered");
     // TODO: could add loads, uptime if needed
@@ -146,76 +118,6 @@ pub(crate) fn get_mem_info() -> Result<(u64, u64), MigError> {
 pub(crate) enum DeviceType {
     RPI3(String),
     X86_64(String),
-}
-
-#[allow(dead_code)]
-pub(crate) fn get_dev_type() -> Result<DeviceType, MigError> {
-    let os_arch = get_os_arch()?;
-    match os_arch {
-        OSArch::ARMHF => {
-            const DEVICE_TREE_MODEL: &str = "/proc/device-tree/model";
-            const RPI_MODEL_REGEX: &str = r#"^Raspberry\s+Pi\s+(\S+)\s+Model\s+(.*)$"#;
-
-            let dev_tree_model = String::from(
-                read_to_string(DEVICE_TREE_MODEL)
-                    .context(upstream_context!(&format!(
-                        "get_device: unable to determine model due to inaccessible file '{}'",
-                        DEVICE_TREE_MODEL
-                    )))?
-                    .trim_end_matches('\0')
-                    .trim_end(),
-            );
-
-            if let Some(captures) = Regex::new(RPI_MODEL_REGEX)
-                .unwrap()
-                .captures(&dev_tree_model)
-            {
-                let pitype = captures.get(1).unwrap().as_str();
-                let model = captures
-                    .get(2)
-                    .unwrap()
-                    .as_str()
-                    .trim_matches(char::from(0));
-                debug!(
-                    "raspberrypi::is_rpi: selection entered with string: '{}'",
-                    pitype
-                );
-
-                match pitype {
-                    "2" => {
-                        info!("Identified RaspberryPi2: model {}", model);
-                        Err(MigError::from_remark(MigErrorKind::NotImpl, &format!("Migration is not implemented for os arch {:?}, device tree model: {}", os_arch, dev_tree_model)))
-                    }
-                    "3" => {
-                        info!("Identified RaspberryPi3: model {}", model);
-                        Ok(DeviceType::RPI3("raspbeerypi3".to_string()))
-                    }
-                    "4" => {
-                        info!("Identified RaspberryPi4: model {}", model);
-                        Err(MigError::from_remark(MigErrorKind::NotImpl, &format!("Migration is not implemented for os arch {:?}, device tree model: {}", os_arch, dev_tree_model)))
-                    }
-                    _ => {
-                        let message = format!("The raspberry pi type reported by your device ('{} {}') is not supported by balena-migrate", pitype, model);
-                        error!("{}", message);
-                        Err(MigError::from_remark(MigErrorKind::InvParam, &message))
-                    }
-                }
-            } else {
-                Err(MigError::from_remark(
-                    MigErrorKind::NotImpl,
-                    &format!(
-                        "Migration is not implemented for os arch {:?}, device tree model: {}",
-                        os_arch, dev_tree_model
-                    ),
-                ))
-            }
-        }
-        OSArch::AMD64 => Ok(DeviceType::X86_64(String::from("intel-nuc"))),
-        _ => Err(MigError::from_remark(
-            MigErrorKind::NotImpl,
-            &format!("Migration is not implemented for os arch {:?}", os_arch),
-        )),
-    }
 }
 
 /******************************************************************

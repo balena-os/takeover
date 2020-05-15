@@ -8,6 +8,9 @@ pub(crate) const TELINIT_CMD: &str = "telinit";
 pub(crate) const REBOOT_CMD: &str = "reboot";
 pub(crate) const UMOUNT_CMD: &str = "umount";
 pub(crate) const LSBLK_CMD: &str = "lsblk";
+pub(crate) const LOSETUP_CMD: &str = "losetup";
+pub(crate) const MOKUTIL_CMD: &str = "mokutil";
+pub(crate) const WHEREIS_CMD: &str = "whereis";
 
 pub(crate) const STAGE2_CONFIG_NAME: &str = "stage2-config.yml";
 
@@ -24,7 +27,12 @@ pub const DISK_BY_UUID_PATH: &str = "/dev/disk/by-uuid";
 pub const BALENA_BOOT_PART: &str = "resin-boot";
 pub const BALENA_BOOT_FSTYPE: &str = "vfat";
 
+pub const OLD_ROOT_MP: &str = "/mnt/old_root";
+pub const BALENA_BOOT_MP: &str = "/mnt/balena-boot";
+pub const BALENA_PART_MP: &str = "/mnt/balena-part";
+
 pub const NIX_NONE: Option<&'static [u8]> = None;
+
 /*pub const BALENA_ROOTA_PART: &str = "resin-rootA";
 pub const BALENA_ROOTA_FSTYPE: &str = "ext4";
 pub const BALENA_ROOTB_PART: &str = "resin-rootB";
@@ -35,24 +43,3 @@ pub const BALENA_STATE_FSTYPE: &str = "ext4";
 pub const BALENA_DATA_PART: &str = "resin-data";
 pub const BALENA_DATA_FSTYPE: &str = "ext4";
 */
-
-pub const OLD_ROOT_MP: &str = "/mnt/old_root";
-pub const BALENA_BOOT_MP: &str = "/mnt/balena-boot";
-pub const BALENA_PART_MP: &str = "/mnt/balena-part";
-
-#[derive(Debug, Clone)]
-pub(crate) enum OSArch {
-    AMD64,
-    #[cfg(target_os = "linux")]
-    ARMHF,
-    I386,
-    /*
-        ARM64,
-        ARMEL,
-        MIPS,
-        MIPSEL,
-        Powerpc,
-        PPC64EL,
-        S390EX,
-    */
-}

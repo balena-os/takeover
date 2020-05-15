@@ -1,7 +1,6 @@
 use log::error;
 use std::path::PathBuf;
 use std::process::exit;
-// use nix::unistd::sync;
 
 use mod_logger::{Level, LogDestination, Logger, NO_STREAM};
 
@@ -9,17 +8,11 @@ use takeover::{stage1, stage2, MigErrorKind, Options};
 
 #[paw::main]
 fn main(opts: Options) {
-    Logger::set_default_level(&Level::Trace);
+    Logger::set_default_level(Level::Info);
 
     if opts.is_stage2() {
-        let log_file = PathBuf::from("/old_root/stage2.log");
-        // if let Err(why) = Logger::set_log_file(&LogDestination::StreamStderr, &log_file, false) {
         if let Err(why) = Logger::set_log_dest(&LogDestination::BufferStderr, NO_STREAM) {
-            error!(
-                "Failed to set logging to '{}', error: {:?}",
-                log_file.display(),
-                why
-            );
+            error!("Failed to initialize logging, error: {:?}", why);
             exit(1);
         }
 

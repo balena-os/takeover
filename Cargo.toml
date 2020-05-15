@@ -10,19 +10,60 @@ edition = "2018"
 path = "src/migrator/lib.rs"
 
 [dependencies]
-failure = "*"
-paw = "1.0.0"
-structopt = { version = "0.3.7", features = ["paw"] }
 
-log = { version = "^0.4.5", features = ["std"] }
-mod_logger = { git = "https://github.com/samothx/ModuleLogger.git" }
-libc = { git = "https://github.com/rust-lang/libc" }
+[dependencies.libc]
+version = "0.2"
+# git = "https://github.com/rust-lang/libc"
 
-regex = "1"
-nix = "*"
-serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.8"
-flate2 = "1.0.14"
+[dependencies.reqwest]
+version = "0.10"
+features = ["blocking", "json"]
+
+[dependencies.url]
+version = "2.1"
+
+[dependencies.failure]
+version = "0.1"
+
+[dependencies.paw]
+version = "1.0"
+
+[dependencies.structopt]
+version = "0.3"
+features = ["paw"]
+
+[dependencies.log]
+version = "0.4"
+features = ["std"]
+
+
+
+[dependencies.regex]
+ version = "1.0"
+
+[dependencies.nix]
+ version = "0.17"
+
+[dependencies.semver]
+ version = "0.9"
+
+[dependencies.serde]
+ version = "1.0"
+ features = ["derive"]
+
+[dependencies.serde_yaml]
+ version = "0.8"
+
+[dependencies.serde_json]
+version = "1"
+
+[dependencies.flate2]
+version = "1.0"
+
+[dependencies.mod_logger]
+# version = "0.5"
+path = "../../rust/ModuleLogger"
+# git = "https://github.com/samothx/ModuleLogger.git"
 
 [features]
 raspberrypi3 = []
