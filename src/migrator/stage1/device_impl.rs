@@ -1,12 +1,12 @@
 use failure::ResultExt;
-use log::error;
+use log::{error, info};
 use std::fs::read_to_string;
 
 use crate::stage1::utils::get_os_arch;
 use crate::{
     common::{MigErrCtx, MigError, MigErrorKind},
-    stage1::defs::{ OSArch},
-    stage1::{device::Device, },
+    stage1::defs::OSArch,
+    stage1::device::Device,
     Options,
 };
 
@@ -18,6 +18,8 @@ const DEVICE_TREE_MODEL: &str = "/proc/device-tree/model";
 
 pub(crate) fn get_device(opts: &Options) -> Result<Box<dyn Device>, MigError> {
     let os_arch = get_os_arch()?;
+    info!("Detected OS Architecture is {:?}", os_arch);
+
     match os_arch {
         OSArch::ARMHF => {
             let dev_tree_model = String::from(

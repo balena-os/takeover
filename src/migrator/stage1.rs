@@ -5,10 +5,7 @@ use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::Duration;
 
-use nix::{
-    mount::{mount, MsFlags},
-    unistd::sync,
-};
+use nix::unistd::sync;
 
 use failure::ResultExt;
 use log::{debug, error, info};
@@ -41,6 +38,7 @@ use crate::common::{
     stage2_config::Stage2Config,
 };
 use crate::common::{file_exists, path_append};
+use crate::stage1::utils::mount_fs;
 use mod_logger::Logger;
 use std::io::Write;
 
@@ -93,6 +91,7 @@ fn get_required_space(opts: &Options, mig_info: &MigrateInfo) -> Result<u64, Mig
 }
 
 fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
+    info!("Preparing for takeover..");
     // *********************************************************
     // turn off swap
     if let Ok(cmd_res) = call(SWAPOFF_CMD, &["-a"], true) {
@@ -139,26 +138,13 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
     // *********************************************************
     // mount tmpfs
 
-    mount(
-        Some("tmpfs".as_bytes()),
-        &takeover_dir,
-        Some("tmpfs".as_bytes()),
-        MsFlags::empty(),
-        NIX_NONE,
-    )
-    .context(upstream_context!(&format!(
-        "Failed to mount tmpfs on {} with fstype tmpfs",
-        &takeover_dir.display()
-    )))?;
-
-    mig_info.add_mount(&takeover_dir);
+    mount_fs(&takeover_dir, "tmpfs", "tmpfs", mig_info)?;
 
     let curr_path = takeover_dir.join("etc");
     create_dir(&curr_path).context(upstream_context!(&format!(
         "Failed to create directory '{}'",
         curr_path.display()
     )))?;
-    info!("Mounted tmpfs on '{}'", takeover_dir.display());
 
     // *********************************************************
     // initialize essential paths
@@ -172,146 +158,43 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
     info!("Created mtab in  '{}'", curr_path.display());
 
     let curr_path = takeover_dir.join("proc");
-    create_dir(&curr_path).context(upstream_context!(&format!(
-        "Failed to create directory '{}'",
-        curr_path.display()
-    )))?;
-
-    mount(
-        Some("proc".as_bytes()),
-        &curr_path,
-        Some("proc".as_bytes()),
-        MsFlags::empty(),
-        NIX_NONE,
-    )
-    .context(upstream_context!(&format!(
-        "Failed to mount proc on {} with fstype proc",
-        &curr_path.display()
-    )))?;
-
-    mig_info.add_mount(&curr_path);
-
-    info!("Mounted proc file system on '{}'", curr_path.display());
+    mount_fs(curr_path, "proc", "proc", mig_info)?;
 
     let curr_path = takeover_dir.join("tmp");
-    create_dir(&curr_path).context(upstream_context!(&format!(
-        "Failed to create directory '{}'",
-        curr_path.display()
-    )))?;
-
-    mount(
-        Some("tmpfs".as_bytes()),
-        &curr_path,
-        Some("tmpfs".as_bytes()),
-        MsFlags::empty(),
-        NIX_NONE,
-    )
-    .context(upstream_context!(&format!(
-        "Failed to mount tmpfs on {} with fstype tmpfs",
-        &curr_path.display()
-    )))?;
-
-    mig_info.add_mount(&curr_path);
-
-    info!("Mounted tmpfs  on '{}'", curr_path.display());
+    mount_fs(&curr_path, "tmpfs", "tmpfs", mig_info)?;
 
     let curr_path = takeover_dir.join("sys");
-    create_dir(&curr_path).context(upstream_context!(&format!(
-        "Failed to create directory '{}'",
-        curr_path.display()
-    )))?;
-
-    mount(
-        Some("sys".as_bytes()),
-        &curr_path,
-        Some("sysfs".as_bytes()),
-        MsFlags::empty(),
-        NIX_NONE,
-    )
-    .context(upstream_context!(&format!(
-        "Failed to mount sys on {} with fstype sysfs",
-        &curr_path.display()
-    )))?;
-
-    mig_info.add_mount(&curr_path);
-
-    info!("Mounted sysfs  on '{}'", curr_path.display());
+    mount_fs(&curr_path, "sys", "sysfs", mig_info)?;
 
     let curr_path = takeover_dir.join("dev");
-    create_dir(&curr_path).context(upstream_context!(&format!(
-        "Failed to create directory '{}'",
-        curr_path.display()
-    )))?;
+    if let Err(_) = mount_fs(&curr_path, "dev", "devtmpfs", mig_info) {
+        mount_fs(&curr_path, "tmpfs", "tmpfs", mig_info)?;
 
-    match mount(
-        Some("dev".as_bytes()),
-        &curr_path,
-        Some("devtmpfs".as_bytes()),
-        MsFlags::empty(),
-        NIX_NONE,
-    ) {
-        Ok(_) => {
-            mig_info.add_mount(&curr_path);
+        let cmd_res = call(
+            CP_CMD,
+            &["-a", "/dev/*", &*curr_path.to_string_lossy()],
+            true,
+        )?;
+        if !cmd_res.status.success() {
+            error!(
+                "Failed to copy /dev file systemto '{}', error : '{}",
+                curr_path.display(),
+                cmd_res.stderr
+            );
+            return Err(MigError::displayed());
         }
-        Err(_why) => {
-            mount(
-                Some("tmpfs".as_bytes()),
-                &curr_path,
-                Some("tmpfs".as_bytes()),
-                MsFlags::empty(),
-                NIX_NONE,
-            )
-            .context(upstream_context!(&format!(
-                "Failed to mount tmpfs on {} with fstype tmpfs",
-                &curr_path.display()
+
+        let curr_path = takeover_dir.join("dev/pts");
+        if curr_path.exists() {
+            remove_dir_all(&curr_path).context(upstream_context!(&format!(
+                "Failed to delete directory '{}'",
+                curr_path.display()
             )))?;
-            mig_info.add_mount(&curr_path);
-
-            let cmd_res = call(
-                CP_CMD,
-                &["-a", "/dev/*", &*curr_path.to_string_lossy()],
-                true,
-            )?;
-            if !cmd_res.status.success() {
-                error!(
-                    "Failed to copy /dev file systemto '{}', error : '{}",
-                    curr_path.display(),
-                    cmd_res.stderr
-                );
-                return Err(MigError::displayed());
-            }
-
-            let curr_path = takeover_dir.join("dev/pts");
-            if curr_path.exists() {
-                remove_dir_all(&curr_path).context(upstream_context!(&format!(
-                    "Failed to delete directory '{}'",
-                    curr_path.display()
-                )))?;
-            }
         }
     }
+
     let curr_path = takeover_dir.join("dev/pts");
-    if !curr_path.exists() {
-        create_dir(&curr_path).context(upstream_context!(&format!(
-            "Failed to create directory '{}'",
-            curr_path.display()
-        )))?;
-    }
-
-    mount(
-        Some("devpts".as_bytes()),
-        &curr_path,
-        Some("devpts".as_bytes()),
-        MsFlags::empty(),
-        NIX_NONE,
-    )
-    .context(upstream_context!(&format!(
-        "Failed to mount devpts on {} with fstype devpts",
-        &curr_path.display()
-    )))?;
-    mig_info.add_mount(&curr_path);
-
-    info!("Mounted dev file system on '{}'", curr_path.display());
+    mount_fs(&curr_path, "devpts", "devpts", mig_info)?;
 
     // *********************************************************
     // create mountpoint for old root
@@ -493,11 +376,12 @@ pub fn stage1(opts: Options) -> Result<(), MigError> {
         error!("please run this program as root");
         return Err(MigError::from(MigErrorKind::Displayed));
     }
+
     let mut mig_info = MigrateInfo::new(&opts)?;
 
     match prepare(&opts, &mut mig_info) {
         Ok(_) => {
-            info!("Takeover initiated successfully");
+            info!("Takeover initiated successfully, please wait for the device to reboot");
             Logger::flush();
             sync();
             sleep(Duration::from_secs(10));

@@ -1,9 +1,12 @@
-use std::path::PathBuf;
+use nix::mount::{mount, MsFlags};
+use std::path::{Path, PathBuf};
+
+use log::info;
 
 use crate::{
     common::{
         call,
-        defs::{MKTEMP_CMD, MOKUTIL_CMD, UNAME_CMD, WHEREIS_CMD},
+        defs::{MKTEMP_CMD, MOKUTIL_CMD, NIX_NONE, UNAME_CMD, WHEREIS_CMD},
         dir_exists, file_exists, MigErrCtx, MigError, MigErrorKind,
     },
     stage1::defs::{OSArch, SYS_UEFI_DIR},
@@ -12,7 +15,9 @@ use crate::{
 use log::{error, trace, warn};
 use regex::Regex;
 
+use crate::stage1::migrate_info::MigrateInfo;
 use failure::ResultExt;
+use std::fs::create_dir_all;
 
 pub(crate) fn get_os_arch() -> Result<OSArch, MigError> {
     const UNAME_ARGS_OS_ARCH: [&str; 1] = ["-m"];
@@ -180,7 +185,7 @@ pub(crate) fn mktemp(
     }
 }
 
-pub fn check_tcp_connect(host: &str, port: u16, timeout: u64) -> Result<(), MigError> {
+pub(crate) fn check_tcp_connect(host: &str, port: u16, timeout: u64) -> Result<(), MigError> {
     use std::net::{Shutdown, TcpStream, ToSocketAddrs};
     use std::time::Duration;
     let url = format!("{}:{}", host, port);
@@ -213,4 +218,39 @@ pub fn check_tcp_connect(host: &str, port: u16, timeout: u64) -> Result<(), MigE
             ),
         ))
     }
+}
+
+pub(crate) fn mount_fs<P: AsRef<Path>>(
+    mount_dir: P,
+    fs: &str,
+    fs_type: &str,
+    mig_info: &mut MigrateInfo,
+) -> Result<(), MigError> {
+    let mount_dir = mount_dir.as_ref();
+    if !dir_exists(mount_dir)? {
+        create_dir_all(mount_dir).context(upstream_context!(&format!(
+            "Failed to create mount directory '{}'",
+            mount_dir.display()
+        )))?;
+    }
+
+    mount(
+        Some(fs.as_bytes()),
+        mount_dir,
+        Some(fs_type.as_bytes()),
+        MsFlags::empty(),
+        NIX_NONE,
+    )
+    .context(upstream_context!(&format!(
+        "Failed to mount {} on {} with fstype {}",
+        fs,
+        mount_dir.display(),
+        fs_type
+    )))?;
+
+    mig_info.add_mount(mount_dir);
+
+    info!("Mounted {} file system on '{}'", fs, mount_dir.display());
+    
+    Ok(())
 }

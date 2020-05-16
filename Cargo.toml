@@ -61,9 +61,10 @@ version = "1"
 version = "1.0"
 
 [dependencies.mod_logger]
-# version = "0.5"
-path = "../../rust/ModuleLogger"
-# git = "https://github.com/samothx/ModuleLogger.git"
+version = "0.6"
+# path = "../../rust/ModuleLogger"
+git = "https://github.com/samothx/ModuleLogger.git"
+# branch = "config-check"
 
 [features]
 raspberrypi3 = []

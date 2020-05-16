@@ -1,4 +1,4 @@
-use log::{error, info, };
+use log::{error, info, warn};
 
 use crate::common::get_os_name;
 use crate::{
@@ -29,20 +29,26 @@ impl IntelNuc {
         ];
 
         let os_name = get_os_name()?;
+        info!("Detected OS name is {}", os_name);
 
-        let os_supported = (!opts.is_os_check())
-            || if let Some(_) = SUPPORTED_OSSES.iter().position(|&r| r == os_name) {
-                true
-            } else {
-                false
-            };
+        let os_supported = if let Some(_) = SUPPORTED_OSSES.iter().position(|&r| r == os_name) {
+            true
+        } else {
+            false
+        };
 
         if !os_supported {
-            error!(
-                "The OS '{}' is not supported for device type IntelNuc",
-                os_name
-            );
-            return Err(MigError::displayed());
+            if opts.is_os_check() {
+                error!(
+                    "The OS '{}' has not been tested with {} for device type IntelNuc, to override this check use the no-os-check option on the command line",
+                    os_name,
+                    env!("CARGO_PKG_NAME")
+                );
+                return Err(MigError::displayed());
+            } else {
+                warn!(
+                    "The OS '{}' has not been tested with {} for device type IntelNuc, prodeeding due to no-os-check option", os_name, env!("CARGO_PKG_NAME"));
+            }
         }
 
         // **********************************************************************
