@@ -1,14 +1,26 @@
-use crate::common::path_append;
-use crate::common::{MigErrCtx, MigError, MigErrorKind};
+use crate::common::{path_append, MigErrCtx, MigError, MigErrorKind};
+
 use failure::ResultExt;
 use lazy_static::lazy_static;
 use log::{debug, error, trace};
 use nix::sys::stat::{major, minor, stat};
 use regex::Regex;
 use std::collections::HashMap;
-use std::fs::read_dir;
-use std::fs::read_to_string;
+use std::fs::{read_dir, read_to_string};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
+
+mod mount;
+use mount::{Mount, MountTab};
+
+pub(crate) mod block_device;
+pub(crate) use block_device::BlockDevice;
+
+mod device;
+use device::Device;
+
+mod partition;
+use partition::Partition;
 
 // TODO: add mountpoints for  partitions
 
@@ -17,101 +29,13 @@ const BLOC_DEV_SUPP_MAJ_NUMBERS: [u64; 45] = [
     70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 179, 180, 259,
 ];
 
-#[derive(Clone, Debug)]
-pub(crate) struct Mount {
-    mountpoint: PathBuf,
-    fs_type: String,
-}
+type DeviceMap = HashMap<PathBuf, Rc<Box<dyn BlockDevice>>>;
 
-impl Mount {
-    pub fn get_mountpoint(&self) -> &Path {
-        self.mountpoint.as_path()
-    }
-
-    pub fn get_fs_type(&self) -> &str {
-        self.fs_type.as_str()
-    }
-}
-
-type MountTab = HashMap<PathBuf, Mount>;
-
-impl Mount {
-    pub fn from_mtab() -> Result<MountTab, MigError> {
-        let mtab_str = read_to_string("/etc/mtab")
-            .context(upstream_context!("Failed to read from '/etc/mtab'"))?;
-
-        let mut mounts: MountTab = MountTab::new();
-
-        for (line_no, line) in mtab_str.lines().enumerate() {
-            let columns: Vec<&str> = line.split_whitespace().collect();
-            if columns.len() < 3 {
-                error!("Failed to parse /etc/mtab line {} : '{}'", line_no, line);
-                return Err(MigError::displayed());
-            }
-
-            let device_name = columns[0];
-            if device_name.starts_with("/dev/") {
-                let mount = Mount {
-                    mountpoint: PathBuf::from(columns[1]),
-                    fs_type: columns[2].to_string(),
-                };
-
-                debug!("from_mtab: processing mount {:?}", mount);
-                mounts.insert(PathBuf::from(device_name), mount);
-            } else {
-                trace!("from_mtab: not processing line {}", line);
-            }
-        }
-
-        Ok(mounts)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct Partition {
-    name: String,
-    major: u64,
-    minor: u64,
-    mounted: Option<Mount>,
-}
-
-impl Partition {
-    pub fn get_major(&self) -> u64 {
-        self.major
-    }
-    pub fn get_minor(&self) -> u64 {
-        self.minor
-    }
-
-    pub fn get_mountpoint(&self) -> &Option<Mount> {
-        &self.mounted
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct BlockDevice {
-    name: String,
-    dev_path: PathBuf,
-    major: u64,
-    minor: u64,
-    partitions: HashMap<PathBuf, Partition>,
-}
-
-impl BlockDevice {
-    pub fn get_dev_path(&self) -> &Path {
-        &self.dev_path
-    }
-
-    pub fn get_partitions(&self) -> &HashMap<PathBuf, Partition> {
-        &self.partitions
-    }
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct BlockDeviceInfo {
-    root_device_idx: usize,
-    root_partition: PathBuf,
-    devices: Vec<BlockDevice>,
+    root_device: Rc<Box<dyn BlockDevice>>,
+    root_partition: Option<Rc<Box<dyn BlockDevice>>>,
+    devices: DeviceMap,
 }
 
 impl BlockDeviceInfo {
@@ -129,10 +53,7 @@ impl BlockDeviceInfo {
             sys_path.display()
         )))?;
 
-        let mut device_list: Vec<BlockDevice> = Vec::new();
-        let mut root_device_idx: Option<usize> = None;
-        let mut root_partition: Option<PathBuf> = None;
-        let mut device_idx: usize = 0;
+        let mut device_map: DeviceMap = DeviceMap::new();
         for entry in read_dir {
             match entry {
                 Ok(entry) => {
@@ -156,59 +77,31 @@ impl BlockDeviceInfo {
                         continue;
                     }
 
-                    let partitions =
-                        BlockDeviceInfo::read_partitions(&curr_dev, &mounts, &curr_path)?;
                     let dev_path = path_append("/dev", &curr_dev);
-
                     if !dev_path.exists() {
                         error!("device path does not exist: '{}'", dev_path.display());
                         return Err(MigError::displayed());
                     }
 
-                    let mut device = BlockDevice {
+                    let dev_path = path_append("/dev", &curr_dev);
+
+                    // TODO: fill mounted
+                    let device = Rc::new(Box::new(Device {
                         name: curr_dev,
-                        dev_path,
                         major: curr_major,
                         minor: curr_minor,
-                        partitions,
-                    };
+                        mounted: None,
+                    }) as Box<dyn BlockDevice>);
+
+                    BlockDeviceInfo::read_partitions(
+                        &device,
+                        &mounts,
+                        &curr_path,
+                        &mut device_map,
+                    )?;
+                    device_map.insert(dev_path, device.clone());
 
                     debug!("new: got device: {:?}", device);
-
-                    if root_partition.is_none() {
-                        for (idx, (dev_path, partition)) in device.partitions.iter_mut().enumerate()
-                        {
-                            if (partition.get_major() == root_major)
-                                && (partition.get_minor() == root_minor)
-                            {
-                                debug!(
-                                    "new: device: {}, number: {}:{} is root device",
-                                    dev_path.display(),
-                                    partition.major,
-                                    partition.minor
-                                );
-
-                                if partition.mounted.is_none() {
-                                    if let Some(mount) =
-                                        mounts.get(PathBuf::from("/dev/root").as_path())
-                                    {
-                                        partition.mounted = Some(mount.clone())
-                                    } else {
-                                        error!(
-                                            "detected root partition '{}' is not mounted",
-                                            dev_path.display()
-                                        );
-                                        return Err(MigError::displayed());
-                                    }
-                                }
-                                // TODO: check mountpoint
-                                root_device_idx = Some(device_idx);
-                                root_partition = Some(dev_path.to_path_buf());
-                            }
-                        }
-                    }
-                    device_list.push(device);
-                    device_idx += 1;
                 }
                 Err(why) => {
                     error!(
@@ -221,12 +114,28 @@ impl BlockDeviceInfo {
             }
         }
 
-        if let Some(root_device_idx) = root_device_idx {
+        let mut root_device: Option<Rc<Box<dyn BlockDevice>>> = None;
+        let mut root_partition: Option<Rc<Box<dyn BlockDevice>>> = None;
+
+        for (_dev_path, device_rc) in &device_map {
+            let device = device_rc.as_ref();
+            if (device.get_major() == root_major) && (device.get_minor() == root_minor) {
+                if let Some(parent) = device.get_parent() {
+                    root_device = Some(parent.clone());
+                    root_partition = Some(device_rc.clone())
+                } else {
+                    root_device = Some(device_rc.clone());
+                    root_partition = None;
+                }
+            }
+        }
+
+        if let Some(root_device) = root_device {
             if let Some(root_partition) = root_partition {
                 return Ok(BlockDeviceInfo {
-                    root_device_idx,
-                    root_partition,
-                    devices: device_list,
+                    root_device,
+                    root_partition: Some(root_partition),
+                    devices: device_map,
                 });
             }
         }
@@ -236,17 +145,17 @@ impl BlockDeviceInfo {
     }
 
     fn read_partitions<P: AsRef<Path>>(
-        dev_name: &str,
+        device: &Rc<Box<dyn BlockDevice>>,
         mounts: &MountTab,
         dev_path: P,
-    ) -> Result<HashMap<PathBuf, Partition>, MigError> {
+        device_map: &mut DeviceMap,
+    ) -> Result<(), MigError> {
         let dev_path = dev_path.as_ref();
         let dir_entries = read_dir(dev_path).context(upstream_context!(&format!(
             "Failed to read directory '{}'",
             dev_path.display()
         )))?;
 
-        let mut part_list: HashMap<PathBuf, Partition> = HashMap::new();
         for entry in dir_entries {
             match entry {
                 Ok(entry) => {
@@ -260,7 +169,8 @@ impl BlockDeviceInfo {
                         .is_dir()
                     {
                         let part_name = BlockDeviceInfo::path_to_device_name(&currdir)?;
-                        if !part_name.starts_with(dev_name) {
+
+                        if !part_name.starts_with(&device.as_ref().get_name()) {
                             trace!("Skipping folder '{}", currdir.display());
                             continue;
                         }
@@ -274,20 +184,20 @@ impl BlockDeviceInfo {
                             None
                         };
 
-                        let partition = Partition {
+                        let partition = Rc::new(Box::new(Partition {
                             name: part_name,
                             major: curr_major,
                             minor: curr_minor,
                             mounted,
-                        };
+                            parent: device.clone(),
+                        }) as Box<dyn BlockDevice>);
 
                         debug!(
                             "found  partition '{:?}' in '{}'",
                             partition,
                             currdir.display(),
                         );
-
-                        part_list.insert(dev_path, partition);
+                        device_map.insert(dev_path, partition);
                     }
                 }
                 Err(why) => {
@@ -301,18 +211,19 @@ impl BlockDeviceInfo {
             }
         }
 
-        Ok(part_list)
+        Ok(())
     }
 
-    pub fn get_root_device(&self) -> &BlockDevice {
-        &self.devices[self.root_device_idx]
+    pub fn get_root_device(&self) -> &Rc<Box<dyn BlockDevice>> {
+        &self.root_device
     }
 
-    pub fn get_root_partition(&self) -> &Partition {
-        &self.devices[self.root_device_idx]
-            .partitions
-            .get(&self.root_partition)
-            .unwrap()
+    pub fn get_root_partition(&self) -> &Option<Rc<Box<dyn BlockDevice>>> {
+        &self.root_partition
+    }
+
+    pub fn get_devices(&self) -> &DeviceMap {
+        &self.devices
     }
 
     fn get_maj_minor<P: AsRef<Path>>(dev_path: P) -> Result<(u64, u64), MigError> {

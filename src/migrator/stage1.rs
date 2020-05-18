@@ -30,13 +30,13 @@ use crate::common::{
         BALENA_CONFIG_PATH, BALENA_IMAGE_NAME, CP_CMD, MKTEMP_CMD, MOUNT_CMD, OLD_ROOT_MP,
         STAGE2_CONFIG_NAME, SWAPOFF_CMD, TELINIT_CMD,
     },
-    dir_exists, format_size_with_unit, get_mem_info, is_admin,
+    format_size_with_unit, get_mem_info, is_admin,
     mig_error::{MigErrCtx, MigError, MigErrorKind},
     options::Options,
     stage2_config::Stage2Config,
 };
 use crate::common::{file_exists, path_append};
-use crate::stage1::block_device_info::{BlockDevice, BlockDeviceInfo};
+use crate::stage1::block_device_info::BlockDeviceInfo;
 use crate::stage1::utils::mount_fs;
 use mod_logger::Logger;
 use std::io::Write;
@@ -269,17 +269,20 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
     let block_dev_info = BlockDeviceInfo::new()?;
 
     let flash_dev = if let Some(flash_dev) = opts.get_flash_to() {
-        block_dev_info.get_root_device()
+        if let Some(flash_dev) = block_dev_info.get_devices().get(flash_dev) {
+            flash_dev
+        } else {
+            error!(
+                "Could not find configured flash device '{}'",
+                flash_dev.display()
+            );
+            return Err(MigError::displayed());
+        }
     } else {
         block_dev_info.get_root_device()
     };
 
-    return Err(MigError::from_remark(
-        MigErrorKind::ExecProcess,
-        "Purposely exiting prematurely",
-    ));
-
-    if !dir_exists(&flash_dev.get_dev_path())? {
+    if !file_exists(&flash_dev.as_ref().get_dev_path()) {
         error!(
             "The device could not be found: '{}'",
             flash_dev.get_dev_path().display()
@@ -290,18 +293,22 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
     // collect partitions that need to be unmounted
     let mut umount_parts: Vec<PathBuf> = Vec::new();
 
-    for (dev_path, partition) in flash_dev.get_partitions() {
-        if let Some(mount) = partition.get_mountpoint() {
-            let mut inserted = false;
-            for (idx, mpoint) in umount_parts.iter().enumerate() {
-                if mpoint.starts_with(mount.get_mountpoint()) {
-                    umount_parts.insert(idx, PathBuf::from(mount.get_mountpoint()));
-                    inserted = true;
-                    break;
+    for (_dev_path, device) in block_dev_info.get_devices() {
+        if let Some(parent) = device.get_parent() {
+            if parent.get_name() == flash_dev.get_name() {
+                if let Some(mount) = device.get_mountpoint() {
+                    let mut inserted = false;
+                    for (idx, mpoint) in umount_parts.iter().enumerate() {
+                        if mpoint.starts_with(mount.get_mountpoint()) {
+                            umount_parts.insert(idx, PathBuf::from(mount.get_mountpoint()));
+                            inserted = true;
+                            break;
+                        }
+                    }
+                    if !inserted {
+                        umount_parts.push(mount.get_mountpoint().to_path_buf());
+                    }
                 }
-            }
-            if !inserted {
-                umount_parts.push(mount.get_mountpoint().to_path_buf());
             }
         }
     }

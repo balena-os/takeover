@@ -7,7 +7,6 @@ pub(crate) const CP_CMD: &str = "cp";
 pub(crate) const TELINIT_CMD: &str = "telinit";
 pub(crate) const REBOOT_CMD: &str = "reboot";
 pub(crate) const UMOUNT_CMD: &str = "umount";
-pub(crate) const LSBLK_CMD: &str = "lsblk";
 pub(crate) const LOSETUP_CMD: &str = "losetup";
 pub(crate) const MOKUTIL_CMD: &str = "mokutil";
 pub(crate) const WHEREIS_CMD: &str = "whereis";
