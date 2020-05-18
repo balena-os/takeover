@@ -1,19 +1,15 @@
 use std::fs::remove_dir_all;
 use std::path::{Path, PathBuf};
 
-use log::{error, warn, info};
+use log::{error, info, warn};
 use mod_logger::Level;
 use nix::mount::umount;
 
 use crate::{
-    common::{get_os_name, mig_error::MigError, options::Options, file_exists},
+    common::{file_exists, get_os_name, mig_error::MigError, options::Options},
     stage1::{
-        defs::DeviceType,
-        device_impl::get_device,
-        device::Device,
-        assets::Assets,
+        assets::Assets, device::Device, device_impl::get_device, image_retrieval::download_image,
         migrate_info::balena_cfg_json::BalenaCfgJson,
-        image_retrieval::download_image,
     },
 };
 
@@ -42,11 +38,14 @@ impl MigrateInfo {
             BalenaCfgJson::new(balena_cfg)?
         } else {
             error!("The required parameter --config/-c was not provided");
-            return Err(MigError::displayed())
+            return Err(MigError::displayed());
         };
         config.check(opts, &*device)?;
 
-        info!("config.json is for device type {}", config.get_device_type()?);
+        info!(
+            "config.json is for device type {}",
+            config.get_device_type()?
+        );
 
         let work_dir = opts.get_work_dir();
 
@@ -60,11 +59,13 @@ impl MigrateInfo {
                 );
                 return Err(MigError::displayed());
             }
-        } else  {
-            download_image(&config,
-                           &work_dir,
-                           config.get_device_type()?.as_str(),
-                            opts.get_version())?
+        } else {
+            download_image(
+                &config,
+                &work_dir,
+                config.get_device_type()?.as_str(),
+                opts.get_version(),
+            )?
         };
 
         Ok(MigrateInfo {
@@ -82,7 +83,7 @@ impl MigrateInfo {
             config,
             image_path,
             device,
-            work_dir
+            work_dir,
         })
     }
 

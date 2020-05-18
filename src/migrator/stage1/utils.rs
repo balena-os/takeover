@@ -251,6 +251,6 @@ pub(crate) fn mount_fs<P: AsRef<Path>>(
     mig_info.add_mount(mount_dir);
 
     info!("Mounted {} file system on '{}'", fs, mount_dir.display());
-    
+
     Ok(())
 }

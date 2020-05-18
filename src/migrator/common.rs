@@ -7,12 +7,12 @@ use failure::ResultExt;
 use libc::getuid;
 use regex::Regex;
 
-use log::{debug, error, info, trace, warn};
+use log::{debug, error, trace, warn};
 
 pub(crate) mod stage2_config;
 
 pub(crate) mod defs;
-use defs::{DISK_BY_LABEL_PATH, DISK_BY_PARTUUID_PATH, DISK_BY_UUID_PATH, MKTEMP_CMD, UNAME_CMD};
+use defs::{DISK_BY_LABEL_PATH, DISK_BY_PARTUUID_PATH, DISK_BY_UUID_PATH, MKTEMP_CMD};
 
 pub mod mig_error;
 pub use mig_error::{MigErrCtx, MigError, MigErrorKind};

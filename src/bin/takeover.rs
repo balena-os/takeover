@@ -9,14 +9,14 @@ use takeover::{stage1, stage2, MigErrorKind, Options};
 #[paw::main]
 fn main(opts: Options) {
     Logger::set_default_level(Level::Info);
+    Logger::set_brief_info(true);
+    Logger::set_color(true);
 
     if opts.is_stage2() {
         if let Err(why) = Logger::set_log_dest(&LogDestination::BufferStderr, NO_STREAM) {
             error!("Failed to initialize logging, error: {:?}", why);
             exit(1);
         }
-
-        Logger::set_color(true);
 
         if let Err(why) = stage2(opts) {
             match why.kind() {
@@ -36,8 +36,6 @@ fn main(opts: Options) {
             );
             exit(1);
         }
-
-        Logger::set_color(true);
 
         if let Err(why) = stage1(opts) {
             match why.kind() {

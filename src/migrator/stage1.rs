@@ -10,9 +10,6 @@ use nix::unistd::sync;
 use failure::ResultExt;
 use log::{debug, error, info};
 
-pub(crate) mod lsblk_info;
-use lsblk_info::LsblkInfo;
-
 pub(crate) mod migrate_info;
 use migrate_info::MigrateInfo;
 
@@ -20,6 +17,7 @@ pub(crate) mod assets;
 use assets::Assets;
 
 mod api_calls;
+mod block_device_info;
 mod defs;
 mod device;
 mod device_impl;
@@ -29,15 +27,16 @@ mod utils;
 use crate::common::{
     call,
     defs::{
-        BALENA_CONFIG_PATH, BALENA_IMAGE_NAME, CP_CMD, MKTEMP_CMD, MOUNT_CMD, NIX_NONE,
-        OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD, TELINIT_CMD,
+        BALENA_CONFIG_PATH, BALENA_IMAGE_NAME, CP_CMD, MKTEMP_CMD, MOUNT_CMD, OLD_ROOT_MP,
+        STAGE2_CONFIG_NAME, SWAPOFF_CMD, TELINIT_CMD,
     },
-    format_size_with_unit, get_mem_info, is_admin,
+    dir_exists, format_size_with_unit, get_mem_info, is_admin,
     mig_error::{MigErrCtx, MigError, MigErrorKind},
     options::Options,
     stage2_config::Stage2Config,
 };
 use crate::common::{file_exists, path_append};
+use crate::stage1::block_device_info::{BlockDevice, BlockDeviceInfo};
 use crate::stage1::utils::mount_fs;
 use mod_logger::Logger;
 use std::io::Write;
@@ -267,49 +266,51 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
         .join(old_init_path.file_name().unwrap());
     Assets::write_stage2_script(&takeover_dir, &new_init_path, &tty)?;
 
-    let lsblk_info = LsblkInfo::all()?;
+    let block_dev_info = BlockDeviceInfo::new()?;
 
     let flash_dev = if let Some(flash_dev) = opts.get_flash_to() {
-        if let Some(device) = lsblk_info
-            .get_blk_devices()
-            .iter()
-            .find(|device| -> bool { device.get_path() == *flash_dev })
-        {
-            device
-        } else {
-            error!("Flash device could not be found: '{}'", flash_dev.display());
-            return Err(MigError::displayed());
-        }
+        block_dev_info.get_root_device()
     } else {
-        let (flash_dev, _root_part) = lsblk_info.get_path_devs("/")?;
-        flash_dev
+        block_dev_info.get_root_device()
     };
+
+    return Err(MigError::from_remark(
+        MigErrorKind::ExecProcess,
+        "Purposely exiting prematurely",
+    ));
+
+    if !dir_exists(&flash_dev.get_dev_path())? {
+        error!(
+            "The device could not be found: '{}'",
+            flash_dev.get_dev_path().display()
+        );
+        return Err(MigError::displayed());
+    }
 
     // collect partitions that need to be unmounted
     let mut umount_parts: Vec<PathBuf> = Vec::new();
-    if let Some(partitions) = &flash_dev.children {
-        for partition in partitions {
-            if let Some(mountpoint) = &partition.mountpoint {
-                let mut inserted = false;
-                for (idx, mpoint) in umount_parts.iter().enumerate() {
-                    if mpoint.starts_with(mountpoint) {
-                        umount_parts.insert(idx, mountpoint.clone());
-                        inserted = true;
-                        break;
-                    }
-                }
-                if !inserted {
-                    umount_parts.push(mountpoint.clone());
+
+    for (dev_path, partition) in flash_dev.get_partitions() {
+        if let Some(mount) = partition.get_mountpoint() {
+            let mut inserted = false;
+            for (idx, mpoint) in umount_parts.iter().enumerate() {
+                if mpoint.starts_with(mount.get_mountpoint()) {
+                    umount_parts.insert(idx, PathBuf::from(mount.get_mountpoint()));
+                    inserted = true;
+                    break;
                 }
             }
+            if !inserted {
+                umount_parts.push(mount.get_mountpoint().to_path_buf());
+            }
         }
-        umount_parts.reverse();
     }
+    umount_parts.reverse();
 
     let s2_cfg = Stage2Config {
         log_dev: opts.get_log_to().clone(),
         log_level: mig_info.get_log_level().to_string(),
-        flash_dev: flash_dev.get_path(),
+        flash_dev: flash_dev.get_dev_path().to_path_buf(),
         pretend: opts.is_pretend(),
         umount_parts,
     };

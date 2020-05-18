@@ -36,8 +36,6 @@ features = ["paw"]
 version = "0.4"
 features = ["std"]
 
-
-
 [dependencies.regex]
  version = "1.0"
 
@@ -62,9 +60,10 @@ version = "1.0"
 
 [dependencies.mod_logger]
 version = "0.6"
-# path = "../../rust/ModuleLogger"
-git = "https://github.com/samothx/ModuleLogger.git"
-# branch = "config-check"
+# git = "https://github.com/samothx/ModuleLogger.git"
+
+[dependencies.lazy_static]
+version = "1.4"
 
 [features]
 raspberrypi3 = []

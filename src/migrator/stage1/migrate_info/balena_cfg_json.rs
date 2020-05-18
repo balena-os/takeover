@@ -2,7 +2,7 @@ use crate::{
     common::{MigErrCtx, MigError, MigErrorKind, Options},
     stage1::{
         device::Device,
-        utils::{check_tcp_connect, mktemp, }
+        utils::{check_tcp_connect, mktemp},
     },
 };
 
@@ -76,7 +76,7 @@ impl BalenaCfgJson {
         Ok(new_path)
     }
 
-    pub fn check(&self, opts: &Options, device: &Device) -> Result<(), MigError> {
+    pub fn check(&self, opts: &Options, device: &dyn Device) -> Result<(), MigError> {
         // TODO: app_name is not checked
         info!("Configured for application id: {}", self.get_app_id()?);
 
@@ -84,9 +84,8 @@ impl BalenaCfgJson {
         if !device.supports_device_type(device_type.as_str()) {
             error!("The devicetype configured in config.json ({}) is not supported by the detected device type {:?}",
                    device_type, device.get_device_type());
-            return Err(MigError::displayed())
+            return Err(MigError::displayed());
         }
-
 
         if opts.is_api_check() {
             let api_endpoint = &self.get_api_endpoint()?;
@@ -237,5 +236,4 @@ impl BalenaCfgJson {
     pub fn get_path(&self) -> &Path {
         &self.file
     }
-
 }
