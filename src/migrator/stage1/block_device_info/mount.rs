@@ -18,6 +18,7 @@ impl Mount {
         self.mountpoint.as_path()
     }
 
+    #[allow(dead_code)]
     pub fn get_fs_type(&self) -> &str {
         self.fs_type.as_str()
     }

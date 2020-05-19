@@ -9,6 +9,7 @@ pub const DEV_TYPE_BBG: &str = "beaglebone-green";
 //pub const DEV_TYPE_BBB: &str = "beaglebone-black";
 pub const DEV_TYPE_BBXM: &str = "beagleboard-xm";
 pub const SYS_UEFI_DIR: &str = "/sys/firmware/efi";
+pub const SYSTEM_CONNECTIONS_DIR: &str = "system-connections";
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum DeviceType {
@@ -23,14 +24,18 @@ pub(crate) enum DeviceType {
 
 impl Display for DeviceType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{},", match self {
-            Self::IntelNuc => "X68_64/Intel Nuc",
-            Self::BeagleboneGreen => "Beaglebone Green",
-            Self::BeagleboardXM => "Beagleboard XM",
-            Self::RaspberryPi2 => "Raspberry Pi 2",
-            Self::RaspberryPi3 => "Raspberry Pi 3",
-            Self::RaspberryPi4 => "Raspberry Pi 4",
-        })
+        write!(
+            f,
+            "{},",
+            match self {
+                Self::IntelNuc => "X68_64/Intel Nuc",
+                Self::BeagleboneGreen => "Beaglebone Green",
+                Self::BeagleboardXM => "Beagleboard XM",
+                Self::RaspberryPi2 => "Raspberry Pi 2",
+                Self::RaspberryPi3 => "Raspberry Pi 3",
+                Self::RaspberryPi4 => "Raspberry Pi 4",
+            }
+        )
     }
 }
 

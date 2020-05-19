@@ -31,22 +31,30 @@ pub struct Options {
         help = "Version of balena-os image to download"
     )]
     version: Option<String>,
-    #[structopt(short, long, value_name = "CONFIG_JSON", parse(from_os_str))]
+    #[structopt(
+        short,
+        long,
+        value_name = "CONFIG_JSON",
+        parse(from_os_str),
+        help = "Path to balena config.json"
+    )]
     config: Option<PathBuf>,
-    #[structopt(long)]
+    #[structopt(long, help = "Pretend mode, do not flash device")]
     pretend: bool,
-    #[structopt(long)]
+    #[structopt(long, help = "Enable debug level verbosity")]
     debug: bool,
-    #[structopt(long)]
+    #[structopt(long, help = "Enable trace level verbosity")]
     trace: bool,
-    #[structopt(long)]
+    #[structopt(long, help = "Internal - stage2 invocation")]
     stage2: bool,
-    #[structopt(long)]
+    #[structopt(long, help = "Do not check if OS is supported")]
     no_os_check: bool,
-    #[structopt(long)]
+    #[structopt(long, help = "Do not check if balena API is available")]
     no_api_check: bool,
-    #[structopt(long)]
+    #[structopt(long, help = "Do not check if balena VPN is available")]
     no_vpn_check: bool,
+    #[structopt(long, help = "Do not check network manager files exist")]
+    no_nwmgr_check: bool,
     #[structopt(
         long,
         value_name = "TIMEOUT",
@@ -54,10 +62,41 @@ pub struct Options {
         help = "API/VPN check timeout in seconds."
     )]
     check_timeout: Option<u64>,
-    #[structopt(long,short, value_name = "LOG_DEVICE", parse(from_os_str))]
+    #[structopt(
+        long,
+        short,
+        value_name = "LOG_DEVICE",
+        parse(from_os_str),
+        help = "Write stage2 log to LOG_DEVICE"
+    )]
     log_to: Option<PathBuf>,
-    #[structopt(short, long, value_name = "INSTALL_DEVICE", parse(from_os_str))]
+    #[structopt(
+        short,
+        long,
+        value_name = "INSTALL_DEVICE",
+        parse(from_os_str),
+        help = "Use INSTALL_DEVICE to flash balena to"
+    )]
     flash_to: Option<PathBuf>,
+    #[structopt(
+        long,
+        help = "Do not create network manager configurations for configured wifis"
+    )]
+    no_wifis: bool,
+    #[structopt(
+        long,
+        short,
+        value_name = "SSID",
+        help = "Create a network manager configuation for configured wifi with SSID"
+    )]
+    wifi: Option<Vec<String>>,
+    #[structopt(
+        long,
+        value_name = "NWMGR_FILE",
+        parse(from_os_str),
+        help = "Supply a network manager file to inject into balena-os"
+    )]
+    nwmgr_cfg: Option<Vec<PathBuf>>,
 }
 
 impl Options {
@@ -127,5 +166,31 @@ impl Options {
         } else {
             DEFAULT_CHECK_TIMEOUT
         }
+    }
+
+    pub fn is_no_wifis(&self) -> bool {
+        self.no_wifis
+    }
+
+    pub fn get_wifis(&self) -> &[String] {
+        const NO_WIFIS: [String; 0] = [];
+        if let Some(wifis) = &self.wifi {
+            wifis.as_slice()
+        } else {
+            &NO_WIFIS
+        }
+    }
+
+    pub fn get_nwmgr_cfg(&self) -> &[PathBuf] {
+        if let Some(nwmgr_cfgs) = &self.nwmgr_cfg {
+            nwmgr_cfgs.as_slice()
+        } else {
+            const NO_NWMGR_CFGS: [PathBuf; 0] = [];
+            &NO_NWMGR_CFGS
+        }
+    }
+
+    pub fn is_no_nwmgr_check(&self) -> bool {
+        self.no_nwmgr_check
     }
 }

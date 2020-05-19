@@ -1,7 +1,7 @@
 use std::env::{current_exe, set_current_dir};
 use std::fs::{copy, create_dir, create_dir_all, read_link, remove_dir_all, OpenOptions};
 use std::os::unix::fs::symlink;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -23,22 +23,26 @@ mod device;
 mod device_impl;
 mod image_retrieval;
 mod utils;
+mod wifi_config;
 
 use crate::common::{
     call,
     defs::{
-        BALENA_CONFIG_PATH, BALENA_IMAGE_NAME, CP_CMD, MKTEMP_CMD, MOUNT_CMD, OLD_ROOT_MP,
-        STAGE2_CONFIG_NAME, SWAPOFF_CMD, TELINIT_CMD,
+        BALENA_CONFIG_PATH, BALENA_IMAGE_NAME, CP_CMD, MOUNT_CMD, OLD_ROOT_MP, STAGE2_CONFIG_NAME,
+        SWAPOFF_CMD, TELINIT_CMD,
     },
-    format_size_with_unit, get_mem_info, is_admin,
+    file_exists, format_size_with_unit, get_mem_info, is_admin,
     mig_error::{MigErrCtx, MigError, MigErrorKind},
     options::Options,
+    path_append,
     stage2_config::Stage2Config,
 };
-use crate::common::{file_exists, path_append};
-use crate::stage1::block_device_info::BlockDeviceInfo;
-use crate::stage1::utils::mount_fs;
+
+use block_device_info::BlockDeviceInfo;
+use defs::SYSTEM_CONNECTIONS_DIR;
 use mod_logger::Logger;
+use utils::{mktemp, mount_fs};
+
 use std::io::Write;
 
 const XTRA_FS_SIZE: u64 = 10 * 1024 * 1024; // 10 MB
@@ -47,16 +51,15 @@ const XTRA_FS_SIZE: u64 = 10 * 1024 * 1024; // 10 MB
 fn get_required_space(opts: &Options, mig_info: &MigrateInfo) -> Result<u64, MigError> {
     let mut req_size: u64 = mig_info.get_assets().busybox_size() as u64 + XTRA_FS_SIZE;
 
-    let image_path = if let Some(image_path) = opts.get_image() {
+    req_size += if let Some(image_path) = opts.get_image() {
         if image_path.exists() {
-            req_size += image_path
+            image_path
                 .metadata()
                 .context(upstream_context!(&format!(
                     "Failed to retrieve imagesize for '{}'",
                     image_path.display()
                 )))?
-                .len() as u64;
-            image_path
+                .len() as u64
         } else {
             error!("Image could not be found: '{}'", image_path.display());
             return Err(MigError::displayed());
@@ -66,16 +69,15 @@ fn get_required_space(opts: &Options, mig_info: &MigrateInfo) -> Result<u64, Mig
         return Err(MigError::displayed());
     };
 
-    let config_path = if let Some(config_path) = opts.get_config().clone() {
+    req_size += if let Some(config_path) = opts.get_config().clone() {
         if file_exists(&config_path) {
-            req_size += config_path
+            config_path
                 .metadata()
                 .context(upstream_context!(&format!(
-                    "Failed to retrieve imagesize for '{}'",
+                    "Failed to retrieve file size for '{}'",
                     config_path.display()
                 )))?
-                .len() as u64;
-            config_path
+                .len() as u64
         } else {
             error!("Config could not be found: '{}'", config_path.display());
             return Err(MigError::displayed());
@@ -85,8 +87,107 @@ fn get_required_space(opts: &Options, mig_info: &MigrateInfo) -> Result<u64, Mig
         return Err(MigError::displayed());
     };
 
+    for nwmgr_cfg in opts.get_nwmgr_cfg() {
+        req_size += nwmgr_cfg
+            .metadata()
+            .context(upstream_context!(&format!(
+                "Failed to retrieve file size for '{}'",
+                nwmgr_cfg.display()
+            )))?
+            .len();
+    }
+
+    let curr_exe = current_exe().context(upstream_context!(
+        "Failed to retrieve path of current executable"
+    ))?;
+    req_size += curr_exe
+        .metadata()
+        .context(upstream_context!(&format!(
+            "Failed to retrieve file size for '{}'",
+            curr_exe.display()
+        )))?
+        .len();
+
+    req_size += mig_info.get_assets().busybox_size() as u64;
+
     // TODO: account for network manager config and backup
     Ok(req_size)
+}
+
+fn copy_files<P: AsRef<Path>>(mig_info: &MigrateInfo, takeover_dir: P) -> Result<(), MigError> {
+    let takeover_dir = takeover_dir.as_ref();
+
+    // *********************************************************
+    // write busybox executable to tmpfs
+
+    let busybox = mig_info.get_assets().write_to(&takeover_dir)?;
+
+    info!("Copied busybox executable to '{}'", busybox.display());
+
+    // *********************************************************
+    // write balena image to tmpfs
+
+    let to_image_path = takeover_dir.join(BALENA_IMAGE_NAME);
+    let image_path = mig_info.get_image_path();
+    copy(image_path, &to_image_path).context(upstream_context!(&format!(
+        "Failed to copy '{}' to {}",
+        image_path.display(),
+        &to_image_path.display()
+    )))?;
+    info!("Copied image to '{}'", to_image_path.display());
+
+    // *********************************************************
+    // write config.json to tmpfs
+
+    let to_cfg_path = path_append(&takeover_dir, BALENA_CONFIG_PATH);
+    let config_path = mig_info.get_balena_cfg().get_path();
+    copy(config_path, &to_cfg_path).context(upstream_context!(&format!(
+        "Failed to copy '{}' to {}",
+        config_path.display(),
+        &to_cfg_path.display()
+    )))?;
+
+    // *********************************************************
+    // write network_manager filess to tmpfs
+    let mut nwmgr_cfgs: u64 = 0;
+    let nwmgr_path = path_append(&takeover_dir, SYSTEM_CONNECTIONS_DIR);
+    create_dir_all(&nwmgr_path).context(upstream_context!(&format!(
+        "Failed to create directory '{}",
+        nwmgr_path.display()
+    )))?;
+
+    for source_file in mig_info.get_nwmgr_files() {
+        nwmgr_cfgs += 1;
+        let target_file = path_append(&nwmgr_path, &format!("balena-{:02}", nwmgr_cfgs));
+        copy(&source_file, &target_file).context(upstream_context!(&format!(
+            "Failed to copy '{}' to '{}'",
+            source_file.display(),
+            target_file.display()
+        )))?;
+    }
+
+    for wifi_config in mig_info.get_wifis() {
+        wifi_config.create_nwmgr_file(&nwmgr_path, nwmgr_cfgs)?;
+    }
+
+    // TODO: copy backup
+
+    // *********************************************************
+    // write this executable to tmpfs
+
+    let target_path = takeover_dir.join("takeover");
+    let curr_exe = current_exe().context(upstream_context!(
+        "Failed to retrieve path of current executable"
+    ))?;
+
+    copy(&curr_exe, &target_path).context(upstream_context!(&format!(
+        "Failed to copy current executable '{}' to '{}",
+        curr_exe.display(),
+        target_path.display()
+    )))?;
+
+    info!("Copied current executable to '{}'", target_path.display());
+    Ok(())
 }
 
 fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
@@ -112,23 +213,22 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
         format_size_with_unit(mem_free)
     );
 
-    // TODO: check memory, abort if not enough
+    let req_space = get_required_space(opts, mig_info)?;
+
+    // TODO: maybe kill some procs first
+    if mem_free < req_space + XTRA_FS_SIZE {
+        error!(
+            "Not enough memory space found to copy files to RAMFS, required size is {} free memory is {}",
+            format_size_with_unit(req_space + XTRA_FS_SIZE),
+            format_size_with_unit(mem_free)
+        );
+        return Err(MigError::displayed());
+    }
 
     // *********************************************************
     // make mountpoint for tmpfs
 
-    let cmd_res = call(MKTEMP_CMD, &["-d", "-p", "/", "TO.XXXXXXXX"], true)?;
-    let takeover_dir = if cmd_res.status.success() {
-        PathBuf::from(cmd_res.stdout)
-    } else {
-        return Err(MigError::from_remark(
-            MigErrorKind::CmdIO,
-            &format!(
-                "Failed to create temporary directory, stderr: '{}'",
-                cmd_res.stderr
-            ),
-        ));
-    };
+    let takeover_dir = mktemp(true, Some("TO.XXXXXXXX"), Some("/"))?;
 
     mig_info.set_to_dir(&takeover_dir);
 
@@ -207,51 +307,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
 
     info!("Created directory '{}'", curr_path.display());
 
-    // *********************************************************
-    // write busybox executable to tmpfs
-
-    let busybox = mig_info.get_assets().write_to(&takeover_dir)?;
-
-    info!("Copied busybox executable to '{}'", busybox.display());
-
-    // *********************************************************
-    // write balena image to tmpfs
-
-    let to_image_path = takeover_dir.join(BALENA_IMAGE_NAME);
-    let image_path = mig_info.get_image_path();
-    copy(image_path, &to_image_path).context(upstream_context!(&format!(
-        "Failed to copy '{}' to {}",
-        image_path.display(),
-        &to_image_path.display()
-    )))?;
-    info!("Copied image to '{}'", to_image_path.display());
-
-    // *********************************************************
-    // write config.json to tmpfs
-
-    let to_cfg_path = path_append(&takeover_dir, BALENA_CONFIG_PATH);
-    let config_path = mig_info.get_balena_cfg().get_path();
-    copy(config_path, &to_cfg_path).context(upstream_context!(&format!(
-        "Failed to copy '{}' to {}",
-        config_path.display(),
-        &to_cfg_path.display()
-    )))?;
-
-    // *********************************************************
-    // write this executable to tmpfs
-
-    let target_path = takeover_dir.join("takeover");
-    let curr_exe = current_exe().context(upstream_context!(
-        "Failed to retrieve path of current executable"
-    ))?;
-
-    copy(&curr_exe, &target_path).context(upstream_context!(&format!(
-        "Failed to copy current executable '{}' to '{}",
-        curr_exe.display(),
-        target_path.display()
-    )))?;
-
-    info!("Copied current executable to '{}'", target_path.display());
+    copy_files(mig_info, &takeover_dir)?;
 
     // *********************************************************
     // setup new init

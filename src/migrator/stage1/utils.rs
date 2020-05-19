@@ -148,18 +148,18 @@ pub(crate) fn whereis(cmd: &str) -> Result<String, MigError> {
     }
 }
 
-pub(crate) fn mktemp(
+pub(crate) fn mktemp<P: AsRef<Path>>(
     dir: bool,
     pattern: Option<&str>,
-    path: Option<PathBuf>,
+    path: Option<P>,
 ) -> Result<PathBuf, MigError> {
     let mut cmd_args: Vec<&str> = Vec::new();
 
-    let mut _dir_path: Option<String> = None;
+    let mut dir_path = String::new();
     if let Some(path) = path {
-        _dir_path = Some(String::from(path.to_string_lossy()));
+        dir_path = path.as_ref().to_string_lossy().to_string();
         cmd_args.push("-p");
-        cmd_args.push(_dir_path.as_ref().unwrap());
+        cmd_args.push(dir_path.as_str());
     }
 
     if dir {

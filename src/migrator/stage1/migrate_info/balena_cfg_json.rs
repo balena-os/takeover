@@ -77,7 +77,6 @@ impl BalenaCfgJson {
     }
 
     pub fn check(&self, opts: &Options, device: &dyn Device) -> Result<(), MigError> {
-        // TODO: app_name is not checked
         info!("Configured for application id: {}", self.get_app_id()?);
 
         let device_type = self.get_device_type()?;

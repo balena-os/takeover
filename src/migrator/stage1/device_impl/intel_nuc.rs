@@ -1,6 +1,7 @@
 use log::{error, info, warn};
 
 use crate::common::get_os_name;
+use crate::stage1::device_impl::check_os;
 use crate::{
     common::{MigError, Options},
     // linux_common::is_secure_boot,
@@ -28,37 +29,13 @@ impl IntelNuc {
             "Manjaro Linux",
         ];
 
-        let os_name = get_os_name()?;
-        info!("Detected OS name is {}", os_name);
-
-        let os_supported = if let Some(_) = SUPPORTED_OSSES.iter().position(|&r| r == os_name) {
-            true
-        } else {
-            false
-        };
-
-        if !os_supported {
-            if opts.is_os_check() {
-                error!(
-                    "The OS '{}' has not been tested with {} for device type IntelNuc, to override this check use the no-os-check option on the command line",
-                    os_name,
-                    env!("CARGO_PKG_NAME")
-                );
-                return Err(MigError::displayed());
-            } else {
-                warn!(
-                    "The OS '{}' has not been tested with {} for device type IntelNuc, prodeeding due to no-os-check option", os_name, env!("CARGO_PKG_NAME"));
-            }
+        if !check_os(SUPPORTED_OSSES, opts, "Generic x86_64/Intel Nuc")? {
+            return Err(MigError::displayed());
         }
 
         // **********************************************************************
-        // ** AMD64 specific initialisation/checksget_
+        // ** AMD64 specific initialisation/checks
         // **********************************************************************
-
-        // TODO: determine boot device
-        // use config.migrate.flash_device
-        // if EFI boot look for EFI partition
-        // else look for /boot
 
         let secure_boot = is_secure_boot()?;
         info!(

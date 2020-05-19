@@ -5,6 +5,7 @@ use log::{error, info, warn};
 use mod_logger::Level;
 use nix::mount::umount;
 
+use crate::stage1::wifi_config::WifiConfig;
 use crate::{
     common::{file_exists, get_os_name, mig_error::MigError, options::Options},
     stage1::{
@@ -26,6 +27,8 @@ pub(crate) struct MigrateInfo {
     device: Box<dyn Device>,
     config: BalenaCfgJson,
     work_dir: PathBuf,
+    wifis: Vec<WifiConfig>,
+    nwmgr_files: Vec<PathBuf>,
 }
 
 #[allow(dead_code)]
@@ -68,6 +71,31 @@ impl MigrateInfo {
             )?
         };
 
+        let wifi_ssids = opts.get_wifis().clone();
+
+        let wifis: Vec<WifiConfig> = if wifi_ssids.len() > 0 || !opts.is_no_wifis() {
+            let wifi_config = WifiConfig::scan(wifi_ssids)?;
+
+            wifi_config
+        } else {
+            Vec::new()
+        };
+
+        let nwmgr_files = Vec::from(opts.get_nwmgr_cfg());
+
+        if nwmgr_files.is_empty() && wifis.is_empty() {
+            if opts.is_no_nwmgr_check() {
+                warn!(
+                    "No Network manager files were found, the device might not be able to come online"
+                );
+            } else {
+                error!(
+                    "No Network manager files were found, the device might not be able to come online"
+                );
+                return Err(MigError::displayed());
+            }
+        }
+
         Ok(MigrateInfo {
             assets: Assets::new(),
             os_name: get_os_name()?,
@@ -84,6 +112,8 @@ impl MigrateInfo {
             image_path,
             device,
             work_dir,
+            wifis,
+            nwmgr_files,
         })
     }
 
@@ -117,6 +147,14 @@ impl MigrateInfo {
 
     pub fn get_mounts(&self) -> &Vec<PathBuf> {
         &self.mounts
+    }
+
+    pub fn get_nwmgr_files(&self) -> &Vec<PathBuf> {
+        &self.nwmgr_files
+    }
+
+    pub fn get_wifis(&self) -> &Vec<WifiConfig> {
+        &self.wifis
     }
 
     pub fn umount_all(&mut self) {

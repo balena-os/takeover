@@ -1,7 +1,8 @@
 use failure::ResultExt;
-use log::{error, info};
+use log::{error, info, warn};
 use std::fs::read_to_string;
 
+use crate::common::get_os_name;
 use crate::stage1::utils::get_os_arch;
 use crate::{
     common::{MigErrCtx, MigError, MigErrorKind},
@@ -12,9 +13,42 @@ use crate::{
 
 // mod beaglebone;
 mod intel_nuc;
-// mod raspberrypi;
+mod raspberrypi;
 
 const DEVICE_TREE_MODEL: &str = "/proc/device-tree/model";
+
+pub(crate) fn check_os(
+    supported: &[&str],
+    opts: &Options,
+    dev_type: &str,
+) -> Result<bool, MigError> {
+    let os_name = get_os_name()?;
+    info!("Detected OS name is {}", os_name);
+
+    let os_supported = if let Some(_) = supported.iter().position(|&r| r == os_name) {
+        true
+    } else {
+        false
+    };
+
+    if !os_supported {
+        if opts.is_os_check() {
+            error!(
+                "The OS '{}' has not been tested with {} for device type {}, to override this check use the no-os-check option on the command line",
+                os_name,
+                dev_type,
+                env!("CARGO_PKG_NAME")
+            );
+            Ok(false)
+        } else {
+            warn!(
+                "The OS '{}' has not been tested with {} for device type IntelNuc, prodeeding due to no-os-check option", os_name, env!("CARGO_PKG_NAME"));
+            Ok(true)
+        }
+    } else {
+        Ok(true)
+    }
+}
 
 pub(crate) fn get_device(opts: &Options) -> Result<Box<dyn Device>, MigError> {
     let os_arch = get_os_arch()?;
@@ -35,11 +69,10 @@ pub(crate) fn get_device(opts: &Options) -> Result<Box<dyn Device>, MigError> {
                     .trim_end(),
             );
 
-            /*
-            if let Some(device) = raspberrypi::is_rpi(mig_info, config, s2_cfg, &dev_tree_model)? {
+            if let Some(device) = raspberrypi::is_rpi(opts, &dev_tree_model)? {
                 return Ok(device);
             }
-
+            /*
             if let Some(device) = beaglebone::is_bb(mig_info, config, s2_cfg, &dev_tree_model)? {
                 return Ok(device);
             }

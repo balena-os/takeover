@@ -1,4 +1,5 @@
-use std::fs::{read_link, read_to_string};
+use std::fs::{read_link, read_to_string, File};
+use std::io::{BufRead, BufReader};
 use std::mem::MaybeUninit;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
@@ -12,7 +13,7 @@ use log::{debug, error, trace, warn};
 pub(crate) mod stage2_config;
 
 pub(crate) mod defs;
-use defs::{DISK_BY_LABEL_PATH, DISK_BY_PARTUUID_PATH, DISK_BY_UUID_PATH, MKTEMP_CMD};
+use defs::{DISK_BY_LABEL_PATH, DISK_BY_PARTUUID_PATH, DISK_BY_UUID_PATH};
 
 pub mod mig_error;
 pub use mig_error::{MigErrCtx, MigError, MigErrorKind};
@@ -64,44 +65,6 @@ pub(crate) fn call(cmd: &str, args: &[&str], trim_stdout: bool) -> Result<CmdRes
     }
 }
 
-#[allow(dead_code)]
-pub(crate) fn mktemp(
-    dir: bool,
-    pattern: Option<&str>,
-    path: Option<PathBuf>,
-) -> Result<PathBuf, MigError> {
-    let mut cmd_args: Vec<&str> = Vec::new();
-
-    let mut _dir_path: Option<String> = None;
-    if let Some(path) = path {
-        _dir_path = Some(String::from(path.to_string_lossy()));
-        cmd_args.push("-p");
-        cmd_args.push(_dir_path.as_ref().unwrap());
-    }
-
-    if dir {
-        cmd_args.push("-d");
-    }
-
-    if let Some(pattern) = pattern {
-        cmd_args.push(pattern);
-    }
-
-    let cmd_res = call(MKTEMP_CMD, cmd_args.as_slice(), true)?;
-
-    if cmd_res.status.success() {
-        Ok(PathBuf::from(cmd_res.stdout))
-    } else {
-        Err(MigError::from_remark(
-            MigErrorKind::ExecProcess,
-            &format!(
-                "Failed to create temporary file for image extraction, error: {}",
-                cmd_res.stderr
-            ),
-        ))
-    }
-}
-
 pub(crate) fn get_mem_info() -> Result<(u64, u64), MigError> {
     trace!("get_mem_info: entered");
     // TODO: could add loads, uptime if needed
@@ -147,6 +110,25 @@ pub(crate) fn get_os_name() -> Result<String, MigError> {
             MigErrorKind::NotFound,
             &format!("get_os_name: could not locate file {}", OS_RELEASE_FILE),
         ))
+    }
+}
+
+pub(crate) fn is_migrator_file<P: AsRef<Path>>(file_name: P) -> Result<bool, MigError> {
+    let path = file_name.as_ref();
+    let file = File::open(path).context(MigErrCtx::from_remark(
+        MigErrorKind::Upstream,
+        &format!("failed to open file '{}'", path.display()),
+    ))?;
+    if let Some(ref line1) = BufReader::new(file).lines().next() {
+        if let Ok(ref line1) = line1 {
+            Ok(Regex::new(r###"^\s*## created by balena-migrate"###)
+                .unwrap()
+                .is_match(&line1))
+        } else {
+            Ok(false)
+        }
+    } else {
+        Ok(false)
     }
 }
 
