@@ -1,27 +1,24 @@
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use crate::stage1::block_device_info::DeviceNum;
 use crate::{
     common::path_append,
     stage1::block_device_info::{block_device::BlockDevice, mount::Mount},
+    MigError,
 };
 
 #[derive(Clone)]
 pub(crate) struct Partition {
     pub name: String,
-    pub major: u64,
-    pub minor: u64,
+    pub device_num: DeviceNum,
     pub mounted: Option<Mount>,
     pub parent: Rc<Box<dyn BlockDevice>>,
 }
 
 impl BlockDevice for Partition {
-    fn get_major(&self) -> u64 {
-        self.major
-    }
-
-    fn get_minor(&self) -> u64 {
-        self.minor
+    fn get_device_num(&self) -> &DeviceNum {
+        &self.device_num
     }
 
     fn get_mountpoint(&self) -> &Option<Mount> {
@@ -42,5 +39,9 @@ impl BlockDevice for Partition {
 
     fn is_partition(&self) -> bool {
         true
+    }
+
+    fn set_mountpoint(&mut self, mountpoint: Mount) {
+        self.mounted = Some(mountpoint);
     }
 }

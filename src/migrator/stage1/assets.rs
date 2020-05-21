@@ -18,13 +18,16 @@ const RPI3_BUSYBOX: &[u8] = include_bytes!("../../../assets/armv7/busybox");
 const X86_64_BUSYBOX: &[u8] = include_bytes!("../../../assets/x86_64/busybox");
 
 const STAGE2_SCRIPT: &str = r###"#!__TO__/busybox sh
-exec <"__TO____TTY__" >"__TO____TTY__" 2>"__TO____TTY__"
+echo "takeover init started"
+if [ -f "__TO____TTY__" ]; then 
+  exec <"__TO____TTY__" >"__TO____TTY__" 2>"__TO____TTY__"
+fi
 cd "__TO__"
-./busybox echo "Init takeover successful"
-./busybox echo "Pivoting root..."
-./busybox mount --make-rprivate /
-./busybox pivot_root . mnt/old_root
-./busybox echo "Chrooting and running init..."
+echo "Init takeover successful"
+echo "Pivoting root..."
+mount --make-rprivate /
+pivot_root . mnt/old_root
+echo "Chrooting and running init..."
 exec ./busybox chroot . /takeover --stage2
 "###;
 

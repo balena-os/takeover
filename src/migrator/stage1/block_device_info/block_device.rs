@@ -1,17 +1,18 @@
+use std::fmt::{self, Debug};
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::fmt::{self, Debug};
 
 use crate::stage1::block_device_info::mount::Mount;
+use crate::stage1::block_device_info::DeviceNum;
 
 pub(crate) trait BlockDevice {
-    fn get_major(&self) -> u64;
-    fn get_minor(&self) -> u64;
+    fn get_device_num(&self) -> &DeviceNum;
     fn get_mountpoint(&self) -> &Option<Mount>;
     fn get_name(&self) -> &str;
     fn get_dev_path(&self) -> PathBuf;
     fn get_parent(&self) -> Option<&Rc<Box<dyn BlockDevice>>>;
     fn is_partition(&self) -> bool;
+    fn set_mountpoint(&mut self, mountpoint: Mount);
 }
 
 impl Debug for dyn BlockDevice {
@@ -24,8 +25,7 @@ impl Debug for dyn BlockDevice {
 
         f.debug_struct("BlockDevice")
             .field("name", &self.get_name())
-            .field("major", &self.get_major())
-            .field("minor", &self.get_minor())
+            .field("device_num", &self.get_device_num())
             .field("mounted", &self.get_mountpoint())
             .field("parent", &parent_val)
             .finish()

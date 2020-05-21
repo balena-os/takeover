@@ -3,12 +3,12 @@ use std::fs::{copy, create_dir, create_dir_all, read_link, remove_dir_all, OpenO
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::thread::sleep;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use nix::unistd::sync;
 
 use failure::ResultExt;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 
 pub(crate) mod migrate_info;
 use migrate_info::MigrateInfo;
@@ -46,7 +46,7 @@ use utils::{mktemp, mount_fs};
 use std::io::Write;
 
 const XTRA_FS_SIZE: u64 = 10 * 1024 * 1024; // const XTRA_MEM_FREE: u64 = 10 * 1024 * 1024; // 10 MB
-const PREMATURE_EXIT: bool = true;
+const DO_CLEANUP: bool = true;
 
 fn get_required_space(opts: &Options, mig_info: &MigrateInfo) -> Result<u64, MigError> {
     let mut req_size: u64 = mig_info.get_assets().busybox_size() as u64 + XTRA_FS_SIZE;
@@ -424,10 +424,6 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
 
     info!("Bind-mounted new init as '{}'", new_init_path.display());
 
-    if PREMATURE_EXIT {
-        return Ok(());
-    }
-
     debug!("calling '{} u'", TELINIT_CMD);
     let cmd_res = call(TELINIT_CMD, &["u"], true)?;
     if !cmd_res.status.success() {
@@ -457,7 +453,9 @@ pub fn stage1(opts: Options) -> Result<(), MigError> {
             Ok(())
         }
         Err(why) => {
-            mig_info.umount_all();
+            if DO_CLEANUP {
+                mig_info.umount_all();
+            }
             return Err(why);
         }
     }

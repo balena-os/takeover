@@ -11,7 +11,6 @@ use crate::{
         migrate_info::MigrateInfo,
     },
 };
-use std::path::PathBuf;
 
 const RPI_MODEL_REGEX: &str = r#"^Raspberry\s+Pi\s+(\S+)\s+Model\s+(.*)$"#;
 const RPI2_SLUGS: [&str; 1] = [DEV_TYPE_RPI2];
