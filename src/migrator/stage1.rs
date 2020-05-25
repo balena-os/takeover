@@ -3,12 +3,12 @@ use std::fs::{copy, create_dir, create_dir_all, read_link, remove_dir_all, OpenO
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::thread::sleep;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use nix::unistd::sync;
 
 use failure::ResultExt;
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 
 pub(crate) mod migrate_info;
 use migrate_info::MigrateInfo;
@@ -29,9 +29,9 @@ use crate::common::{
     call,
     defs::{
         BALENA_CONFIG_PATH, BALENA_IMAGE_NAME, CP_CMD, MOUNT_CMD, OLD_ROOT_MP, STAGE2_CONFIG_NAME,
-        SWAPOFF_CMD, TELINIT_CMD,
+        SWAPOFF_CMD, SYSTEM_CONNECTIONS_DIR, TELINIT_CMD, TRANSFER_DIR,
     },
-    file_exists, format_size_with_unit, get_mem_info, is_admin,
+    dir_exists, file_exists, format_size_with_unit, get_mem_info, is_admin,
     mig_error::{MigErrCtx, MigError, MigErrorKind},
     options::Options,
     path_append,
@@ -39,10 +39,10 @@ use crate::common::{
 };
 
 use block_device_info::BlockDeviceInfo;
-use defs::SYSTEM_CONNECTIONS_DIR;
 use mod_logger::Logger;
 use utils::{mktemp, mount_fs};
 
+use crate::common::stage2_config::UmountPart;
 use std::io::Write;
 
 const XTRA_FS_SIZE: u64 = 10 * 1024 * 1024; // const XTRA_MEM_FREE: u64 = 10 * 1024 * 1024; // 10 MB
@@ -116,6 +116,14 @@ fn get_required_space(opts: &Options, mig_info: &MigrateInfo) -> Result<u64, Mig
 
 fn copy_files<P: AsRef<Path>>(mig_info: &MigrateInfo, takeover_dir: P) -> Result<(), MigError> {
     let takeover_dir = takeover_dir.as_ref();
+    let transfer_dir = path_append(takeover_dir, TRANSFER_DIR);
+
+    if !dir_exists(&transfer_dir)? {
+        create_dir(&transfer_dir).context(upstream_context!(&format!(
+            "Failed to create transfer directory: '{}'",
+            transfer_dir.display()
+        )))?;
+    }
 
     // *********************************************************
     // write busybox executable to tmpfs
@@ -127,7 +135,7 @@ fn copy_files<P: AsRef<Path>>(mig_info: &MigrateInfo, takeover_dir: P) -> Result
     // *********************************************************
     // write balena image to tmpfs
 
-    let to_image_path = takeover_dir.join(BALENA_IMAGE_NAME);
+    let to_image_path = path_append(&transfer_dir, BALENA_IMAGE_NAME);
     let image_path = mig_info.get_image_path();
     copy(image_path, &to_image_path).context(upstream_context!(&format!(
         "Failed to copy '{}' to {}",
@@ -139,7 +147,7 @@ fn copy_files<P: AsRef<Path>>(mig_info: &MigrateInfo, takeover_dir: P) -> Result
     // *********************************************************
     // write config.json to tmpfs
 
-    let to_cfg_path = path_append(&takeover_dir, BALENA_CONFIG_PATH);
+    let to_cfg_path = path_append(&transfer_dir, BALENA_CONFIG_PATH);
     let config_path = mig_info.get_balena_cfg().get_path();
     copy(config_path, &to_cfg_path).context(upstream_context!(&format!(
         "Failed to copy '{}' to {}",
@@ -150,7 +158,7 @@ fn copy_files<P: AsRef<Path>>(mig_info: &MigrateInfo, takeover_dir: P) -> Result
     // *********************************************************
     // write network_manager filess to tmpfs
     let mut nwmgr_cfgs: u64 = 0;
-    let nwmgr_path = path_append(&takeover_dir, SYSTEM_CONNECTIONS_DIR);
+    let nwmgr_path = path_append(&transfer_dir, SYSTEM_CONNECTIONS_DIR);
     create_dir_all(&nwmgr_path).context(upstream_context!(&format!(
         "Failed to create directory '{}",
         nwmgr_path.display()
@@ -175,7 +183,7 @@ fn copy_files<P: AsRef<Path>>(mig_info: &MigrateInfo, takeover_dir: P) -> Result
     // *********************************************************
     // write this executable to tmpfs
 
-    let target_path = takeover_dir.join("takeover");
+    let target_path = path_append(takeover_dir, "takeover");
     let curr_exe = current_exe().context(upstream_context!(
         "Failed to retrieve path of current executable"
     ))?;
@@ -347,22 +355,35 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
     }
 
     // collect partitions that need to be unmounted
-    let mut umount_parts: Vec<PathBuf> = Vec::new();
+    let mut umount_parts: Vec<UmountPart> = Vec::new();
 
     for (_dev_path, device) in block_dev_info.get_devices() {
         if let Some(parent) = device.get_parent() {
+            // this is a partition rather than a device
             if parent.get_name() == flash_dev.get_name() {
+                // it is a partition of the flash device
                 if let Some(mount) = device.get_mountpoint() {
                     let mut inserted = false;
                     for (idx, mpoint) in umount_parts.iter().enumerate() {
-                        if mpoint.starts_with(mount.get_mountpoint()) {
-                            umount_parts.insert(idx, PathBuf::from(mount.get_mountpoint()));
+                        if mpoint.mountpoint.starts_with(mount.get_mountpoint()) {
+                            umount_parts.insert(
+                                idx,
+                                UmountPart {
+                                    dev_name: device.get_dev_path().to_path_buf(),
+                                    mountpoint: PathBuf::from(mount.get_mountpoint()),
+                                    fs_type: mount.get_fs_type().to_string(),
+                                },
+                            );
                             inserted = true;
                             break;
                         }
                     }
                     if !inserted {
-                        umount_parts.push(mount.get_mountpoint().to_path_buf());
+                        umount_parts.push(UmountPart {
+                            dev_name: device.get_dev_path().to_path_buf(),
+                            mountpoint: PathBuf::from(mount.get_mountpoint()),
+                            fs_type: mount.get_fs_type().to_string(),
+                        });
                     }
                 }
             }
@@ -376,6 +397,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
         flash_dev: flash_dev.get_dev_path().to_path_buf(),
         pretend: opts.is_pretend(),
         umount_parts,
+        flash_external: opts.is_flash_external(),
     };
 
     let s2_cfg_path = takeover_dir.join(STAGE2_CONFIG_NAME);

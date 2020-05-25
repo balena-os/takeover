@@ -1,4 +1,4 @@
-use std::fs::{read_link, read_to_string, File};
+use std::fs::{read_to_string, File};
 use std::io::{BufRead, BufReader};
 use std::mem::MaybeUninit;
 use std::path::{Path, PathBuf};
@@ -13,7 +13,6 @@ use log::{debug, error, trace, warn};
 pub(crate) mod stage2_config;
 
 pub(crate) mod defs;
-use defs::{DISK_BY_LABEL_PATH, DISK_BY_PARTUUID_PATH, DISK_BY_UUID_PATH};
 
 pub mod mig_error;
 pub use mig_error::{MigErrCtx, MigError, MigErrorKind};
@@ -244,52 +243,6 @@ pub fn get_root_dev() -> Result<Option<PathBuf>, MigError> {
         }
     }
     Ok(None)
-}
-
-pub(crate) fn to_std_device_path(device: &Path) -> Result<PathBuf, MigError> {
-    debug!("to_std_device_path: entered with '{}'", device.display());
-
-    if !file_exists(device) {
-        return Err(MigError::from_remark(
-            MigErrorKind::NotFound,
-            &format!("File does not exist: '{}'", device.display()),
-        ));
-    }
-
-    if !(device.starts_with(DISK_BY_PARTUUID_PATH)
-        || device.starts_with(DISK_BY_UUID_PATH)
-        || device.starts_with(DISK_BY_LABEL_PATH))
-    {
-        return Ok(PathBuf::from(device));
-    }
-
-    trace!(
-        "to_std_device_path: attempting to dereference as link '{}'",
-        device.display()
-    );
-
-    match read_link(device) {
-        Ok(link) => {
-            if let Some(parent) = device.parent() {
-                let dev_path = path_append(parent, link);
-                Ok(dev_path.canonicalize().context(upstream_context!(&format!(
-                    "failed to canonicalize path from: '{}'",
-                    dev_path.display()
-                )))?)
-            } else {
-                trace!("Failed to retrieve parent from  '{}'", device.display());
-                Ok(PathBuf::from(device))
-            }
-        }
-        Err(why) => {
-            trace!(
-                "Failed to dereference file '{}' : {:?}",
-                device.display(),
-                why
-            );
-            Ok(PathBuf::from(device))
-        }
-    }
 }
 
 pub(crate) fn path_append<P1: AsRef<Path>, P2: AsRef<Path>>(base: P1, append: P2) -> PathBuf {

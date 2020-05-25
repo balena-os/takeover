@@ -5,11 +5,10 @@ pub const DEV_TYPE_GEN_X86_64: &str = "genericx86-64-ext";
 pub const DEV_TYPE_RPI3: &str = "raspberrypi3";
 pub const DEV_TYPE_RPI2: &str = "raspberry-pi2";
 pub const DEV_TYPE_RPI4_64: &str = "raspberrypi4-64";
-pub const DEV_TYPE_BBG: &str = "beaglebone-green";
-//pub const DEV_TYPE_BBB: &str = "beaglebone-black";
-pub const DEV_TYPE_BBXM: &str = "beagleboard-xm";
+// pub const DEV_TYPE_BBG: &str = "beaglebone-green";
+// pub const DEV_TYPE_BBB: &str = "beaglebone-black";
+// pub const DEV_TYPE_BBXM: &str = "beagleboard-xm";
 pub const SYS_UEFI_DIR: &str = "/sys/firmware/efi";
-pub const SYSTEM_CONNECTIONS_DIR: &str = "system-connections";
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum DeviceType {

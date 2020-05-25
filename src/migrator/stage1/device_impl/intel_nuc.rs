@@ -1,6 +1,5 @@
-use log::{error, info, warn};
+use log::{error, info};
 
-use crate::common::get_os_name;
 use crate::stage1::device_impl::check_os;
 use crate::{
     common::{MigError, Options},

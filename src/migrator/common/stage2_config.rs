@@ -10,12 +10,20 @@ use serde_yaml;
 use crate::common::{MigErrCtx, MigError, MigErrorKind};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+pub(crate) struct UmountPart {
+    pub dev_name: PathBuf,
+    pub mountpoint: PathBuf,
+    pub fs_type: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub(crate) struct Stage2Config {
     pub log_level: String,
     pub log_dev: Option<PathBuf>,
     pub flash_dev: PathBuf,
     pub pretend: bool,
-    pub umount_parts: Vec<PathBuf>,
+    pub umount_parts: Vec<UmountPart>,
+    pub flash_external: bool,
 }
 
 #[allow(dead_code)]
@@ -49,5 +57,9 @@ impl Stage2Config {
 
     pub fn get_flash_dev(&self) -> &PathBuf {
         &self.flash_dev
+    }
+
+    pub fn is_flash_external(&self) -> bool {
+        self.flash_external
     }
 }

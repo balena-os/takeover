@@ -5,7 +5,6 @@ use crate::stage1::block_device_info::DeviceNum;
 use crate::{
     common::path_append,
     stage1::block_device_info::{block_device::BlockDevice, mount::Mount},
-    MigError,
 };
 
 #[derive(Clone, Debug)]

@@ -1,14 +1,12 @@
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use regex::Regex;
 
-use crate::common::get_os_name;
 use crate::stage1::device_impl::check_os;
 use crate::{
     common::{options::Options, MigError, MigErrorKind},
     stage1::{
         defs::{DeviceType, DEV_TYPE_RPI2, DEV_TYPE_RPI3, DEV_TYPE_RPI4_64},
         device::Device,
-        migrate_info::MigrateInfo,
     },
 };
 

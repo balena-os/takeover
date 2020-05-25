@@ -1,17 +1,17 @@
-use std::fs::{copy, create_dir, create_dir_all, read_to_string, File, OpenOptions};
+use std::fs::{copy, create_dir, create_dir_all, read_dir, read_to_string, File, OpenOptions};
 use std::io::{Read, Write};
 use std::mem::MaybeUninit;
 use std::os::raw::c_int;
 use std::os::unix::io::AsRawFd;
-use std::process::exit;
-use std::thread::{self, sleep};
+use std::process::{exit, Command, Stdio};
+use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use nix::{
     errno::{errno, Errno},
     fcntl::{fcntl, F_GETFD},
     ioctl_none,
-    mount::{mount, umount, umount2, MntFlags, MsFlags},
+    mount::{mount, umount, MsFlags},
     unistd::sync,
 };
 
@@ -20,20 +20,22 @@ use std::path::{Path, PathBuf};
 use failure::ResultExt;
 use flate2::read::GzDecoder;
 use libc::{
-    close, getpid, sigfillset, sigprocmask, sigset_t, wait, MNT_DETACH, MNT_FORCE, SIG_BLOCK,
+    close, getpid, sigfillset, sigprocmask, sigset_t, wait, MS_RDONLY, MS_REMOUNT, SIG_BLOCK,
 };
-use log::{debug, error, info, trace, warn};
+use log::{debug, error, info, trace, warn, Level};
 use mod_logger::{LogDestination, Logger};
 
 use crate::common::{
     call,
-    defs::{BALENA_IMAGE_PATH, OLD_ROOT_MP, REBOOT_CMD, STAGE2_CONFIG_NAME, UMOUNT_CMD},
+    defs::{BALENA_IMAGE_PATH, OLD_ROOT_MP, REBOOT_CMD, STAGE2_CONFIG_NAME},
     dir_exists, file_exists, format_size_with_unit,
     mig_error::{MigErrCtx, MigError, MigErrorKind},
     options::Options,
     stage2_config::Stage2Config,
 };
 
+use crate::common::defs::{DD_CMD, GZIP_CMD, SYSTEM_CONNECTIONS_DIR, TRANSFER_DIR};
+use crate::common::stage2_config::UmountPart;
 use crate::common::{
     defs::{
         BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART, BALENA_CONFIG_PATH, BALENA_PART_MP,
@@ -44,6 +46,10 @@ use crate::common::{
 };
 
 const DD_BLOCK_SIZE: usize = 128 * 1024; // 4_194_304;
+
+const VALIDATE_MAX_ERR: usize = 20;
+const DO_VALIDATE: bool = true;
+const VALIDATE_BLOCK_SIZE: usize = 64 * 1024; // 4_194_304;
 
 pub const BUSYBOX_CMD: &str = "/busybox";
 
@@ -61,6 +67,36 @@ fn reboot() {
     sleep(Duration::from_secs(1));
     info!("rebooting");
     exit(1);
+}
+
+fn read_stage2_config() -> Result<Stage2Config, MigError> {
+    let s2_cfg_path = PathBuf::from(&format!("/{}", STAGE2_CONFIG_NAME));
+    if file_exists(&s2_cfg_path) {
+        let s2_cfg_txt = match read_to_string(&s2_cfg_path) {
+            Ok(s2_config_txt) => s2_config_txt,
+            Err(why) => {
+                error!(
+                    "Failed to read stage 2 config from '{}', error: {}",
+                    s2_cfg_path.display(),
+                    why
+                );
+                return Err(MigError::displayed());
+            }
+        };
+        match Stage2Config::deserialze(&s2_cfg_txt) {
+            Ok(s2_config) => Ok(s2_config),
+            Err(why) => {
+                error!("Failed to deserialize stage 2 config: error {}", why);
+                return Err(MigError::displayed());
+            }
+        }
+    } else {
+        error!(
+            "Stage2 config file could not be found in '{}',",
+            s2_cfg_path.display()
+        );
+        return Err(MigError::displayed());
+    }
 }
 
 fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<(), MigError> {
@@ -104,14 +140,14 @@ fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<(), MigError> {
         // TODO: remove this later
         Logger::set_log_file(
             &LogDestination::Stderr,
-            &PathBuf::from("/mnt/log/stage2.log"),
+            &PathBuf::from("/mnt/log/stage2-init.log"),
             false,
         )
         .context(upstream_context!(
-            "Failed set log file to  '/mnt/log/stage2.log'"
+            "Failed set log file to  '/mnt/log/stage2-init.log'"
         ))?;
         info!(
-            "Now logging to /mnt/log/stage2.log on '{}'",
+            "Now logging to /mnt/log/stage2-init.log on '{}'",
             log_dev.display()
         );
         Ok(())
@@ -128,11 +164,14 @@ fn kill_procs(signal: &str) -> Result<(), MigError> {
         info!("fuser: {}", cmd_res.stdout);
     }
     */
+    debug!("kill_procs: entered");
+
     let cmd_res = call(
         BUSYBOX_CMD,
         &["fuser", "-k", &format!("-{}", signal), "-m", OLD_ROOT_MP],
         true,
     )?;
+
     if !cmd_res.status.success() {
         warn!(
             "Failed to kill processes using '{}', stderr: {}",
@@ -142,37 +181,57 @@ fn kill_procs(signal: &str) -> Result<(), MigError> {
     Ok(())
 }
 
-fn unmount_partitions(mountpoints: &Vec<PathBuf>) -> Result<(), MigError> {
+fn unmount_partitions(mountpoints: &Vec<UmountPart>) -> Result<(), MigError> {
     for mpoint in mountpoints {
-        let mountpoint = path_append(OLD_ROOT_MP, mpoint);
+        let mountpoint = path_append(OLD_ROOT_MP, &mpoint.mountpoint);
 
-        match umount2(
-            &mountpoint,
-            MntFlags::from_bits(MNT_FORCE | MNT_DETACH).unwrap(),
-        ) {
+        info!(
+            "Attempting to unmount '{}' from '{}'",
+            mpoint.dev_name.display(),
+            mountpoint.display()
+        );
+        match umount(&mountpoint) {
             Ok(_) => {
-                info!("Successfully unmounted '{}", mountpoint.display());
+                info!("Successfully unmounted '{}'", mountpoint.display());
             }
             Err(why) => {
-                error!(
-                    "Failed to unmount partition '{}', error : {:?} ",
+                warn!(
+                    "Failed to unmount partition '{}' from '{}', error : {:?} ",
+                    mpoint.dev_name.display(),
                     mountpoint.display(),
                     why
                 );
-                let cmd_res = call(
-                    BUSYBOX_CMD,
-                    &[UMOUNT_CMD, "-l", &*mountpoint.to_string_lossy()],
-                    true,
-                )?;
-                if !cmd_res.status.success() {
-                    error!(
-                        "Failed to unmount '{}', stderr: '{}'",
-                        mountpoint.display(),
-                        cmd_res.stderr
-                    );
-                    return Err(MigError::displayed());
-                } else {
-                    info!("Successfully unmounted '{}'", mountpoint.display());
+
+                info!(
+                    "Trying to remount '{}' on '{}' as readonly",
+                    mpoint.dev_name.display(),
+                    mountpoint.display()
+                );
+
+                match mount(
+                    Some(mpoint.dev_name.as_path()),
+                    &mountpoint,
+                    Some(mpoint.fs_type.as_bytes()),
+                    MsFlags::from_bits(MS_REMOUNT | MS_RDONLY).unwrap(),
+                    NIX_NONE,
+                ) {
+                    Ok(_) => {
+                        info!(
+                            "Successfully remounted '{}' on '{}' as readonly ",
+                            mpoint.dev_name.display(),
+                            mountpoint.display()
+                        );
+                    }
+                    Err(why) => {
+                        error!(
+                            "Failed to remount '{}' on '{}' with fs type: {} as readonly, error: {:?}",
+                            mpoint.dev_name.display(),
+                            mountpoint.display(),
+                            mpoint.fs_type,
+                            why
+                        );
+                        return Err(MigError::displayed());
+                    }
                 }
             }
         }
@@ -281,15 +340,62 @@ fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
                     );
                     // TODO: copy files
 
+                    let src_path = path_append(TRANSFER_DIR, BALENA_CONFIG_PATH);
                     let target_path = path_append(BALENA_PART_MP, BALENA_CONFIG_PATH);
-                    copy(BALENA_CONFIG_PATH, &target_path).context(upstream_context!(&format!(
+                    copy(&src_path, &target_path).context(upstream_context!(&format!(
                         "Failed to copy {} to {}",
-                        BALENA_CONFIG_PATH,
+                        src_path.display(),
                         target_path.display()
                     )))?;
 
                     info!("Successfully copied config.json to boot partition",);
 
+                    let src_path = path_append(TRANSFER_DIR, SYSTEM_CONNECTIONS_DIR);
+                    let dir_list = read_dir(&src_path).context(upstream_context!(&format!(
+                        "Failed to read directory '{}'",
+                        src_path.display()
+                    )))?;
+
+                    let target_dir = path_append(BALENA_BOOT_MP, SYSTEM_CONNECTIONS_DIR);
+                    for entry in dir_list {
+                        match entry {
+                            Ok(entry) => {
+                                let curr_file = entry.path();
+                                if entry
+                                    .metadata()
+                                    .context(upstream_context!(&format!(
+                                        "Failed to read metadata from file '{}'",
+                                        curr_file.display()
+                                    )))?
+                                    .is_file()
+                                {
+                                    if let Some(filename) = curr_file.file_name() {
+                                        let target_path = path_append(&target_dir, filename);
+                                        copy(&curr_file, &target_path).context(
+                                            upstream_context!(&format!(
+                                                "Failed to copy '{}' to '{}'",
+                                                curr_file.display(),
+                                                target_path.display()
+                                            )),
+                                        )?;
+                                        info!(
+                                            "Successfully copied '{}' to boot partition",
+                                            curr_file.display()
+                                        );
+                                    } else {
+                                        warn!(
+                                            "Failed to extract filename from path '{}'",
+                                            curr_file.display()
+                                        );
+                                    }
+                                }
+                            }
+                            Err(why) => {
+                                error!("Failed to read directory entry, error: {:?}", why);
+                                return Err(MigError::displayed());
+                            }
+                        }
+                    }
                     umount(BALENA_PART_MP).context(upstream_context!(&format!(
                         "Failed to unmount {}",
                         BALENA_PART_MP
@@ -372,14 +478,116 @@ enum FlashState {
     FailNonRecoverable,
 }
 
-fn flash_gzip_internal(target_path: &Path, image_path: &Path) -> FlashState {
-    debug!("opening: '{}'", image_path.display());
+fn fill_buffer<I: Read>(buffer: &mut [u8], input: &mut I) -> Result<usize, MigError> {
+    // fill buffer
+    let mut buff_fill: usize = 0;
+    loop {
+        let bytes_read = input
+            .read(&mut buffer[buff_fill..])
+            .context(upstream_context!("Failed to read from  input stream"))?;
+
+        if bytes_read > 0 {
+            buff_fill += bytes_read;
+            if buff_fill < buffer.len() {
+                continue;
+            }
+        }
+        break;
+    }
+
+    Ok(buff_fill)
+}
+
+fn validate(target_path: &Path, image_path: &Path) -> Result<bool, MigError> {
+    debug!("Validate: opening: '{}'", image_path.display());
 
     let mut decoder = GzDecoder::new(match File::open(&image_path) {
         Ok(file) => file,
         Err(why) => {
             error!(
-                "Failed to open image file '{}', error: {:?}",
+                "Validate: Failed to open image file '{}', error: {:?}",
+                image_path.display(),
+                why
+            );
+            return Err(MigError::displayed());
+        }
+    });
+
+    debug!("Validate: opening output file '{}'", target_path.display());
+    let mut target = match OpenOptions::new()
+        .write(false)
+        .read(true)
+        .create(false)
+        .open(&target_path)
+    {
+        Ok(file) => file,
+        Err(why) => {
+            error!(
+                "Validate: Failed to open output file '{}', error: {:?}",
+                target_path.display(),
+                why
+            );
+            return Err(MigError::displayed());
+        }
+    };
+
+    let mut gz_buffer: [u8; VALIDATE_BLOCK_SIZE] = [0; VALIDATE_BLOCK_SIZE];
+    let mut tgt_buffer: [u8; VALIDATE_BLOCK_SIZE] = [0; VALIDATE_BLOCK_SIZE];
+
+    let mut byte_offset: u64 = 0;
+    let mut err_count = 0;
+
+    loop {
+        let gz_read = fill_buffer(&mut gz_buffer, &mut decoder)?;
+        let tgt_read = fill_buffer(&mut tgt_buffer, &mut target)?;
+        if gz_read == 0 {
+            break;
+        }
+
+        if gz_read > tgt_read {
+            warn!(
+                "Validate: file size mismatch at offset {:x}:{}: gzip stream {} output stream {}",
+                byte_offset,
+                format_size_with_unit(byte_offset),
+                gz_read,
+                tgt_read
+            );
+            return Ok(false);
+        } else {
+            for idx in 0..gz_read {
+                if gz_buffer[idx] != tgt_buffer[idx] {
+                    warn!(
+                        "Validate: byte mismatch at offset 0x{:x}:{}: {:x} != {:x}",
+                        byte_offset + idx as u64,
+                        format_size_with_unit(byte_offset + idx as u64),
+                        gz_buffer[idx],
+                        tgt_buffer[idx]
+                    );
+                    err_count += 1;
+                    if err_count >= VALIDATE_MAX_ERR {
+                        return Ok(false);
+                    }
+                }
+            }
+            byte_offset += gz_read as u64;
+        }
+
+        if gz_read < VALIDATE_BLOCK_SIZE {
+            break;
+        }
+    }
+
+    Ok(err_count == 0)
+}
+
+fn flash_internal(target_path: &Path, image_path: &Path) -> FlashState {
+    debug!("Flash: opening: '{}'", image_path.display());
+
+    let mut decoder = GzDecoder::new(match File::open(&image_path) {
+        Ok(file) => file,
+        Err(why) => {
+            error!(
+                "Flash: Failed to open image file '{}', error: {:?}",
                 image_path.display(),
                 why
             );
@@ -387,30 +595,7 @@ fn flash_gzip_internal(target_path: &Path, image_path: &Path) -> FlashState {
         }
     });
 
-    /* debug!("invoking dd");
-
-    let mut dd_child = match Command::new(dd_cmd)
-        .args(&[
-            // "conv=fsync", sadly not supported on busybox dd
-            // "oflag=direct",
-            &format!("of={}", &target_path.to_string_lossy()),
-            &format!("bs={}", DD_BLOCK_SIZE),
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::inherit()) // test
-        .stderr(Stdio::inherit())
-        .spawn()
-    {
-        Ok(dd_child) => dd_child,
-        Err(why) => {
-            error!("failed to execute command {}, error: {:?}", dd_cmd, why);
-            Logger::flush();
-            return FlashResult::FailRecoverable;
-        }
-    };
-    */
-
-    debug!("opening output file '{}", target_path.display());
+    debug!("Flash: opening output file '{}", target_path.display());
     let mut out_file = match OpenOptions::new()
         .write(true)
         .read(false)
@@ -420,7 +605,7 @@ fn flash_gzip_internal(target_path: &Path, image_path: &Path) -> FlashState {
         Ok(file) => file,
         Err(why) => {
             error!(
-                "Failed to open output file '{}', error: {:?}",
+                "Flash: Failed to open output file '{}', error: {:?}",
                 target_path.display(),
                 why
             );
@@ -437,28 +622,17 @@ fn flash_gzip_internal(target_path: &Path, image_path: &Path) -> FlashState {
     let mut buffer: [u8; DD_BLOCK_SIZE] = [0; DD_BLOCK_SIZE];
     loop {
         // fill buffer
-        let mut buff_fill: usize = 0;
-        loop {
-            let bytes_read = match decoder.read(&mut buffer[buff_fill..]) {
-                Ok(bytes_read) => bytes_read,
-                Err(why) => {
-                    error!(
-                        "Failed to read uncompressed data from '{}', error: {:?}",
-                        image_path.display(),
-                        why
-                    );
-                    return fail_res;
-                }
-            };
-
-            if bytes_read > 0 {
-                buff_fill += bytes_read;
-                if buff_fill < buffer.len() {
-                    continue;
-                }
+        let buff_fill = match fill_buffer(&mut buffer, &mut decoder) {
+            Ok(buff_fill) => buff_fill,
+            Err(why) => {
+                error!(
+                    "Failed to read compressed data from '{}', error: {}:?",
+                    image_path.display(),
+                    why
+                );
+                return fail_res;
             }
-            break;
-        }
+        };
 
         if buff_fill > 0 {
             fail_res = FlashState::FailNonRecoverable;
@@ -487,7 +661,7 @@ fn flash_gzip_internal(target_path: &Path, image_path: &Path) -> FlashState {
                 None => Duration::from_secs(0),
             };
 
-            if since_last.as_secs() >= 10 {
+            if (since_last.as_secs() >= 10) || buff_fill < buffer.len() {
                 last_elapsed = curr_elapsed;
                 let secs_elapsed = curr_elapsed.as_secs();
                 info!(
@@ -503,14 +677,110 @@ fn flash_gzip_internal(target_path: &Path, image_path: &Path) -> FlashState {
                 break;
             }
         } else {
+            let secs_elapsed = start_time.elapsed().as_secs();
+            info!(
+                "{} written @ {}/sec in {} seconds",
+                format_size_with_unit(write_count as u64),
+                format_size_with_unit(write_count as u64 / secs_elapsed),
+                secs_elapsed
+            );
+            Logger::flush();
             break;
         }
     }
     FlashState::Success
 }
 
-fn migrate_worker(_opts: Options, s2_config: &Stage2Config) {
+fn flash_external(target_path: &Path, image_path: &Path) -> FlashState {
+    let gzip_child = match Command::new(BUSYBOX_CMD)
+        .args(&[GZIP_CMD, "-d", "-c", &image_path.to_string_lossy()])
+        .stdout(Stdio::piped())
+        .spawn()
+    {
+        Ok(gzip_child) => gzip_child,
+        Err(why) => {
+            error!("Failed to create gzip process, error: {:?}", why);
+            return FlashState::FailRecoverable;
+        }
+    };
+
+    if let Some(stdout) = gzip_child.stdout {
+        debug!("invoking dd");
+        match Command::new(BUSYBOX_CMD)
+            .args(&[
+                DD_CMD,
+                &format!("of={}", &target_path.to_string_lossy()),
+                &format!("bs={}", DD_BLOCK_SIZE),
+            ])
+            .stdin(stdout)
+            .output()
+        {
+            Ok(dd_cmd_res) => {
+                if dd_cmd_res.status.success() {
+                    FlashState::Success
+                } else {
+                    error!(
+                        "dd terminated with exit code: {:?}",
+                        dd_cmd_res.status.code()
+                    );
+                    FlashState::FailNonRecoverable
+                }
+            }
+            Err(why) => {
+                error!("failed to execute command {}, error: {:?}", DD_CMD, why);
+                FlashState::FailRecoverable
+            }
+        }
+    } else {
+        error!("failed to retrieved gzip stdout)");
+        FlashState::FailRecoverable
+    }
+}
+
+pub fn stage2(_opts: Options) {
     info!("Stage 2 migrate_worker entered");
+
+    let s2_config = match read_stage2_config() {
+        Ok(s2_config) => s2_config,
+        Err(why) => {
+            error!("Failed to read stage2 configuration, error: {:?}", why);
+            reboot();
+            return;
+        }
+    };
+
+    info!("Stage 2 config was read successfully");
+
+    Logger::set_default_level(s2_config.get_log_level());
+    if let Some(_) = &s2_config.log_dev {
+        // Device should have been mounted by stage2-init
+        match dir_exists("/mnt/log/") {
+            Ok(exists) => {
+                if exists {
+                    Logger::set_log_file(
+                        &LogDestination::StreamStderr,
+                        PathBuf::from("/mnt/log/stage2.log").as_path(),
+                        false,
+                    )
+                    .unwrap_or_else(|why| {
+                        error!(
+                            "Failed to setup logging to /mnt/log/stage2.log, error: {:?}",
+                            why
+                        )
+                    });
+                    info!("Set logfile to /mnt/log/stage2.log");
+                }
+            }
+            Err(why) => {
+                warn!("Failed to check for log directory, error: {:?}", why);
+            }
+        }
+    }
+
+    info!("Stage 2 log level set to {:?}", s2_config.get_log_level());
+
+    Logger::flush();
+    sync();
 
     //match kill_procs1(&["takeover"], 15) {
     match kill_procs("TERM") {
@@ -526,7 +796,6 @@ fn migrate_worker(_opts: Options, s2_config: &Stage2Config) {
 
     sleep(Duration::from_secs(5));
 
-    // match kill_procs(&[], 9) {
     match kill_procs("KILL") {
         Ok(_) => (),
         Err(why) => {
@@ -538,9 +807,11 @@ fn migrate_worker(_opts: Options, s2_config: &Stage2Config) {
         }
     }
 
-    if let Ok(cmd_res) = call(BUSYBOX_CMD, &["ps", "-A"], true) {
-        if cmd_res.status.success() {
-            info!("ps: {}", cmd_res.stdout);
+    if let Level::Trace = s2_config.get_log_level() {
+        if let Ok(cmd_res) = call(BUSYBOX_CMD, &["ps", "-A"], true) {
+            if cmd_res.status.success() {
+                trace!("ps: {}", cmd_res.stdout);
+            }
         }
     }
 
@@ -558,17 +829,46 @@ fn migrate_worker(_opts: Options, s2_config: &Stage2Config) {
         return;
     }
 
-    match flash_gzip_internal(&s2_config.flash_dev, &PathBuf::from(BALENA_IMAGE_PATH)) {
-        FlashState::Success => (),
-        _ => {
-            sleep(Duration::from_secs(10));
-            reboot();
-            return;
+    sync();
+
+    let image_path = path_append(TRANSFER_DIR, BALENA_IMAGE_PATH);
+    if s2_config.is_flash_external() {
+        match flash_external(&s2_config.flash_dev, &image_path) {
+            FlashState::Success => (),
+            _ => {
+                sleep(Duration::from_secs(10));
+                reboot();
+                return;
+            }
+        }
+    } else {
+        match flash_internal(&s2_config.flash_dev, &image_path) {
+            FlashState::Success => (),
+            _ => {
+                sleep(Duration::from_secs(10));
+                reboot();
+                return;
+            }
         }
     }
 
     sync();
     sleep(Duration::from_secs(1));
+
+    if DO_VALIDATE {
+        match validate(&s2_config.flash_dev, &image_path) {
+            Ok(res) => {
+                if res {
+                    info!("Image validated successfully");
+                } else {
+                    error!("Image validation failed");
+                }
+            }
+            Err(why) => {
+                error!("Image validation returned error: {:?}", why);
+            }
+        }
+    }
 
     if let Err(_why) = mount_balena(&s2_config.flash_dev) {
         error!("Failed to mount balena drives");
@@ -595,12 +895,13 @@ fn migrate_worker(_opts: Options, s2_config: &Stage2Config) {
     reboot();
 }
 
-pub fn stage2(opts: Options) -> Result<(), MigError> {
+pub fn init() {
     info!("Stage 2 entered");
 
     if unsafe { getpid() } != 1 {
         error!("Process must be pid 1 to run stage2");
-        reboot()
+        reboot();
+        return;
     }
 
     info!("Stage 2 check pid success!");
@@ -631,35 +932,13 @@ pub fn stage2(opts: Options) -> Result<(), MigError> {
 
     info!("Stage 2 closed {} fd's", close_count);
 
-    let s2_cfg_path = PathBuf::from(&format!("/{}", STAGE2_CONFIG_NAME));
-    let s2_config = if file_exists(&s2_cfg_path) {
-        let s2_cfg_txt = match read_to_string(&s2_cfg_path) {
-            Ok(s2_config_txt) => s2_config_txt,
-            Err(why) => {
-                error!(
-                    "Failed to read stage 2 config from '{}', error: {}",
-                    s2_cfg_path.display(),
-                    why
-                );
-                reboot();
-                return Err(MigError::displayed());
-            }
-        };
-        match Stage2Config::deserialze(&s2_cfg_txt) {
-            Ok(s2_config) => s2_config,
-            Err(why) => {
-                error!("Failed to deserialize stage 2 config: error {}", why);
-                reboot();
-                return Err(MigError::displayed());
-            }
+    let s2_config = match read_stage2_config() {
+        Ok(s2_config) => s2_config,
+        Err(why) => {
+            error!("Failed to read stage2 configuration, error: {:?}", why);
+            reboot();
+            return;
         }
-    } else {
-        error!(
-            "Stage2 config file could not be found in '{}',",
-            s2_cfg_path.display()
-        );
-        reboot();
-        return Err(MigError::displayed());
     };
 
     info!("Stage 2 config was read successfully");
@@ -680,15 +959,19 @@ pub fn stage2(opts: Options) -> Result<(), MigError> {
         false
     };
 
-    info!("Stage 2 setup_log success!, ext_log = {}", ext_log);
+    info!("Stage 2 setup_log success!, ext_log: {}", ext_log);
 
     Logger::flush();
     sync();
 
-    let worker_opts = opts.clone();
-    thread::spawn(move || {
-        migrate_worker(worker_opts, &s2_config);
-    });
+    let _child_pid = match Command::new("./takeover").args(&["--stage2"]).spawn() {
+        Ok(cmd_res) => cmd_res.id(),
+        Err(why) => {
+            error!("Failed to spawn stage2 worker process, error: {:?}", why);
+            reboot();
+            return;
+        }
+    };
 
     info!("Stage 2 migrate worker spawned");
 

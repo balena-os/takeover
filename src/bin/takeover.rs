@@ -4,29 +4,33 @@ use std::process::exit;
 
 use mod_logger::{Level, LogDestination, Logger, NO_STREAM};
 
-use takeover::{stage1, stage2, MigErrorKind, Options};
+use takeover::{init, stage1, stage2, MigErrorKind, Options};
 
 #[paw::main]
 fn main(opts: Options) {
-    Logger::set_default_level(Level::Info);
     Logger::set_brief_info(true);
     Logger::set_color(true);
 
     if opts.is_stage2() {
+        Logger::set_default_level(Level::Debug);
         if let Err(why) = Logger::set_log_dest(&LogDestination::BufferStderr, NO_STREAM) {
             error!("Failed to initialize logging, error: {:?}", why);
             exit(1);
         }
 
-        if let Err(why) = stage2(opts) {
-            match why.kind() {
-                MigErrorKind::Displayed => (),
-                _ => error!("Migrate stage 2 returned error: {:?}", why),
-            };
-            Logger::flush();
+        stage2(opts);
+        exit(1);
+    } else if opts.is_init() {
+        Logger::set_default_level(Level::Debug);
+        if let Err(why) = Logger::set_log_dest(&LogDestination::BufferStderr, NO_STREAM) {
+            error!("Failed to initialize logging, error: {:?}", why);
             exit(1);
-        };
+        }
+
+        init();
+        exit(1);
     } else {
+        Logger::set_default_level(Level::Info);
         let log_file = PathBuf::from("./stage1.log");
         if let Err(why) = Logger::set_log_file(&LogDestination::StreamStderr, &log_file, true) {
             error!(

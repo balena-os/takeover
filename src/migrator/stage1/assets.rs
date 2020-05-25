@@ -28,7 +28,7 @@ echo "Pivoting root..."
 mount --make-rprivate /
 pivot_root . mnt/old_root
 echo "Chrooting and running init..."
-exec ./busybox chroot . /takeover --stage2
+exec ./busybox chroot . /takeover --init
 "###;
 
 #[derive(Debug)]

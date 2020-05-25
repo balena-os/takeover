@@ -47,6 +47,8 @@ pub struct Options {
     trace: bool,
     #[structopt(long, help = "Internal - stage2 invocation")]
     stage2: bool,
+    #[structopt(long, help = "Internal - init process invocation")]
+    init: bool,
     #[structopt(long, help = "Do not check if OS is supported")]
     no_os_check: bool,
     #[structopt(long, help = "Do not check if balena API is available")]
@@ -55,6 +57,8 @@ pub struct Options {
     no_vpn_check: bool,
     #[structopt(long, help = "Do not check network manager files exist")]
     no_nwmgr_check: bool,
+    #[structopt(long, help = "Use gzip & dd instead of internal implementation")]
+    flash_external: bool,
     #[structopt(
         long,
         value_name = "TIMEOUT",
@@ -104,6 +108,10 @@ impl Options {
         self.stage2
     }
 
+    pub fn is_init(&self) -> bool {
+        self.init
+    }
+
     pub fn get_work_dir(&self) -> PathBuf {
         if let Some(work_dir) = &self.work_dir {
             work_dir.clone()
@@ -138,6 +146,10 @@ impl Options {
 
     pub fn is_trace(&self) -> bool {
         self.trace
+    }
+
+    pub fn is_flash_external(&self) -> bool {
+        self.flash_external
     }
 
     pub fn is_os_check(&self) -> bool {
