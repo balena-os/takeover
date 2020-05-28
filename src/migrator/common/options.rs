@@ -57,8 +57,6 @@ pub struct Options {
     no_vpn_check: bool,
     #[structopt(long, help = "Do not check network manager files exist")]
     no_nwmgr_check: bool,
-    #[structopt(long, help = "Use gzip & dd instead of internal implementation")]
-    flash_external: bool,
     #[structopt(
         long,
         value_name = "TIMEOUT",
@@ -146,10 +144,6 @@ impl Options {
 
     pub fn is_trace(&self) -> bool {
         self.trace
-    }
-
-    pub fn is_flash_external(&self) -> bool {
-        self.flash_external
     }
 
     pub fn is_os_check(&self) -> bool {

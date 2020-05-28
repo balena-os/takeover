@@ -34,7 +34,8 @@ use crate::common::{
     stage2_config::Stage2Config,
 };
 
-use crate::common::defs::{DD_CMD, GZIP_CMD, SYSTEM_CONNECTIONS_DIR, TRANSFER_DIR};
+use crate::common::defs::{DD_CMD, SYSTEM_CONNECTIONS_DIR, TRANSFER_DIR};
+use crate::common::disk_util::PartInfo;
 use crate::common::stage2_config::UmountPart;
 use crate::common::{
     defs::{
@@ -276,6 +277,145 @@ fn part_reread(device: &Path) -> Result<i32, MigError> {
     }
 }
 
+fn transfer_boot_files<P: AsRef<Path>>(dev_root: P) -> Result<(), MigError> {
+    let src_path = path_append(TRANSFER_DIR, BALENA_CONFIG_PATH);
+    let target_path = path_append(dev_root.as_ref(), BALENA_CONFIG_PATH);
+    copy(&src_path, &target_path).context(upstream_context!(&format!(
+        "Failed to copy {} to {}",
+        src_path.display(),
+        target_path.display()
+    )))?;
+
+    info!("Successfully copied config.json to boot partition",);
+
+    let src_path = path_append(TRANSFER_DIR, SYSTEM_CONNECTIONS_DIR);
+    let dir_list = read_dir(&src_path).context(upstream_context!(&format!(
+        "Failed to read directory '{}'",
+        src_path.display()
+    )))?;
+
+    let target_dir = path_append(dev_root.as_ref(), SYSTEM_CONNECTIONS_DIR);
+    debug!(
+        "Transfering files from '{}' to '{}'",
+        src_path.display(),
+        target_dir.display()
+    );
+    for entry in dir_list {
+        match entry {
+            Ok(entry) => {
+                let curr_file = entry.path();
+                debug!("Found source file '{}'", curr_file.display());
+                if entry
+                    .metadata()
+                    .context(upstream_context!(&format!(
+                        "Failed to read metadata from file '{}'",
+                        curr_file.display()
+                    )))?
+                    .is_file()
+                {
+                    if let Some(filename) = curr_file.file_name() {
+                        let target_path = path_append(&target_dir, filename);
+                        copy(&curr_file, &target_path).context(upstream_context!(&format!(
+                            "Failed to copy '{}' to '{}'",
+                            curr_file.display(),
+                            target_path.display()
+                        )))?;
+                        info!(
+                            "Successfully copied '{}' to boot partition as '{}",
+                            curr_file.display(),
+                            target_path.display()
+                        );
+                    } else {
+                        warn!(
+                            "Failed to extract filename from path '{}'",
+                            curr_file.display()
+                        );
+                    }
+                }
+            }
+            Err(why) => {
+                error!("Failed to read directory entry, error: {:?}", why);
+                return Err(MigError::displayed());
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn raw_mount_partition<P1: AsRef<Path>, P2: AsRef<Path>>(
+    partition: &PartInfo,
+    device: P2,
+    mountpoint: P1,
+    fs_type: &str,
+) -> Result<String, MigError> {
+    let cmd_res = call(BUSYBOX_CMD, &["losetup", "-f"], true)?;
+    let loop_dev = if cmd_res.status.success() {
+        cmd_res.stdout
+    } else {
+        error!(
+            "Failed determine next free loop device, stderr: {}",
+            cmd_res.stderr
+        );
+        return Err(MigError::displayed());
+    };
+
+    let byte_offset = partition.start_lba * DEF_BLOCK_SIZE as u64;
+    let args = &[
+        "losetup",
+        "-o",
+        &byte_offset.to_string(),
+        "-f",
+        &*device.as_ref().to_string_lossy(),
+    ];
+
+    let cmd_res = call(BUSYBOX_CMD, args, true)?;
+    if cmd_res.status.success() {
+        info!(
+            "Loop-mounted {} on '{}'",
+            loop_dev,
+            mountpoint.as_ref().display()
+        );
+        mount(
+            Some(loop_dev.as_str()),
+            mountpoint.as_ref(),
+            Some(fs_type.as_bytes()),
+            MsFlags::empty(),
+            NIX_NONE,
+        )
+        .context(upstream_context!(&format!(
+            "Failed to mount {} on {}",
+            loop_dev,
+            mountpoint.as_ref().display()
+        )))?;
+        Ok(loop_dev)
+    } else {
+        error!(
+            "Failed to loop-mount partition, error: '{}'",
+            cmd_res.stderr
+        );
+        Err(MigError::displayed())
+    }
+}
+
+fn raw_umount_partition<P: AsRef<Path>>(device: &str, mountpoint: P) -> Result<(), MigError> {
+    umount(mountpoint.as_ref()).context(upstream_context!(&format!(
+        "Failed to unmount {}",
+        mountpoint.as_ref().display()
+    )))?;
+
+    let cmd_res = call(BUSYBOX_CMD, &["losetup", "-d", device], true)?;
+    if !cmd_res.status.success() {
+        error!(
+            "Failed to remove loop device {}, stderr: {}",
+            device, cmd_res.stderr
+        );
+        return Err(MigError::displayed());
+    }
+
+    Ok(())
+}
+
 fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
     debug!("raw_mount_balena called");
     let mut disk = Disk::from_drive_file(device, None)?;
@@ -298,121 +438,22 @@ fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
             1 => {
                 // boot partition
                 // losetup -o offset --sizelimit size --show -f log.img
+                let loop_dev = raw_mount_partition(&partition, device, BALENA_PART_MP, "vfat")?;
 
-                let cmd_res = call(BUSYBOX_CMD, &["losetup", "-f"], true)?;
-                let loop_dev = if cmd_res.status.success() {
-                    cmd_res.stdout
-                } else {
-                    error!(
-                        "Failed determine next free loop device, stderr: {}",
-                        cmd_res.stderr
-                    );
-                    return Err(MigError::displayed());
-                };
+                info!(
+                    "Mounted boot partition as {} on {}",
+                    loop_dev, BALENA_PART_MP
+                );
+                // TODO: copy files
 
-                let byte_offset = (partition.start_lba * DEF_BLOCK_SIZE as u64).to_string();
-                let args = &[
-                    "losetup",
-                    "-o",
-                    byte_offset.as_str(),
-                    "-f",
-                    &*device.to_string_lossy(),
-                ];
+                transfer_boot_files(BALENA_PART_MP)?;
 
-                let cmd_res = call(BUSYBOX_CMD, args, true)?;
-                if cmd_res.status.success() {
-                    info!("Loop-mounted boot partition on '{}'", loop_dev);
-                    mount(
-                        Some(loop_dev.as_str()),
-                        BALENA_PART_MP,
-                        Some(BALENA_BOOT_FSTYPE.as_bytes()),
-                        MsFlags::empty(),
-                        NIX_NONE,
-                    )
-                    .context(upstream_context!(&format!(
-                        "Failed to mount {} on {}",
-                        loop_dev, BALENA_PART_MP
-                    )))?;
+                sync();
 
-                    info!(
-                        "Mounted boot partition as {} on {}",
-                        loop_dev, BALENA_PART_MP
-                    );
-                    // TODO: copy files
+                raw_umount_partition(&loop_dev, BALENA_PART_MP)?;
 
-                    let src_path = path_append(TRANSFER_DIR, BALENA_CONFIG_PATH);
-                    let target_path = path_append(BALENA_PART_MP, BALENA_CONFIG_PATH);
-                    copy(&src_path, &target_path).context(upstream_context!(&format!(
-                        "Failed to copy {} to {}",
-                        src_path.display(),
-                        target_path.display()
-                    )))?;
-
-                    info!("Successfully copied config.json to boot partition",);
-
-                    let src_path = path_append(TRANSFER_DIR, SYSTEM_CONNECTIONS_DIR);
-                    let dir_list = read_dir(&src_path).context(upstream_context!(&format!(
-                        "Failed to read directory '{}'",
-                        src_path.display()
-                    )))?;
-
-                    let target_dir = path_append(BALENA_BOOT_MP, SYSTEM_CONNECTIONS_DIR);
-                    for entry in dir_list {
-                        match entry {
-                            Ok(entry) => {
-                                let curr_file = entry.path();
-                                if entry
-                                    .metadata()
-                                    .context(upstream_context!(&format!(
-                                        "Failed to read metadata from file '{}'",
-                                        curr_file.display()
-                                    )))?
-                                    .is_file()
-                                {
-                                    if let Some(filename) = curr_file.file_name() {
-                                        let target_path = path_append(&target_dir, filename);
-                                        copy(&curr_file, &target_path).context(
-                                            upstream_context!(&format!(
-                                                "Failed to copy '{}' to '{}'",
-                                                curr_file.display(),
-                                                target_path.display()
-                                            )),
-                                        )?;
-                                        info!(
-                                            "Successfully copied '{}' to boot partition",
-                                            curr_file.display()
-                                        );
-                                    } else {
-                                        warn!(
-                                            "Failed to extract filename from path '{}'",
-                                            curr_file.display()
-                                        );
-                                    }
-                                }
-                            }
-                            Err(why) => {
-                                error!("Failed to read directory entry, error: {:?}", why);
-                                return Err(MigError::displayed());
-                            }
-                        }
-                    }
-                    umount(BALENA_PART_MP).context(upstream_context!(&format!(
-                        "Failed to unmount {}",
-                        BALENA_PART_MP
-                    )))?;
-
-                    let cmd_res = call(BUSYBOX_CMD, &["losetup", "-d", loop_dev.as_str()], true)?;
-                    if !cmd_res.status.success() {
-                        error!(
-                            "Failed to remove loop device {}, stderr: {}",
-                            loop_dev, cmd_res.stderr
-                        );
-                        return Err(MigError::displayed());
-                    }
-                } else {
-                    error!("Failed to mount boot partition, stderr: {}", cmd_res.stderr);
-                    return Err(MigError::displayed());
-                }
+                // TODO: check if backup.tgz is available - mount stick around if yes
+                return Ok(());
             }
             _ => {
                 error!("Invalid partition index encountered: {}", partition.index);
@@ -459,7 +500,7 @@ fn sys_mount_balena() -> Result<(), MigError> {
     Ok(())
 }
 
-fn mount_balena(device: &Path) -> Result<(), MigError> {
+fn transfer_files(device: &Path) -> Result<(), MigError> {
     match part_reread(device) {
         Ok(_) => {
             if file_exists(path_append(DISK_BY_LABEL_PATH, BALENA_BOOT_PART)) {
@@ -580,6 +621,7 @@ fn validate(target_path: &Path, image_path: &Path) -> Result<bool, MigError> {
     Ok(err_count == 0)
 }
 
+/*
 fn flash_internal(target_path: &Path, image_path: &Path) -> FlashState {
     debug!("Flash: opening: '{}'", image_path.display());
 
@@ -690,50 +732,113 @@ fn flash_internal(target_path: &Path, image_path: &Path) -> FlashState {
     }
     FlashState::Success
 }
+*/
 
 fn flash_external(target_path: &Path, image_path: &Path) -> FlashState {
-    let gzip_child = match Command::new(BUSYBOX_CMD)
-        .args(&[GZIP_CMD, "-d", "-c", &image_path.to_string_lossy()])
-        .stdout(Stdio::piped())
+    let mut fail_res = FlashState::FailRecoverable;
+
+    let mut decoder = GzDecoder::new(match File::open(&image_path) {
+        Ok(file) => file,
+        Err(why) => {
+            error!(
+                "Flash: Failed to open image file '{}', error: {:?}",
+                image_path.display(),
+                why
+            );
+            return fail_res;
+        }
+    });
+
+    debug!("invoking dd");
+    match Command::new(BUSYBOX_CMD)
+        .args(&[
+            DD_CMD,
+            &format!("of={}", &target_path.to_string_lossy()),
+            &format!("bs={}", DD_BLOCK_SIZE),
+        ])
+        .stdin(Stdio::piped())
         .spawn()
     {
-        Ok(gzip_child) => gzip_child,
-        Err(why) => {
-            error!("Failed to create gzip process, error: {:?}", why);
-            return FlashState::FailRecoverable;
-        }
-    };
+        Ok(mut dd_cmd) => {
+            if let Some(stdin) = dd_cmd.stdin.as_mut() {
+                let mut buffer: [u8; DD_BLOCK_SIZE] = [0; DD_BLOCK_SIZE];
+                let mut tot_bytes: u64 = 0;
+                let start_time = Instant::now();
+                fail_res = FlashState::FailNonRecoverable;
 
-    if let Some(stdout) = gzip_child.stdout {
-        debug!("invoking dd");
-        match Command::new(BUSYBOX_CMD)
-            .args(&[
-                DD_CMD,
-                &format!("of={}", &target_path.to_string_lossy()),
-                &format!("bs={}", DD_BLOCK_SIZE),
-            ])
-            .stdin(stdout)
-            .output()
-        {
-            Ok(dd_cmd_res) => {
-                if dd_cmd_res.status.success() {
-                    FlashState::Success
-                } else {
+                loop {
+                    // fill buffer
+                    match fill_buffer(&mut buffer, &mut decoder) {
+                        Ok(buff_fill) => {
+                            if buff_fill > 0 {
+                                match stdin.write_all(&buffer) {
+                                    Ok(_) => {
+                                        tot_bytes += buff_fill as u64;
+                                        if buff_fill < DD_BLOCK_SIZE {
+                                            break;
+                                        }
+                                    }
+                                    Err(why) => {
+                                        error!("Failed to write to dd stdin at offset 0x{:x}:{} error {:?}",
+                                               tot_bytes,
+                                               format_size_with_unit(tot_bytes),
+                                               why);
+                                        return fail_res;
+                                    }
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                        Err(why) => {
+                            error!(
+                                "Failed to read compressed data from '{}' at offset 0x{:x}:{}, error: {}:?",
+                                image_path.display(),
+                                tot_bytes,
+                                format_size_with_unit(tot_bytes),
+                                why
+                            );
+                            return fail_res;
+                        }
+                    };
+                }
+
+                let elapsed = Instant::now().duration_since(start_time).as_secs();
+                info!(
+                    "Wrote {} bytes, {} to dd in {} seconds @ {}/sec",
+                    tot_bytes,
+                    format_size_with_unit(tot_bytes),
+                    elapsed,
+                    format_size_with_unit(tot_bytes / elapsed),
+                );
+            } else {
+                error!("Failed to retrieve dd stdin");
+                return FlashState::FailRecoverable;
+            }
+
+            match dd_cmd.wait() {
+                Ok(status) => {
+                    if status.success() {
+                        info!("dd terminated successfully");
+                        FlashState::Success
+                    } else {
+                        error!("dd terminated with exit code: {:?}", status.code());
+                        FlashState::FailNonRecoverable
+                    }
+                }
+                Err(why) => {
                     error!(
-                        "dd terminated with exit code: {:?}",
-                        dd_cmd_res.status.code()
+                        "Failure waiting for dd command termination, error: {:?}",
+                        why
                     );
-                    FlashState::FailNonRecoverable
+                    fail_res
                 }
             }
-            Err(why) => {
-                error!("failed to execute command {}, error: {:?}", DD_CMD, why);
-                FlashState::FailRecoverable
-            }
         }
-    } else {
-        error!("failed to retrieved gzip stdout)");
-        FlashState::FailRecoverable
+        Err(why) => {
+            error!("Failed to execute '{}', error: {:?}", DD_CMD, why);
+            fail_res
+        }
     }
 }
 
@@ -832,23 +937,12 @@ pub fn stage2(_opts: Options) {
     sync();
 
     let image_path = path_append(TRANSFER_DIR, BALENA_IMAGE_PATH);
-    if s2_config.is_flash_external() {
-        match flash_external(&s2_config.flash_dev, &image_path) {
-            FlashState::Success => (),
-            _ => {
-                sleep(Duration::from_secs(10));
-                reboot();
-                return;
-            }
-        }
-    } else {
-        match flash_internal(&s2_config.flash_dev, &image_path) {
-            FlashState::Success => (),
-            _ => {
-                sleep(Duration::from_secs(10));
-                reboot();
-                return;
-            }
+    match flash_external(&s2_config.flash_dev, &image_path) {
+        FlashState::Success => (),
+        _ => {
+            sleep(Duration::from_secs(10));
+            reboot();
+            return;
         }
     }
 
@@ -870,24 +964,8 @@ pub fn stage2(_opts: Options) {
         }
     }
 
-    if let Err(_why) = mount_balena(&s2_config.flash_dev) {
-        error!("Failed to mount balena drives");
-        sleep(Duration::from_secs(10));
-        reboot();
-        return;
-    }
-
-    let target_path = path_append(BALENA_BOOT_MP, BALENA_CONFIG_PATH);
-    if let Err(why) = copy(BALENA_CONFIG_PATH, &target_path) {
-        error!(
-            "Failed to copy '{}' to '{}, error: {:?}",
-            BALENA_CONFIG_PATH,
-            target_path.display(),
-            why
-        );
-        sleep(Duration::from_secs(10));
-        reboot();
-        return;
+    if let Err(why) = transfer_files(&s2_config.flash_dev) {
+        error!("Failed to transfer files to balena OS, error: {:?}", why);
     }
 
     sync();

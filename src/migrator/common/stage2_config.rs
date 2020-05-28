@@ -23,7 +23,6 @@ pub(crate) struct Stage2Config {
     pub flash_dev: PathBuf,
     pub pretend: bool,
     pub umount_parts: Vec<UmountPart>,
-    pub flash_external: bool,
 }
 
 #[allow(dead_code)]
@@ -57,9 +56,5 @@ impl Stage2Config {
 
     pub fn get_flash_dev(&self) -> &PathBuf {
         &self.flash_dev
-    }
-
-    pub fn is_flash_external(&self) -> bool {
-        self.flash_external
     }
 }

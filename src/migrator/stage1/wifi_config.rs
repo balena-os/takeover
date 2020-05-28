@@ -526,6 +526,7 @@ impl<'a> WifiConfig {
             }
         }
 
+        info!("Creating NetworkManager file in '{}'", path.display());
         let mut nwmgr_file = File::create(&path).context(MigErrCtx::from_remark(
             MigErrorKind::Upstream,
             &format!("Failed to create file in '{}'", path.display()),
@@ -595,6 +596,8 @@ impl<'a> WifiConfig {
                 content
             }
         };
+
+        trace!("writing nwmgr file as: \n{}", content);
 
         nwmgr_file
             .write_all(content.as_bytes())

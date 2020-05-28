@@ -30,7 +30,14 @@ fn main(opts: Options) {
         init();
         exit(1);
     } else {
-        Logger::set_default_level(Level::Info);
+        if opts.is_trace() {
+            Logger::set_default_level(Level::Trace);
+        } else if opts.is_debug() {
+            Logger::set_default_level(Level::Debug);
+        } else {
+            Logger::set_default_level(Level::Info);
+        }
+
         let log_file = PathBuf::from("./stage1.log");
         if let Err(why) = Logger::set_log_file(&LogDestination::StreamStderr, &log_file, true) {
             error!(

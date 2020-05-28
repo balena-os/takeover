@@ -5,9 +5,13 @@ use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::Duration;
 
-use nix::unistd::sync;
+use nix::{
+    mount::{mount, MsFlags},
+    unistd::sync,
+};
 
 use failure::ResultExt;
+use libc::MS_BIND;
 use log::{debug, error, info};
 
 pub(crate) mod migrate_info;
@@ -28,7 +32,7 @@ mod wifi_config;
 use crate::common::{
     call,
     defs::{
-        BALENA_CONFIG_PATH, BALENA_IMAGE_NAME, CP_CMD, MOUNT_CMD, OLD_ROOT_MP, STAGE2_CONFIG_NAME,
+        BALENA_CONFIG_PATH, BALENA_IMAGE_NAME, CP_CMD, OLD_ROOT_MP, STAGE2_CONFIG_NAME,
         SWAPOFF_CMD, SYSTEM_CONNECTIONS_DIR, TELINIT_CMD, TRANSFER_DIR,
     },
     dir_exists, file_exists, format_size_with_unit, get_mem_info, is_admin,
@@ -42,6 +46,7 @@ use block_device_info::BlockDeviceInfo;
 use mod_logger::Logger;
 use utils::{mktemp, mount_fs};
 
+use crate::common::defs::NIX_NONE;
 use crate::common::stage2_config::UmountPart;
 use std::io::Write;
 
@@ -172,6 +177,11 @@ fn copy_files<P: AsRef<Path>>(mig_info: &MigrateInfo, takeover_dir: P) -> Result
             source_file.display(),
             target_file.display()
         )))?;
+        info!(
+            "Copied '{}' to '{}'",
+            source_file.display(),
+            target_file.display()
+        );
     }
 
     for wifi_config in mig_info.get_wifis() {
@@ -397,7 +407,6 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
         flash_dev: flash_dev.get_dev_path().to_path_buf(),
         pretend: opts.is_pretend(),
         umount_parts,
-        flash_external: opts.is_flash_external(),
     };
 
     let s2_cfg_path = takeover_dir.join(STAGE2_CONFIG_NAME);
@@ -427,22 +436,18 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
         takeover_dir.display()
     )))?;
 
-    let cmd_res = call(
-        MOUNT_CMD,
-        &[
-            "--bind",
-            &*new_init_path.to_string_lossy(),
-            &*old_init_path.to_string_lossy(),
-        ],
-        true,
-    )?;
-    if !cmd_res.status.success() {
-        error!(
-            "Failed to bindmount new init over old init, stder: '{}'",
-            cmd_res.stderr
-        );
-        return Err(MigError::displayed());
-    }
+    mount(
+        Some(&new_init_path),
+        &old_init_path,
+        NIX_NONE,
+        MsFlags::from_bits(MS_BIND).unwrap(),
+        NIX_NONE,
+    )
+    .context(upstream_context!(&format!(
+        "Failed to bind-mount '{}' to '{}'",
+        new_init_path.display(),
+        old_init_path.display()
+    )))?;
 
     info!("Bind-mounted new init as '{}'", new_init_path.display());
 
