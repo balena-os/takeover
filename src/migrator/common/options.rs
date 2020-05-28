@@ -49,6 +49,8 @@ pub struct Options {
     stage2: bool,
     #[structopt(long, help = "Internal - init process invocation")]
     init: bool,
+    #[structopt(long, help = "Internal - do not cleanup after stage1 failure")]
+    no_cleanup: bool,
     #[structopt(long, help = "Do not check if OS is supported")]
     no_os_check: bool,
     #[structopt(long, help = "Do not check if balena API is available")]
@@ -204,5 +206,9 @@ impl Options {
 
     pub fn is_migrate_name(&self) -> bool {
         !self.no_keep_name
+    }
+
+    pub fn is_cleanup(&self) -> bool {
+        !self.no_cleanup
     }
 }

@@ -27,23 +27,19 @@ use mod_logger::{LogDestination, Logger};
 
 use crate::common::{
     call,
-    defs::{BALENA_IMAGE_PATH, OLD_ROOT_MP, REBOOT_CMD, STAGE2_CONFIG_NAME},
-    dir_exists, file_exists, format_size_with_unit,
+    defs::{
+        BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART, BALENA_CONFIG_PATH,
+        BALENA_IMAGE_PATH, BALENA_PART_MP, DD_CMD, DISK_BY_LABEL_PATH, FUSER_CMD, LOSETUP_CMD,
+        NIX_NONE, OLD_ROOT_MP, PS_CMD, REBOOT_CMD, STAGE2_CONFIG_NAME, SYSTEM_CONNECTIONS_DIR,
+        TRANSFER_DIR,
+    },
+    dir_exists,
+    disk_util::{Disk, PartInfo, PartitionIterator, DEF_BLOCK_SIZE},
+    file_exists, format_size_with_unit, get_mountpoint,
     mig_error::{MigErrCtx, MigError, MigErrorKind},
     options::Options,
-    stage2_config::Stage2Config,
-};
-
-use crate::common::defs::{DD_CMD, SYSTEM_CONNECTIONS_DIR, TRANSFER_DIR};
-use crate::common::disk_util::PartInfo;
-use crate::common::stage2_config::UmountPart;
-use crate::common::{
-    defs::{
-        BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART, BALENA_CONFIG_PATH, BALENA_PART_MP,
-        DISK_BY_LABEL_PATH, NIX_NONE,
-    },
-    disk_util::{Disk, PartitionIterator, DEF_BLOCK_SIZE},
-    get_mountpoint, path_append,
+    path_append,
+    stage2_config::{Stage2Config, UmountPart},
 };
 
 const DD_BLOCK_SIZE: usize = 128 * 1024; // 4_194_304;
@@ -169,7 +165,7 @@ fn kill_procs(signal: &str) -> Result<(), MigError> {
 
     let cmd_res = call(
         BUSYBOX_CMD,
-        &["fuser", "-k", &format!("-{}", signal), "-m", OLD_ROOT_MP],
+        &[FUSER_CMD, "-k", &format!("-{}", signal), "-m", OLD_ROOT_MP],
         true,
     )?;
 
@@ -182,7 +178,7 @@ fn kill_procs(signal: &str) -> Result<(), MigError> {
     Ok(())
 }
 
-fn unmount_partitions(mountpoints: &Vec<UmountPart>) -> Result<(), MigError> {
+fn unmount_partitions(mountpoints: &[UmountPart]) -> Result<(), MigError> {
     for mpoint in mountpoints {
         let mountpoint = path_append(OLD_ROOT_MP, &mpoint.mountpoint);
 
@@ -349,7 +345,7 @@ fn raw_mount_partition<P1: AsRef<Path>, P2: AsRef<Path>>(
     mountpoint: P1,
     fs_type: &str,
 ) -> Result<String, MigError> {
-    let cmd_res = call(BUSYBOX_CMD, &["losetup", "-f"], true)?;
+    let cmd_res = call(BUSYBOX_CMD, &[LOSETUP_CMD, "-f"], true)?;
     let loop_dev = if cmd_res.status.success() {
         cmd_res.stdout
     } else {
@@ -362,7 +358,7 @@ fn raw_mount_partition<P1: AsRef<Path>, P2: AsRef<Path>>(
 
     let byte_offset = partition.start_lba * DEF_BLOCK_SIZE as u64;
     let args = &[
-        "losetup",
+        LOSETUP_CMD,
         "-o",
         &byte_offset.to_string(),
         "-f",
@@ -404,7 +400,7 @@ fn raw_umount_partition<P: AsRef<Path>>(device: &str, mountpoint: P) -> Result<(
         mountpoint.as_ref().display()
     )))?;
 
-    let cmd_res = call(BUSYBOX_CMD, &["losetup", "-d", device], true)?;
+    let cmd_res = call(BUSYBOX_CMD, &[LOSETUP_CMD, "-d", device], true)?;
     if !cmd_res.status.success() {
         error!(
             "Failed to remove loop device {}, stderr: {}",
@@ -857,7 +853,7 @@ pub fn stage2(_opts: Options) {
     info!("Stage 2 config was read successfully");
 
     Logger::set_default_level(s2_config.get_log_level());
-    if let Some(_) = &s2_config.log_dev {
+    if s2_config.log_dev.is_some() {
         // Device should have been mounted by stage2-init
         match dir_exists("/mnt/log/") {
             Ok(exists) => {
@@ -913,7 +909,7 @@ pub fn stage2(_opts: Options) {
     }
 
     if let Level::Trace = s2_config.get_log_level() {
-        if let Ok(cmd_res) = call(BUSYBOX_CMD, &["ps", "-A"], true) {
+        if let Ok(cmd_res) = call(BUSYBOX_CMD, &[PS_CMD, "-A"], true) {
             if cmd_res.status.success() {
                 trace!("ps: {}", cmd_res.stdout);
             }

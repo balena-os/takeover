@@ -51,46 +51,27 @@ use crate::common::stage2_config::UmountPart;
 use std::io::Write;
 
 const XTRA_FS_SIZE: u64 = 10 * 1024 * 1024; // const XTRA_MEM_FREE: u64 = 10 * 1024 * 1024; // 10 MB
-const DO_CLEANUP: bool = false;
 
 fn get_required_space(opts: &Options, mig_info: &MigrateInfo) -> Result<u64, MigError> {
     let mut req_size: u64 = mig_info.get_assets().busybox_size() as u64 + XTRA_FS_SIZE;
 
-    req_size += if let Some(image_path) = opts.get_image() {
-        if image_path.exists() {
-            image_path
-                .metadata()
-                .context(upstream_context!(&format!(
-                    "Failed to retrieve imagesize for '{}'",
-                    image_path.display()
-                )))?
-                .len() as u64
-        } else {
-            error!("Image could not be found: '{}'", image_path.display());
-            return Err(MigError::displayed());
-        }
-    } else {
-        error!("Required parameter image is missing.");
-        return Err(MigError::displayed());
-    };
+    req_size += mig_info
+        .get_image_path()
+        .metadata()
+        .context(upstream_context!(&format!(
+            "Failed to retrieve imagesize for '{}'",
+            mig_info.get_image_path().display()
+        )))?
+        .len() as u64;
 
-    req_size += if let Some(config_path) = opts.get_config().clone() {
-        if file_exists(&config_path) {
-            config_path
-                .metadata()
-                .context(upstream_context!(&format!(
-                    "Failed to retrieve file size for '{}'",
-                    config_path.display()
-                )))?
-                .len() as u64
-        } else {
-            error!("Config could not be found: '{}'", config_path.display());
-            return Err(MigError::displayed());
-        }
-    } else {
-        error!("The required parameter --config/-c was not provided");
-        return Err(MigError::displayed());
-    };
+    let cfg_path = mig_info.get_balena_cfg().get_path();
+    req_size += cfg_path
+        .metadata()
+        .context(upstream_context!(&format!(
+            "Failed to retrieve file size for '{}'",
+            cfg_path.display()
+        )))?
+        .len() as u64;
 
     for nwmgr_cfg in opts.get_nwmgr_cfg() {
         req_size += nwmgr_cfg
@@ -474,7 +455,7 @@ pub fn stage1(opts: Options) -> Result<(), MigError> {
             Ok(())
         }
         Err(why) => {
-            if DO_CLEANUP {
+            if opts.is_cleanup() {
                 mig_info.umount_all();
             }
             return Err(why);

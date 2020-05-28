@@ -12,6 +12,8 @@ pub(crate) const MOKUTIL_CMD: &str = "mokutil";
 pub(crate) const WHEREIS_CMD: &str = "whereis";
 // pub(crate) const GZIP_CMD: &str = "gzip";
 pub(crate) const DD_CMD: &str = "dd";
+pub(crate) const FUSER_CMD: &str = "fuser";
+pub(crate) const PS_CMD: &str = "ps";
 
 pub(crate) const STAGE2_CONFIG_NAME: &str = "stage2-config.yml";
 

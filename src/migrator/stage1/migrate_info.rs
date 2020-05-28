@@ -1,22 +1,20 @@
 use std::fs::{copy, read_to_string, remove_dir_all};
 use std::path::{Path, PathBuf};
 
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use mod_logger::Level;
 use nix::mount::umount;
 
 use failure::ResultExt;
 
-use crate::common::defs::BALENA_CONFIG_PATH;
-use crate::common::path_append;
-use crate::stage1::wifi_config::WifiConfig;
 use crate::{
     common::{
-        file_exists, get_os_name, mig_error::MigError, options::Options, MigErrCtx, MigErrorKind,
+        defs::BALENA_CONFIG_PATH, file_exists, get_os_name, mig_error::MigError, options::Options,
+        path_append, MigErrCtx, MigErrorKind,
     },
     stage1::{
         assets::Assets, device::Device, device_impl::get_device, image_retrieval::download_image,
-        migrate_info::balena_cfg_json::BalenaCfgJson,
+        migrate_info::balena_cfg_json::BalenaCfgJson, wifi_config::WifiConfig,
     },
 };
 
@@ -60,7 +58,12 @@ impl MigrateInfo {
 
         let image_path = if let Some(image_path) = opts.get_image() {
             if file_exists(&image_path) {
-                image_path.clone()
+                image_path
+                    .canonicalize()
+                    .context(upstream_context!(&format!(
+                        "Failed to canonicalize path '{}'",
+                        image_path.display()
+                    )))?
             } else {
                 error!(
                     "The balena-os image configured as '{}' could not be found",
@@ -69,13 +72,21 @@ impl MigrateInfo {
                 return Err(MigError::displayed());
             }
         } else {
-            download_image(
+            let image_path = download_image(
                 &config,
                 &work_dir,
                 config.get_device_type()?.as_str(),
                 opts.get_version(),
-            )?
+            )?;
+            image_path
+                .canonicalize()
+                .context(upstream_context!(&format!(
+                    "Failed to canonicalize path '{}'",
+                    image_path.display()
+                )))?
         };
+
+        debug!("image path: '{}'", image_path.display());
 
         let wifi_ssids = opts.get_wifis().clone();
 
