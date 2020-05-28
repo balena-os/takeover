@@ -1,13 +1,19 @@
-use std::fs::remove_dir_all;
+use std::fs::{copy, read_to_string, remove_dir_all};
 use std::path::{Path, PathBuf};
 
 use log::{error, info, warn};
 use mod_logger::Level;
 use nix::mount::umount;
 
+use failure::ResultExt;
+
+use crate::common::defs::BALENA_CONFIG_PATH;
+use crate::common::path_append;
 use crate::stage1::wifi_config::WifiConfig;
 use crate::{
-    common::{file_exists, get_os_name, mig_error::MigError, options::Options},
+    common::{
+        file_exists, get_os_name, mig_error::MigError, options::Options, MigErrCtx, MigErrorKind,
+    },
     stage1::{
         assets::Assets, device::Device, device_impl::get_device, image_retrieval::download_image,
         migrate_info::balena_cfg_json::BalenaCfgJson,
@@ -37,7 +43,7 @@ impl MigrateInfo {
         let device = get_device(opts)?;
         info!("Detected device type: {}", device.get_device_type());
 
-        let config = if let Some(balena_cfg) = opts.get_config() {
+        let mut config = if let Some(balena_cfg) = opts.get_config() {
             BalenaCfgJson::new(balena_cfg)?
         } else {
             error!("The required parameter --config/-c was not provided");
@@ -96,6 +102,18 @@ impl MigrateInfo {
             }
         }
 
+        if opts.is_migrate_name() {
+            let hostname = read_to_string("/proc/sys/kernel/hostname")
+                .context(upstream_context!(
+                    "Failed to read file '/proc/sys/kernel/hostname'"
+                ))?
+                .trim()
+                .to_string();
+
+            info!("Writing hostname to config.json: '{}'", hostname);
+            config.set_host_name(&hostname);
+        }
+
         Ok(MigrateInfo {
             assets: Assets::new(),
             os_name: get_os_name()?,
@@ -115,6 +133,23 @@ impl MigrateInfo {
             wifis,
             nwmgr_files,
         })
+    }
+
+    pub fn write_config<P: AsRef<Path>>(&mut self, target_dir: P) -> Result<(), MigError> {
+        let target_path = path_append(target_dir.as_ref(), BALENA_CONFIG_PATH);
+
+        if self.config.is_modified() {
+            self.config.write(&target_path)?;
+        } else {
+            let config_path = self.config.get_path();
+            copy(config_path, &target_path).context(upstream_context!(&format!(
+                "Failed to copy '{}' to {}",
+                config_path.display(),
+                &target_path.display()
+            )))?;
+        }
+        info!("Copied config.json to '{}'", target_path.display());
+        Ok(())
     }
 
     pub fn get_assets(&self) -> &Assets {

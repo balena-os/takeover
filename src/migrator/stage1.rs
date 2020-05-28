@@ -32,8 +32,8 @@ mod wifi_config;
 use crate::common::{
     call,
     defs::{
-        BALENA_CONFIG_PATH, BALENA_IMAGE_NAME, CP_CMD, OLD_ROOT_MP, STAGE2_CONFIG_NAME,
-        SWAPOFF_CMD, SYSTEM_CONNECTIONS_DIR, TELINIT_CMD, TRANSFER_DIR,
+        BALENA_IMAGE_NAME, CP_CMD, OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD,
+        SYSTEM_CONNECTIONS_DIR, TELINIT_CMD, TRANSFER_DIR,
     },
     dir_exists, file_exists, format_size_with_unit, get_mem_info, is_admin,
     mig_error::{MigErrCtx, MigError, MigErrorKind},
@@ -51,7 +51,7 @@ use crate::common::stage2_config::UmountPart;
 use std::io::Write;
 
 const XTRA_FS_SIZE: u64 = 10 * 1024 * 1024; // const XTRA_MEM_FREE: u64 = 10 * 1024 * 1024; // 10 MB
-const DO_CLEANUP: bool = true;
+const DO_CLEANUP: bool = false;
 
 fn get_required_space(opts: &Options, mig_info: &MigrateInfo) -> Result<u64, MigError> {
     let mut req_size: u64 = mig_info.get_assets().busybox_size() as u64 + XTRA_FS_SIZE;
@@ -119,7 +119,7 @@ fn get_required_space(opts: &Options, mig_info: &MigrateInfo) -> Result<u64, Mig
     Ok(req_size)
 }
 
-fn copy_files<P: AsRef<Path>>(mig_info: &MigrateInfo, takeover_dir: P) -> Result<(), MigError> {
+fn copy_files<P: AsRef<Path>>(mig_info: &mut MigrateInfo, takeover_dir: P) -> Result<(), MigError> {
     let takeover_dir = takeover_dir.as_ref();
     let transfer_dir = path_append(takeover_dir, TRANSFER_DIR);
 
@@ -152,13 +152,7 @@ fn copy_files<P: AsRef<Path>>(mig_info: &MigrateInfo, takeover_dir: P) -> Result
     // *********************************************************
     // write config.json to tmpfs
 
-    let to_cfg_path = path_append(&transfer_dir, BALENA_CONFIG_PATH);
-    let config_path = mig_info.get_balena_cfg().get_path();
-    copy(config_path, &to_cfg_path).context(upstream_context!(&format!(
-        "Failed to copy '{}' to {}",
-        config_path.display(),
-        &to_cfg_path.display()
-    )))?;
+    mig_info.write_config(&transfer_dir)?;
 
     // *********************************************************
     // write network_manager filess to tmpfs

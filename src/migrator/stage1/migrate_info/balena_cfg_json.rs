@@ -1,9 +1,6 @@
 use crate::{
     common::{MigErrCtx, MigError, MigErrorKind, Options},
-    stage1::{
-        device::Device,
-        utils::{check_tcp_connect, mktemp},
-    },
+    stage1::{device::Device, utils::check_tcp_connect},
 };
 
 use failure::ResultExt;
@@ -43,37 +40,31 @@ impl BalenaCfgJson {
         })
     }
 
-    pub fn write(&mut self, work_dir: &Path) -> Result<PathBuf, MigError> {
-        let new_path = mktemp(
-            false,
-            Some("config.json.XXXX"),
-            Some(work_dir.to_path_buf()),
-        )
-        .context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            "Failed to create temporary file",
-        ))?;
-
-        let out_file =
-            OpenOptions::new()
-                .write(true)
-                .open(&new_path)
-                .context(MigErrCtx::from_remark(
-                    MigErrorKind::Upstream,
-                    &format!("Failed to open file for writing: '{}'", new_path.display()),
-                ))?;
+    pub fn write<P: AsRef<Path>>(&mut self, target_path: P) -> Result<(), MigError> {
+        let target_path = target_path.as_ref();
+        let out_file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(target_path)
+            .context(MigErrCtx::from_remark(
+                MigErrorKind::Upstream,
+                &format!(
+                    "Failed to open file for writing: '{}'",
+                    target_path.display()
+                ),
+            ))?;
 
         serde_json::to_writer(out_file, &self.config).context(MigErrCtx::from_remark(
             MigErrorKind::Upstream,
             &format!(
                 "Failed save modified config.json to '{}'",
-                new_path.display()
+                target_path.display()
             ),
         ))?;
 
         self.modified = false;
 
-        Ok(new_path)
+        Ok(())
     }
 
     pub fn check(&self, opts: &Options, device: &dyn Device) -> Result<(), MigError> {

@@ -57,6 +57,8 @@ pub struct Options {
     no_vpn_check: bool,
     #[structopt(long, help = "Do not check network manager files exist")]
     no_nwmgr_check: bool,
+    #[structopt(long, help = "Do not migrate host-name")]
+    no_keep_name: bool,
     #[structopt(
         long,
         value_name = "TIMEOUT",
@@ -198,5 +200,9 @@ impl Options {
 
     pub fn is_no_nwmgr_check(&self) -> bool {
         self.no_nwmgr_check
+    }
+
+    pub fn is_migrate_name(&self) -> bool {
+        !self.no_keep_name
     }
 }
