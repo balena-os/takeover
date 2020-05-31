@@ -1,15 +1,14 @@
-use std::fs::{copy, create_dir, create_dir_all, read_dir, read_to_string, File, OpenOptions};
+#![allow(clippy::missing_safety_doc)]
+
+use std::fs::{copy, create_dir, read_dir, read_to_string, File, OpenOptions};
 use std::io::{Read, Write};
-use std::mem::MaybeUninit;
-use std::os::raw::c_int;
+
 use std::os::unix::io::AsRawFd;
 use std::process::{exit, Command, Stdio};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use nix::{
-    errno::{errno, Errno},
-    fcntl::{fcntl, F_GETFD},
     ioctl_none,
     mount::{mount, umount, MsFlags},
     unistd::sync,
@@ -19,23 +18,22 @@ use std::path::{Path, PathBuf};
 
 use failure::ResultExt;
 use flate2::read::GzDecoder;
-use libc::{
-    close, getpid, sigfillset, sigprocmask, sigset_t, wait, MS_RDONLY, MS_REMOUNT, SIG_BLOCK,
-};
+use libc::{MS_RDONLY, MS_REMOUNT};
 use log::{debug, error, info, trace, warn, Level};
 use mod_logger::{LogDestination, Logger};
 
+use crate::common::defs::BACKUP_ARCH_NAME;
 use crate::common::{
     call,
     defs::{
         BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART, BALENA_CONFIG_PATH,
-        BALENA_IMAGE_PATH, BALENA_PART_MP, DD_CMD, DISK_BY_LABEL_PATH, FUSER_CMD, LOSETUP_CMD,
-        NIX_NONE, OLD_ROOT_MP, PS_CMD, REBOOT_CMD, STAGE2_CONFIG_NAME, SYSTEM_CONNECTIONS_DIR,
-        TRANSFER_DIR,
+        BALENA_DATA_FSTYPE, BALENA_DATA_PART, BALENA_IMAGE_PATH, BALENA_PART_MP, DD_CMD,
+        DISK_BY_LABEL_PATH, FUSER_CMD, LOSETUP_CMD, NIX_NONE, OLD_ROOT_MP, PS_CMD, REBOOT_CMD,
+        STAGE2_CONFIG_NAME, SYSTEM_CONNECTIONS_DIR, TRANSFER_DIR,
     },
     dir_exists,
     disk_util::{Disk, PartInfo, PartitionIterator, DEF_BLOCK_SIZE},
-    file_exists, format_size_with_unit, get_mountpoint,
+    file_exists, format_size_with_unit,
     mig_error::{MigErrCtx, MigError, MigErrorKind},
     options::Options,
     path_append,
@@ -48,25 +46,24 @@ const VALIDATE_MAX_ERR: usize = 20;
 const DO_VALIDATE: bool = true;
 const VALIDATE_BLOCK_SIZE: usize = 64 * 1024; // 4_194_304;
 
-pub const BUSYBOX_CMD: &str = "/busybox";
-
 const BLK_IOC_MAGIC: u8 = 0x12;
 const BLK_RRPART: u8 = 95;
+pub(crate) const BUSYBOX_CMD: &str = "/busybox";
 
 ioctl_none!(blk_reread, BLK_IOC_MAGIC, BLK_RRPART);
 
-fn reboot() {
+pub(crate) fn busybox_reboot() {
     trace!("reboot entered");
     Logger::flush();
     sync();
     sleep(Duration::from_secs(3));
-    let _cmd_res = call(BUSYBOX_CMD, &[REBOOT_CMD, "-f"], true);
+    let _cmd_res = call_busybox!(&[REBOOT_CMD, "-f"]);
     sleep(Duration::from_secs(1));
     info!("rebooting");
     exit(1);
 }
 
-fn read_stage2_config() -> Result<Stage2Config, MigError> {
+pub(crate) fn read_stage2_config() -> Result<Stage2Config, MigError> {
     let s2_cfg_path = PathBuf::from(&format!("/{}", STAGE2_CONFIG_NAME));
     if file_exists(&s2_cfg_path) {
         let s2_cfg_txt = match read_to_string(&s2_cfg_path) {
@@ -84,7 +81,7 @@ fn read_stage2_config() -> Result<Stage2Config, MigError> {
             Ok(s2_config) => Ok(s2_config),
             Err(why) => {
                 error!("Failed to deserialize stage 2 config: error {}", why);
-                return Err(MigError::displayed());
+                Err(MigError::displayed())
             }
         }
     } else {
@@ -92,90 +89,82 @@ fn read_stage2_config() -> Result<Stage2Config, MigError> {
             "Stage2 config file could not be found in '{}',",
             s2_cfg_path.display()
         );
-        return Err(MigError::displayed());
-    }
-}
-
-fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<(), MigError> {
-    let log_dev = log_dev.as_ref();
-    trace!("setup_log entered with '{}'", log_dev.display());
-    if log_dev.exists() {
-        if let Some(mountpoint) = get_mountpoint(log_dev)? {
-            if let Err(why) = umount(&mountpoint) {
-                warn!(
-                    "Failed to unmount log device '{}' from '{}', error: {:?}",
-                    log_dev.display(),
-                    mountpoint.display(),
-                    why
-                );
-            } else {
-                trace!("Unmounted '{}'", mountpoint.display())
-            }
-        }
-
-        create_dir_all("/mnt/log").context(upstream_context!(
-            "Failed to create log mount directory /mnt/log"
-        ))?;
-
-        trace!("Created log mountpoint: '/mnt/log'");
-        mount(
-            Some(log_dev),
-            "/mnt/log",
-            Some("vfat"),
-            MsFlags::empty(),
-            NIX_NONE,
-        )
-        .context(upstream_context!(&format!(
-            "Failed to mount '{}' on /mnt/log",
-            log_dev.display()
-        )))?;
-
-        trace!(
-            "Mounted '{}' to log mountpoint: '/mnt/log'",
-            log_dev.display()
-        );
-        // TODO: remove this later
-        Logger::set_log_file(
-            &LogDestination::Stderr,
-            &PathBuf::from("/mnt/log/stage2-init.log"),
-            false,
-        )
-        .context(upstream_context!(
-            "Failed set log file to  '/mnt/log/stage2-init.log'"
-        ))?;
-        info!(
-            "Now logging to /mnt/log/stage2-init.log on '{}'",
-            log_dev.display()
-        );
-        Ok(())
-    } else {
-        warn!("Log device does not exist: '{}'", log_dev.display());
         Err(MigError::displayed())
     }
 }
 
-fn kill_procs(signal: &str) -> Result<(), MigError> {
-    /*
-    let cmd_res = call(BUSYBOX_CMD, &["fuser", "-m", OLD_ROOT_MP], true)?;
-    if cmd_res.status.success() {
-        info!("fuser: {}", cmd_res.stdout);
+fn setup_logging<P: AsRef<Path>>(level: Level, log_dev: &Option<P>) {
+    Logger::set_default_level(level);
+    if log_dev.is_some() {
+        // Device should have been mounted by stage2-init
+        match dir_exists("/mnt/log/") {
+            Ok(exists) => {
+                if exists {
+                    Logger::set_log_file(
+                        &LogDestination::StreamStderr,
+                        PathBuf::from("/mnt/log/stage2.log").as_path(),
+                        false,
+                    )
+                    .unwrap_or_else(|why| {
+                        error!(
+                            "Failed to setup logging to /mnt/log/stage2.log, error: {:?}",
+                            why
+                        )
+                    });
+                    info!("Set logfile to /mnt/log/stage2.log");
+                }
+            }
+            Err(why) => {
+                warn!("Failed to check for log directory, error: {:?}", why);
+            }
+        }
     }
-    */
-    debug!("kill_procs: entered");
 
-    let cmd_res = call(
-        BUSYBOX_CMD,
-        &[FUSER_CMD, "-k", &format!("-{}", signal), "-m", OLD_ROOT_MP],
-        true,
-    )?;
+    info!("Stage 2 log level set to {:?}", level);
+    Logger::flush();
+    sync();
+}
 
-    if !cmd_res.status.success() {
-        warn!(
-            "Failed to kill processes using '{}', stderr: {}",
-            OLD_ROOT_MP, cmd_res.stderr
-        );
+fn kill_procs(log_level: Level) -> Result<(), MigError> {
+    trace!("kill_procs: entered");
+    let mut killed = false;
+    let mut signal: &str = "TERM";
+    loop {
+        let cmd_res = call(
+            BUSYBOX_CMD,
+            &[FUSER_CMD, "-k", &format!("-{}", signal), "-m", OLD_ROOT_MP],
+            true,
+        )?;
+
+        if cmd_res.status.success() {
+            killed = true;
+        } else {
+            warn!(
+                "Failed to kill processes using '{}', signal: {}, stderr: {}",
+                OLD_ROOT_MP, signal, cmd_res.stderr
+            );
+        }
+
+        if signal == "KILL" {
+            break;
+        } else {
+            signal = "KILL";
+            sleep(Duration::from_secs(5));
+        }
     }
-    Ok(())
+
+    if let Level::Trace = log_level {
+        if let Ok(res) = call_busybox!(&[PS_CMD, "-A"], "") {
+            trace!("ps: {}", res);
+        }
+    }
+
+    if !killed {
+        Ok(())
+    } else {
+        error!("Failed to kill any processes using using '{}'", OLD_ROOT_MP,);
+        Err(MigError::displayed())
+    }
 }
 
 fn unmount_partitions(mountpoints: &[UmountPart]) -> Result<(), MigError> {
@@ -187,6 +176,7 @@ fn unmount_partitions(mountpoints: &[UmountPart]) -> Result<(), MigError> {
             mpoint.dev_name.display(),
             mountpoint.display()
         );
+
         match umount(&mountpoint) {
             Ok(_) => {
                 info!("Successfully unmounted '{}'", mountpoint.display());
@@ -296,6 +286,7 @@ fn transfer_boot_files<P: AsRef<Path>>(dev_root: P) -> Result<(), MigError> {
         src_path.display(),
         target_dir.display()
     );
+
     for entry in dir_list {
         match entry {
             Ok(entry) => {
@@ -345,53 +336,42 @@ fn raw_mount_partition<P1: AsRef<Path>, P2: AsRef<Path>>(
     mountpoint: P1,
     fs_type: &str,
 ) -> Result<String, MigError> {
-    let cmd_res = call(BUSYBOX_CMD, &[LOSETUP_CMD, "-f"], true)?;
-    let loop_dev = if cmd_res.status.success() {
-        cmd_res.stdout
-    } else {
-        error!(
-            "Failed determine next free loop device, stderr: {}",
-            cmd_res.stderr
-        );
-        return Err(MigError::displayed());
-    };
+    let loop_dev = call_busybox!(
+        &[LOSETUP_CMD, "-f"],
+        "Failed determine next free loop device"
+    )?;
 
     let byte_offset = partition.start_lba * DEF_BLOCK_SIZE as u64;
-    let args = &[
-        LOSETUP_CMD,
-        "-o",
-        &byte_offset.to_string(),
-        "-f",
-        &*device.as_ref().to_string_lossy(),
-    ];
 
-    let cmd_res = call(BUSYBOX_CMD, args, true)?;
-    if cmd_res.status.success() {
-        info!(
-            "Loop-mounted {} on '{}'",
-            loop_dev,
-            mountpoint.as_ref().display()
-        );
-        mount(
-            Some(loop_dev.as_str()),
-            mountpoint.as_ref(),
-            Some(fs_type.as_bytes()),
-            MsFlags::empty(),
-            NIX_NONE,
-        )
-        .context(upstream_context!(&format!(
-            "Failed to mount {} on {}",
-            loop_dev,
-            mountpoint.as_ref().display()
-        )))?;
-        Ok(loop_dev)
-    } else {
-        error!(
-            "Failed to loop-mount partition, error: '{}'",
-            cmd_res.stderr
-        );
-        Err(MigError::displayed())
-    }
+    call_busybox!(
+        &[
+            LOSETUP_CMD,
+            "-o",
+            &byte_offset.to_string(),
+            "-f",
+            &*device.as_ref().to_string_lossy(),
+        ],
+        "Failed to loop-mount partition"
+    )?;
+
+    info!(
+        "Loop-mounted {} on '{}'",
+        loop_dev,
+        mountpoint.as_ref().display()
+    );
+    mount(
+        Some(loop_dev.as_str()),
+        mountpoint.as_ref(),
+        Some(fs_type.as_bytes()),
+        MsFlags::empty(),
+        NIX_NONE,
+    )
+    .context(upstream_context!(&format!(
+        "Failed to mount {} on {}",
+        loop_dev,
+        mountpoint.as_ref().display()
+    )))?;
+    Ok(loop_dev)
 }
 
 fn raw_umount_partition<P: AsRef<Path>>(device: &str, mountpoint: P) -> Result<(), MigError> {
@@ -400,14 +380,11 @@ fn raw_umount_partition<P: AsRef<Path>>(device: &str, mountpoint: P) -> Result<(
         mountpoint.as_ref().display()
     )))?;
 
-    let cmd_res = call(BUSYBOX_CMD, &[LOSETUP_CMD, "-d", device], true)?;
-    if !cmd_res.status.success() {
-        error!(
-            "Failed to remove loop device {}, stderr: {}",
-            device, cmd_res.stderr
-        );
-        return Err(MigError::displayed());
-    }
+    call_command!(
+        BUSYBOX_CMD,
+        &[LOSETUP_CMD, "-d", device],
+        &format!("Failed to remove loop device {}", device,)
+    )?;
 
     Ok(())
 }
@@ -416,6 +393,8 @@ fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
     debug!("raw_mount_balena called");
     let mut disk = Disk::from_drive_file(device, None)?;
     let part_iterator = PartitionIterator::new(&mut disk)?;
+
+    let backup_path = path_append(TRANSFER_DIR, BACKUP_ARCH_NAME);
 
     if !dir_exists(BALENA_PART_MP)? {
         create_dir(BALENA_PART_MP).context(upstream_context!(&format!(
@@ -434,7 +413,8 @@ fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
             1 => {
                 // boot partition
                 // losetup -o offset --sizelimit size --show -f log.img
-                let loop_dev = raw_mount_partition(&partition, device, BALENA_PART_MP, "vfat")?;
+                let loop_dev =
+                    raw_mount_partition(&partition, device, BALENA_PART_MP, BALENA_BOOT_FSTYPE)?;
 
                 info!(
                     "Mounted boot partition as {} on {}",
@@ -448,8 +428,40 @@ fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
 
                 raw_umount_partition(&loop_dev, BALENA_PART_MP)?;
 
-                // TODO: check if backup.tgz is available - mount stick around if yes
-                return Ok(());
+                if !file_exists(&backup_path) {
+                    return Ok(());
+                }
+            }
+            2..=4 => debug!("Skipping partition {}", partition.index),
+            5 => {
+                // TODO: transfer backup
+                if file_exists(&backup_path) {
+                    let loop_dev = raw_mount_partition(
+                        &partition,
+                        device,
+                        BALENA_PART_MP,
+                        BALENA_DATA_FSTYPE,
+                    )?;
+
+                    info!(
+                        "Mounted data partition as {} on {}",
+                        loop_dev, BALENA_PART_MP
+                    );
+                    // TODO: copy files
+
+                    let target_path = path_append(BALENA_PART_MP, BACKUP_ARCH_NAME);
+                    copy(&backup_path, &target_path).context(upstream_context!(&format!(
+                        "Failed to copy '{}' to '{}'",
+                        backup_path.display(),
+                        target_path.display()
+                    )))?;
+
+                    sync();
+
+                    raw_umount_partition(&loop_dev, BALENA_PART_MP)?;
+
+                    return Ok(());
+                }
             }
             _ => {
                 error!("Invalid partition index encountered: {}", partition.index);
@@ -491,6 +503,49 @@ fn sys_mount_balena() -> Result<(), MigError> {
             why
         );
         return Err(MigError::displayed());
+    }
+
+    transfer_boot_files(BALENA_BOOT_MP)?;
+
+    umount(BALENA_BOOT_MP).context(upstream_context!(&format!(
+        "Failed to unmount '{}' from '{}'",
+        part_label.display(),
+        BALENA_BOOT_MP
+    )))?;
+
+    let backup_path = path_append(TRANSFER_DIR, BACKUP_ARCH_NAME);
+    if file_exists(&backup_path) {
+        let part_label = path_append(DISK_BY_LABEL_PATH, BALENA_DATA_PART);
+        if let Err(why) = mount(
+            Some(&part_label),
+            BALENA_BOOT_MP,
+            Some(BALENA_DATA_FSTYPE.as_bytes()),
+            MsFlags::empty(),
+            NIX_NONE,
+        ) {
+            error!(
+                "Failed to mount '{}' to '{}', error: {:?}",
+                part_label.display(),
+                BALENA_BOOT_MP,
+                why
+            );
+            return Err(MigError::displayed());
+        }
+
+        let target_path = path_append(BALENA_PART_MP, BACKUP_ARCH_NAME);
+        copy(&backup_path, &target_path).context(upstream_context!(&format!(
+            "Failed to copy '{}' to '{}'",
+            backup_path.display(),
+            target_path.display()
+        )))?;
+
+        sync();
+
+        umount(BALENA_PART_MP).context(upstream_context!(&format!(
+            "Failed to unmount '{}' from '{}'",
+            part_label.display(),
+            BALENA_PART_MP
+        )))?;
     }
 
     Ok(())
@@ -617,119 +672,6 @@ fn validate(target_path: &Path, image_path: &Path) -> Result<bool, MigError> {
     Ok(err_count == 0)
 }
 
-/*
-fn flash_internal(target_path: &Path, image_path: &Path) -> FlashState {
-    debug!("Flash: opening: '{}'", image_path.display());
-
-    let mut decoder = GzDecoder::new(match File::open(&image_path) {
-        Ok(file) => file,
-        Err(why) => {
-            error!(
-                "Flash: Failed to open image file '{}', error: {:?}",
-                image_path.display(),
-                why
-            );
-            return FlashState::FailRecoverable;
-        }
-    });
-
-    debug!("Flash: opening output file '{}", target_path.display());
-    let mut out_file = match OpenOptions::new()
-        .write(true)
-        .read(false)
-        .create(false)
-        .open(&target_path)
-    {
-        Ok(file) => file,
-        Err(why) => {
-            error!(
-                "Flash: Failed to open output file '{}', error: {:?}",
-                target_path.display(),
-                why
-            );
-            return FlashState::FailRecoverable;
-        }
-    };
-
-    let start_time = Instant::now();
-    let mut last_elapsed = Duration::new(0, 0);
-    let mut write_count: usize = 0;
-
-    let mut fail_res = FlashState::FailRecoverable;
-    // TODO: might pay to put buffer on page boundary
-    let mut buffer: [u8; DD_BLOCK_SIZE] = [0; DD_BLOCK_SIZE];
-    loop {
-        // fill buffer
-        let buff_fill = match fill_buffer(&mut buffer, &mut decoder) {
-            Ok(buff_fill) => buff_fill,
-            Err(why) => {
-                error!(
-                    "Failed to read compressed data from '{}', error: {}:?",
-                    image_path.display(),
-                    why
-                );
-                return fail_res;
-            }
-        };
-
-        if buff_fill > 0 {
-            fail_res = FlashState::FailNonRecoverable;
-
-            let bytes_written = match out_file.write(&buffer[0..buff_fill]) {
-                Ok(bytes_written) => bytes_written,
-                Err(why) => {
-                    error!("Failed to write uncompressed data to dd, error {:?}", why);
-                    return fail_res;
-                }
-            };
-
-            write_count += bytes_written;
-
-            if buff_fill != bytes_written {
-                error!(
-                    "Read/write count mismatch, read {}, wrote {}",
-                    buff_fill, bytes_written
-                );
-                return fail_res;
-            }
-
-            let curr_elapsed = start_time.elapsed();
-            let since_last = match curr_elapsed.checked_sub(last_elapsed) {
-                Some(dur) => dur,
-                None => Duration::from_secs(0),
-            };
-
-            if (since_last.as_secs() >= 10) || buff_fill < buffer.len() {
-                last_elapsed = curr_elapsed;
-                let secs_elapsed = curr_elapsed.as_secs();
-                info!(
-                    "{} written @ {}/sec in {} seconds",
-                    format_size_with_unit(write_count as u64),
-                    format_size_with_unit(write_count as u64 / secs_elapsed),
-                    secs_elapsed
-                );
-                Logger::flush();
-            }
-
-            if buff_fill < buffer.len() {
-                break;
-            }
-        } else {
-            let secs_elapsed = start_time.elapsed().as_secs();
-            info!(
-                "{} written @ {}/sec in {} seconds",
-                format_size_with_unit(write_count as u64),
-                format_size_with_unit(write_count as u64 / secs_elapsed),
-                secs_elapsed
-            );
-            Logger::flush();
-            break;
-        }
-    }
-    FlashState::Success
-}
-*/
-
 fn flash_external(target_path: &Path, image_path: &Path) -> FlashState {
     let mut fail_res = FlashState::FailRecoverable;
 
@@ -845,88 +787,30 @@ pub fn stage2(_opts: Options) {
         Ok(s2_config) => s2_config,
         Err(why) => {
             error!("Failed to read stage2 configuration, error: {:?}", why);
-            reboot();
+            busybox_reboot();
             return;
         }
     };
 
     info!("Stage 2 config was read successfully");
 
-    Logger::set_default_level(s2_config.get_log_level());
-    if s2_config.log_dev.is_some() {
-        // Device should have been mounted by stage2-init
-        match dir_exists("/mnt/log/") {
-            Ok(exists) => {
-                if exists {
-                    Logger::set_log_file(
-                        &LogDestination::StreamStderr,
-                        PathBuf::from("/mnt/log/stage2.log").as_path(),
-                        false,
-                    )
-                    .unwrap_or_else(|why| {
-                        error!(
-                            "Failed to setup logging to /mnt/log/stage2.log, error: {:?}",
-                            why
-                        )
-                    });
-                    info!("Set logfile to /mnt/log/stage2.log");
-                }
-            }
-            Err(why) => {
-                warn!("Failed to check for log directory, error: {:?}", why);
-            }
-        }
-    }
-
-    info!("Stage 2 log level set to {:?}", s2_config.get_log_level());
-
-    Logger::flush();
-    sync();
+    setup_logging(s2_config.get_log_level(), &s2_config.log_dev);
 
     //match kill_procs1(&["takeover"], 15) {
-    match kill_procs("TERM") {
-        Ok(_) => (),
-        Err(why) => {
-            if let MigErrorKind::Displayed = why.kind() {
-            } else {
-                error!("kill_procs first attempt failed with error: {:?} ", why);
-            }
-            reboot();
-        }
-    }
 
-    sleep(Duration::from_secs(5));
-
-    match kill_procs("KILL") {
-        Ok(_) => (),
-        Err(why) => {
-            if let MigErrorKind::Displayed = why.kind() {
-            } else {
-                error!("kill_procs second attempt failed with error: {:?} ", why);
-            }
-            reboot();
-        }
-    }
-
-    if let Level::Trace = s2_config.get_log_level() {
-        if let Ok(cmd_res) = call(BUSYBOX_CMD, &[PS_CMD, "-A"], true) {
-            if cmd_res.status.success() {
-                trace!("ps: {}", cmd_res.stdout);
-            }
-        }
-    }
+    let _res = kill_procs(s2_config.get_log_level());
 
     match unmount_partitions(&s2_config.umount_parts) {
         Ok(_) => (),
         Err(why) => {
             error!("unmount_partitions failed; {:?}", why);
-            reboot();
+            busybox_reboot();
         }
     }
 
     if s2_config.pretend {
         info!("Not flashing due to pretend mode");
-        reboot();
+        busybox_reboot();
         return;
     }
 
@@ -937,7 +821,7 @@ pub fn stage2(_opts: Options) {
         FlashState::Success => (),
         _ => {
             sleep(Duration::from_secs(10));
-            reboot();
+            busybox_reboot();
             return;
         }
     }
@@ -964,119 +848,8 @@ pub fn stage2(_opts: Options) {
         error!("Failed to transfer files to balena OS, error: {:?}", why);
     }
 
+    info!("Migration succeded successfully");
     sync();
 
-    reboot();
-}
-
-pub fn init() {
-    info!("Stage 2 entered");
-
-    if unsafe { getpid() } != 1 {
-        error!("Process must be pid 1 to run stage2");
-        reboot();
-        return;
-    }
-
-    info!("Stage 2 check pid success!");
-
-    const START_FD: i32 = 0;
-    let mut close_count = 0;
-    for fd in START_FD..1024 {
-        unsafe {
-            match fcntl(fd, F_GETFD) {
-                Ok(_) => {
-                    close(fd);
-                    close_count += 1;
-                }
-                Err(why) => {
-                    if let Some(err_no) = why.as_errno() {
-                        if let Errno::EBADF = err_no {
-                            ()
-                        } else {
-                            warn!("Unexpected error from fcntl({},F_GETFD) : {}", fd, err_no);
-                        }
-                    } else {
-                        warn!("Unexpected error from fcntl({},F_GETFD) : {}", fd, why);
-                    }
-                }
-            }
-        };
-    }
-
-    info!("Stage 2 closed {} fd's", close_count);
-
-    let s2_config = match read_stage2_config() {
-        Ok(s2_config) => s2_config,
-        Err(why) => {
-            error!("Failed to read stage2 configuration, error: {:?}", why);
-            reboot();
-            return;
-        }
-    };
-
-    info!("Stage 2 config was read successfully");
-
-    Logger::set_default_level(s2_config.get_log_level());
-
-    info!("Stage 2 log level set to {:?}", s2_config.get_log_level());
-
-    let ext_log = if let Some(log_dev) = s2_config.get_log_dev() {
-        match setup_log(log_dev) {
-            Ok(_) => true,
-            Err(why) => {
-                error!("Setup log failed, error: {:?}", why);
-                false
-            }
-        }
-    } else {
-        false
-    };
-
-    info!("Stage 2 setup_log success!, ext_log: {}", ext_log);
-
-    Logger::flush();
-    sync();
-
-    let _child_pid = match Command::new("./takeover").args(&["--stage2"]).spawn() {
-        Ok(cmd_res) => cmd_res.id(),
-        Err(why) => {
-            error!("Failed to spawn stage2 worker process, error: {:?}", why);
-            reboot();
-            return;
-        }
-    };
-
-    info!("Stage 2 migrate worker spawned");
-
-    unsafe {
-        let mut signals: sigset_t = MaybeUninit::<sigset_t>::zeroed().assume_init();
-        let mut old_signals: sigset_t = MaybeUninit::<sigset_t>::zeroed().assume_init();
-
-        sigfillset(&mut signals);
-        sigprocmask(SIG_BLOCK, &signals, &mut old_signals);
-
-        let mut status: c_int = MaybeUninit::<c_int>::zeroed().assume_init();
-
-        let mut loop_count = 0;
-        loop {
-            let pid = wait(&mut status);
-            loop_count += 1;
-            if pid == -1 {
-                let sys_error = errno();
-                if sys_error == 10 {
-                    sleep(Duration::from_secs(1));
-                } else {
-                    warn!("wait returned error, errno: {}", sys_error);
-                }
-            } else {
-                trace!(
-                    "Stage 2 wait loop {}, status: {}, pid: {}",
-                    loop_count,
-                    status,
-                    pid
-                );
-            }
-        }
-    }
+    busybox_reboot();
 }

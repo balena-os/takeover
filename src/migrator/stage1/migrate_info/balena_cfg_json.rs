@@ -158,21 +158,19 @@ impl BalenaCfgJson {
         if let Some(value) = self.config.get(name) {
             if let Some(value) = value.as_u64() {
                 Ok(value)
+            } else if let Some(str_val) = value.as_str() {
+                Ok(str_val.parse::<u64>().context(MigErrCtx::from_remark(
+                    MigErrorKind::Upstream,
+                    &format!("Failed to parse uint value for '{}' from config.json", name),
+                ))?)
             } else {
-                if let Some(str_val) = value.as_str() {
-                    Ok(str_val.parse::<u64>().context(MigErrCtx::from_remark(
-                        MigErrorKind::Upstream,
-                        &format!("Failed to parse uint value for '{}' from config.json", name),
-                    ))?)
-                } else {
-                    Err(MigError::from_remark(
-                        MigErrorKind::InvParam,
-                        &format!(
-                            "Invalid type encountered for '{}', expected uint, found {:?}",
-                            name, value
-                        ),
-                    ))
-                }
+                Err(MigError::from_remark(
+                    MigErrorKind::InvParam,
+                    &format!(
+                        "Invalid type encountered for '{}', expected uint, found {:?}",
+                        name, value
+                    ),
+                ))
             }
         } else {
             Err(MigError::from_remark(

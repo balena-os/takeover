@@ -55,7 +55,7 @@ pub(crate) fn call(cmd: &str, args: &[&str], trim_stdout: bool) -> Result<CmdRes
             })
         }
         Err(why) => {
-            error!("call: output failed: {:?}", why);
+            error!("call: output failed for command: '{}': {:?}", cmd, why);
             Err(MigError::from_remark(
                 MigErrorKind::Upstream,
                 &format!("call: failed to execute: command {} '{:?}'", cmd, args),

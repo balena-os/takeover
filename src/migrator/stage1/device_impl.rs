@@ -25,11 +25,7 @@ pub(crate) fn check_os(
     let os_name = get_os_name()?;
     info!("Detected OS name is {}", os_name);
 
-    let os_supported = if let Some(_) = supported.iter().position(|&r| r == os_name) {
-        true
-    } else {
-        false
-    };
+    let os_supported = supported.iter().any(|&r| r == os_name);
 
     if !os_supported {
         if opts.is_os_check() {

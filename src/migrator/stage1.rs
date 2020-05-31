@@ -2,6 +2,7 @@ use std::env::{current_exe, set_current_dir};
 use std::fs::{copy, create_dir, create_dir_all, read_link, remove_dir_all, OpenOptions};
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -48,6 +49,7 @@ use utils::{mktemp, mount_fs};
 
 use crate::common::defs::NIX_NONE;
 use crate::common::stage2_config::UmountPart;
+use crate::stage1::block_device_info::BlockDevice;
 use std::io::Write;
 
 const XTRA_FS_SIZE: u64 = 10 * 1024 * 1024; // const XTRA_MEM_FREE: u64 = 10 * 1024 * 1024; // 10 MB
@@ -183,6 +185,48 @@ fn copy_files<P: AsRef<Path>>(mig_info: &mut MigrateInfo, takeover_dir: P) -> Re
     Ok(())
 }
 
+fn get_umount_parts(
+    flash_dev: &Rc<Box<dyn BlockDevice>>,
+    block_dev_info: &BlockDeviceInfo,
+) -> Result<Vec<UmountPart>, MigError> {
+    let mut umount_parts: Vec<UmountPart> = Vec::new();
+
+    for device in block_dev_info.get_devices().values() {
+        if let Some(parent) = device.get_parent() {
+            // this is a partition rather than a device
+            if parent.get_name() == flash_dev.get_name() {
+                // it is a partition of the flash device
+                if let Some(mount) = device.get_mountpoint() {
+                    let mut inserted = false;
+                    for (idx, mpoint) in umount_parts.iter().enumerate() {
+                        if mpoint.mountpoint.starts_with(mount.get_mountpoint()) {
+                            umount_parts.insert(
+                                idx,
+                                UmountPart {
+                                    dev_name: device.get_dev_path().to_path_buf(),
+                                    mountpoint: PathBuf::from(mount.get_mountpoint()),
+                                    fs_type: mount.get_fs_type().to_string(),
+                                },
+                            );
+                            inserted = true;
+                            break;
+                        }
+                    }
+                    if !inserted {
+                        umount_parts.push(UmountPart {
+                            dev_name: device.get_dev_path().to_path_buf(),
+                            mountpoint: PathBuf::from(mount.get_mountpoint()),
+                            fs_type: mount.get_fs_type().to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    umount_parts.reverse();
+    Ok(umount_parts)
+}
+
 fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
     info!("Preparing for takeover..");
     // *********************************************************
@@ -259,7 +303,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
     mount_fs(&curr_path, "sys", "sysfs", mig_info)?;
 
     let curr_path = takeover_dir.join("dev");
-    if let Err(_) = mount_fs(&curr_path, "dev", "devtmpfs", mig_info) {
+    if mount_fs(&curr_path, "dev", "devtmpfs", mig_info).is_err() {
         mount_fs(&curr_path, "tmpfs", "tmpfs", mig_info)?;
 
         let cmd_res = call(
@@ -340,48 +384,13 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
     }
 
     // collect partitions that need to be unmounted
-    let mut umount_parts: Vec<UmountPart> = Vec::new();
-
-    for (_dev_path, device) in block_dev_info.get_devices() {
-        if let Some(parent) = device.get_parent() {
-            // this is a partition rather than a device
-            if parent.get_name() == flash_dev.get_name() {
-                // it is a partition of the flash device
-                if let Some(mount) = device.get_mountpoint() {
-                    let mut inserted = false;
-                    for (idx, mpoint) in umount_parts.iter().enumerate() {
-                        if mpoint.mountpoint.starts_with(mount.get_mountpoint()) {
-                            umount_parts.insert(
-                                idx,
-                                UmountPart {
-                                    dev_name: device.get_dev_path().to_path_buf(),
-                                    mountpoint: PathBuf::from(mount.get_mountpoint()),
-                                    fs_type: mount.get_fs_type().to_string(),
-                                },
-                            );
-                            inserted = true;
-                            break;
-                        }
-                    }
-                    if !inserted {
-                        umount_parts.push(UmountPart {
-                            dev_name: device.get_dev_path().to_path_buf(),
-                            mountpoint: PathBuf::from(mount.get_mountpoint()),
-                            fs_type: mount.get_fs_type().to_string(),
-                        });
-                    }
-                }
-            }
-        }
-    }
-    umount_parts.reverse();
 
     let s2_cfg = Stage2Config {
         log_dev: opts.get_log_to().clone(),
         log_level: mig_info.get_log_level().to_string(),
         flash_dev: flash_dev.get_dev_path().to_path_buf(),
         pretend: opts.is_pretend(),
-        umount_parts,
+        umount_parts: get_umount_parts(flash_dev, &block_dev_info)?,
     };
 
     let s2_cfg_path = takeover_dir.join(STAGE2_CONFIG_NAME);
@@ -458,7 +467,7 @@ pub fn stage1(opts: Options) -> Result<(), MigError> {
             if opts.is_cleanup() {
                 mig_info.umount_all();
             }
-            return Err(why);
+            Err(why)
         }
     }
 }

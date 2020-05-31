@@ -88,12 +88,10 @@ impl MigrateInfo {
 
         debug!("image path: '{}'", image_path.display());
 
-        let wifi_ssids = opts.get_wifis().clone();
+        let wifi_ssids = opts.get_wifis();
 
-        let wifis: Vec<WifiConfig> = if wifi_ssids.len() > 0 || !opts.is_no_wifis() {
-            let wifi_config = WifiConfig::scan(wifi_ssids)?;
-
-            wifi_config
+        let wifis: Vec<WifiConfig> = if !wifi_ssids.is_empty() || !opts.is_no_wifis() {
+            WifiConfig::scan(wifi_ssids)?
         } else {
             Vec::new()
         };
@@ -204,17 +202,13 @@ impl MigrateInfo {
     }
 
     pub fn umount_all(&mut self) {
-        loop {
-            if let Some(mountpoint) = self.mounts.pop() {
-                if let Err(why) = umount(&mountpoint) {
-                    warn!(
-                        "Failed to unmount mountpoint: '{}', error : {:?}",
-                        mountpoint.display(),
-                        why
-                    );
-                }
-            } else {
-                break;
+        while let Some(mountpoint) = self.mounts.pop() {
+            if let Err(why) = umount(&mountpoint) {
+                warn!(
+                    "Failed to unmount mountpoint: '{}', error : {:?}",
+                    mountpoint.display(),
+                    why
+                );
             }
         }
 

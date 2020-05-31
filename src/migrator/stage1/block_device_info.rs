@@ -101,7 +101,7 @@ pub(crate) struct BlockDeviceInfo {
 
 impl BlockDeviceInfo {
     pub fn new() -> Result<BlockDeviceInfo, MigError> {
-        let stat_res = stat("/").context(upstream_context!(&format!("Failed to stat root")))?;
+        let stat_res = stat("/").context(upstream_context!("Failed to stat root"))?;
         let root_number = DeviceNum::new(stat_res.st_dev);
         let mounts = Mount::from_mtab()?;
 
@@ -150,16 +150,14 @@ impl BlockDeviceInfo {
 
                     let mounted: Option<Mount> = if let Some(mount) = mounts.get(&dev_path) {
                         Some(mount.clone())
-                    } else {
-                        if root_number == curr_number {
-                            if let Some(mount) = mounts.get(PathBuf::from("/dev/root").as_path()) {
-                                Some(mount.clone())
-                            } else {
-                                None
-                            }
+                    } else if root_number == curr_number {
+                        if let Some(mount) = mounts.get(PathBuf::from("/dev/root").as_path()) {
+                            Some(mount.clone())
                         } else {
                             None
                         }
+                    } else {
+                        None
                     };
 
                     let device = Rc::new(Box::new(Device {
@@ -193,7 +191,7 @@ impl BlockDeviceInfo {
         let mut root_device: Option<Rc<Box<dyn BlockDevice>>> = None;
         let mut root_partition: Option<Rc<Box<dyn BlockDevice>>> = None;
 
-        for (_dev_path, device_rc) in &mut device_map {
+        for device_rc in device_map.values_mut() {
             let device = device_rc.as_ref();
             if device.get_device_num() == &root_number {
                 if let Some(parent) = device.get_parent() {
@@ -258,18 +256,14 @@ impl BlockDeviceInfo {
 
                         let mounted = if let Some(mount) = mounts.get(dev_path.as_path()) {
                             Some(mount.clone())
-                        } else {
-                            if curr_number == *root_number {
-                                if let Some(mount) =
-                                    mounts.get(PathBuf::from("/dev/root").as_path())
-                                {
-                                    Some(mount.clone())
-                                } else {
-                                    None
-                                }
+                        } else if curr_number == *root_number {
+                            if let Some(mount) = mounts.get(PathBuf::from("/dev/root").as_path()) {
+                                Some(mount.clone())
                             } else {
                                 None
                             }
+                        } else {
+                            None
                         };
 
                         let partition = Rc::new(Box::new(Partition {
