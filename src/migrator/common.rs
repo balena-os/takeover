@@ -18,6 +18,7 @@ pub mod mig_error;
 pub use mig_error::{MigErrCtx, MigError, MigErrorKind};
 
 pub mod options;
+use crate::common::defs::PIDOF_CMD;
 pub use options::Options;
 
 pub(crate) mod disk_util;
@@ -61,6 +62,17 @@ pub(crate) fn call(cmd: &str, args: &[&str], trim_stdout: bool) -> Result<CmdRes
                 &format!("call: failed to execute: command {} '{:?}'", cmd, args),
             ))
         }
+    }
+}
+
+pub(crate) fn pid_of(proc_name: &str) -> Result<Option<u32>, MigError> {
+    let cmd_res = call(PIDOF_CMD, &[proc_name], true)?;
+    if cmd_res.status.success() {
+        Ok(Some(cmd_res.stdout.parse::<u32>().context(
+            upstream_context!(&format!("Failed to parse pid from '{}'", cmd_res.stdout)),
+        )?))
+    } else {
+        Ok(None)
     }
 }
 
@@ -112,6 +124,7 @@ pub(crate) fn get_os_name() -> Result<String, MigError> {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn is_migrator_file<P: AsRef<Path>>(file_name: P) -> Result<bool, MigError> {
     let path = file_name.as_ref();
     let file = File::open(path).context(MigErrCtx::from_remark(

@@ -10,6 +10,8 @@ pub(crate) const REBOOT_CMD: &str = "reboot";
 pub(crate) const LOSETUP_CMD: &str = "losetup";
 pub(crate) const MOKUTIL_CMD: &str = "mokutil";
 pub(crate) const WHEREIS_CMD: &str = "whereis";
+pub(crate) const PIDOF_CMD: &str = "pidof";
+
 // pub(crate) const GZIP_CMD: &str = "gzip";
 pub(crate) const DD_CMD: &str = "dd";
 pub(crate) const FUSER_CMD: &str = "fuser";

@@ -251,16 +251,14 @@ impl<'a> PartitionIterator<'a> {
 impl<'a> Iterator for PartitionIterator<'a> {
     type Item = PartInfo;
 
-    #[allow(clippy::cognitive_complexity)] //TODO refactor this function to fix the clippy warning
     fn next(&mut self) -> Option<Self::Item> {
         trace!("PartitionIterator::next: entered");
         // TODO: check for 0 size partition ?
 
-        #[allow(clippy::large_enum_variant)] //TODO refactor to remove clippy warning
         enum SetMbr {
             Leave,
             ToNone,
-            ToMbr(MasterBootRecord),
+            ToMbr(Box<MasterBootRecord>),
         }
 
         let (res, mbr) = if let Some(ref mbr) = self.mbr {
@@ -359,7 +357,7 @@ impl<'a> Iterator for PartitionIterator<'a> {
                                                         + u64::from(part.first_lba),
                                                     num_sectors: u64::from(part.num_sectors),
                                                 }),
-                                                SetMbr::ToMbr(mbr),
+                                                SetMbr::ToMbr(Box::new(mbr)),
                                             )
                                         }
                                         _ => {
@@ -404,7 +402,7 @@ impl<'a> Iterator for PartitionIterator<'a> {
                         PartitionType::Empty => {
                             debug!("PartitionIterator::next: got empty partition");
                             // looks like the extended partition is empty
-                            (None, SetMbr::ToMbr(mbr))
+                            (None, SetMbr::ToMbr(Box::new(mbr)))
                         }
                         PartitionType::Fat | PartitionType::Linux => {
                             debug!("PartitionIterator::next: got partition data partition");
@@ -419,7 +417,7 @@ impl<'a> Iterator for PartitionIterator<'a> {
                                     start_lba: self.offset + u64::from(part.first_lba),
                                     num_sectors: u64::from(part.num_sectors),
                                 }),
-                                SetMbr::ToMbr(mbr),
+                                SetMbr::ToMbr(Box::new(mbr)),
                             )
                         }
                         _ => {
@@ -446,7 +444,7 @@ impl<'a> Iterator for PartitionIterator<'a> {
         match mbr {
             SetMbr::ToMbr(mbr) => {
                 debug!("PartitionIterator::next set mbr");
-                self.mbr = Some(mbr);
+                self.mbr = Some(*mbr);
             }
             SetMbr::Leave => {
                 debug!("PartitionIterator::next leave mbr");
