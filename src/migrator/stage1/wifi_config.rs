@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 #[cfg(target_os = "windows")]
 use crate::common::call;
 
-use crate::common::{dir_exists, path_append, pid_of, MigErrCtx, MigError, MigErrorKind};
+use crate::common::{dir_exists, path_append, pidof, MigErrCtx, MigError, MigErrorKind};
 
 mod wpa_parser;
 use wpa_parser::WpaParser;
@@ -68,11 +68,11 @@ pub(crate) enum WifiConfig {
 impl<'a> WifiConfig {
     pub fn scan(ssid_filter: &[String]) -> Result<Vec<WifiConfig>, MigError> {
         trace!("WifiConfig::scan: entered with {:?}", ssid_filter);
-        if pid_of("NetworkManager")?.is_some() {
+        if !pidof("NetworkManager")?.is_empty() {
             Ok(parse_nwmgr_config(ssid_filter)?)
-        } else if pid_of("wpa_supplicant")?.is_some() {
+        } else if !pidof("wpa_supplicant")?.is_empty() {
             Ok(WpaParser::parse_config(ssid_filter)?)
-        } else if pid_of("connman")?.is_some() {
+        } else if !pidof("connman")?.is_empty() {
             Ok(WifiConfig::from_connman(ssid_filter)?)
         } else {
             warn!("No supported network managers found, no wifis will be migrated");

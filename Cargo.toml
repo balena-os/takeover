@@ -59,7 +59,7 @@ version = "1.0.53"
 version = "1.0.14"
 
 [dependencies.mod_logger]
-version = "0.6"
+version = "0.6.1"
 # git = "https://github.com/samothx/ModuleLogger.git"
 # branch = "support-ext-mods"
 

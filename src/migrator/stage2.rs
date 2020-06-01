@@ -827,7 +827,7 @@ pub fn stage2(_opts: Options) {
     }
 
     sync();
-    sleep(Duration::from_secs(1));
+    sleep(Duration::from_secs(5));
 
     if DO_VALIDATE {
         match validate(&s2_config.flash_dev, &image_path) {

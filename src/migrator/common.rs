@@ -65,15 +65,18 @@ pub(crate) fn call(cmd: &str, args: &[&str], trim_stdout: bool) -> Result<CmdRes
     }
 }
 
-pub(crate) fn pid_of(proc_name: &str) -> Result<Option<u32>, MigError> {
+pub(crate) fn pidof(proc_name: &str) -> Result<Vec<u32>, MigError> {
     let cmd_res = call(PIDOF_CMD, &[proc_name], true)?;
+    let mut res: Vec<u32> = Vec::new();
     if cmd_res.status.success() {
-        Ok(Some(cmd_res.stdout.parse::<u32>().context(
-            upstream_context!(&format!("Failed to parse pid from '{}'", cmd_res.stdout)),
-        )?))
-    } else {
-        Ok(None)
+        for pid in cmd_res.stdout.split_whitespace() {
+            res.push(pid.parse::<u32>().context(upstream_context!(&format!(
+                "pidof: Failed to parse string to u32: '{}'",
+                pid
+            )))?);
+        }
     }
+    Ok(res)
 }
 
 pub(crate) fn get_mem_info() -> Result<(u64, u64), MigError> {

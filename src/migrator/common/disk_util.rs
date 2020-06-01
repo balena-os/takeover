@@ -251,6 +251,7 @@ impl<'a> PartitionIterator<'a> {
 impl<'a> Iterator for PartitionIterator<'a> {
     type Item = PartInfo;
 
+    #[allow(clippy::cognitive_complexity)]
     fn next(&mut self) -> Option<Self::Item> {
         trace!("PartitionIterator::next: entered");
         // TODO: check for 0 size partition ?
