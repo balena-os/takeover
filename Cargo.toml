@@ -1,7 +1,7 @@
 [package]
 name = "takeover"
 version = "0.1.0"
-authors = ["Thomas Runte <thomas@etnur.net>"]
+authors = ["Thomas Runte <thomasr@balena.io>"]
 edition = "2018"
 publish = false
 
