@@ -12,6 +12,7 @@ use crate::{
 };
 
 // mod beaglebone;
+mod beaglebone;
 mod intel_nuc;
 mod raspberrypi;
 
@@ -68,12 +69,10 @@ pub(crate) fn get_device(opts: &Options) -> Result<Box<dyn Device>, MigError> {
             if let Some(device) = raspberrypi::is_rpi(opts, &dev_tree_model)? {
                 return Ok(device);
             }
-            /*
-            if let Some(device) = beaglebone::is_bb(mig_info, config, s2_cfg, &dev_tree_model)? {
+
+            if let Some(device) = beaglebone::is_bb(opts, &dev_tree_model)? {
                 return Ok(device);
             }
-
-             */
 
             let message = format!(
                 "Your device type: '{}' is not supported by balena-migrate.",
