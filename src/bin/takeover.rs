@@ -2,7 +2,7 @@ use log::error;
 use std::path::PathBuf;
 use std::process::exit;
 
-use mod_logger::{Level, LogDestination, Logger, NO_STREAM};
+use mod_logger::{LogDestination, Logger, NO_STREAM};
 
 use takeover::{init, stage1, stage2, MigErrorKind, Options};
 
@@ -12,7 +12,7 @@ fn main(opts: Options) {
     Logger::set_color(true);
 
     if opts.is_stage2() {
-        Logger::set_default_level(Level::Debug);
+        Logger::set_default_level(opts.get_s2_log_level());
         if let Err(why) = Logger::set_log_dest(&LogDestination::BufferStderr, NO_STREAM) {
             error!("Failed to initialize logging, error: {:?}", why);
             exit(1);
@@ -21,22 +21,16 @@ fn main(opts: Options) {
         stage2(opts);
         exit(1);
     } else if opts.is_init() {
-        Logger::set_default_level(Level::Debug);
+        Logger::set_default_level(opts.get_s2_log_level());
         if let Err(why) = Logger::set_log_dest(&LogDestination::BufferStderr, NO_STREAM) {
             error!("Failed to initialize logging, error: {:?}", why);
             exit(1);
         }
 
-        init();
+        init(&opts);
         exit(1);
     } else {
-        if opts.is_trace() {
-            Logger::set_default_level(Level::Trace);
-        } else if opts.is_debug() {
-            Logger::set_default_level(Level::Debug);
-        } else {
-            Logger::set_default_level(Level::Info);
-        }
+        Logger::set_default_level(opts.get_log_level());
 
         let log_file = PathBuf::from("./stage1.log");
         if let Err(why) = Logger::set_log_file(&LogDestination::StreamStderr, &log_file, true) {

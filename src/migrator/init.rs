@@ -1,6 +1,7 @@
 use crate::{
     common::{defs::NIX_NONE, get_mountpoint, MigErrCtx, MigError, MigErrorKind},
     stage2::{busybox_reboot, read_stage2_config},
+    Options,
 };
 use log::{error, info, trace, warn};
 use mod_logger::{LogDestination, Logger};
@@ -107,7 +108,7 @@ fn close_fds() -> i32 {
     close_count
 }
 
-pub fn init() {
+pub fn init(opts: &Options) {
     info!("Stage 2 entered");
 
     if unsafe { getpid() } != 1 {
@@ -131,10 +132,6 @@ pub fn init() {
 
     info!("Stage 2 config was read successfully");
 
-    Logger::set_default_level(s2_config.get_log_level());
-
-    info!("Stage 2 log level set to {:?}", s2_config.get_log_level());
-
     let ext_log = if let Some(log_dev) = s2_config.get_log_dev() {
         match setup_log(log_dev) {
             Ok(_) => true,
@@ -152,7 +149,14 @@ pub fn init() {
     Logger::flush();
     sync();
 
-    let _child_pid = match Command::new("./takeover").args(&["--stage2"]).spawn() {
+    let _child_pid = match Command::new("./takeover")
+        .args(&[
+            "--stage2",
+            "--s2-log-level",
+            opts.get_s2_log_level().to_string().as_str(),
+        ])
+        .spawn()
+    {
         Ok(cmd_res) => cmd_res.id(),
         Err(why) => {
             error!("Failed to spawn stage2 worker process, error: {:?}", why);

@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use failure::ResultExt;
-use log::error;
+use log::{error, Level};
 
 use crate::{
     common::{
@@ -28,7 +28,7 @@ echo "Pivoting root..."
 mount --make-rprivate /
 pivot_root . mnt/old_root
 echo "Chrooting and running init..."
-exec ./busybox chroot . /takeover --init
+exec ./busybox chroot . /takeover --init --s2-log-level __LOG_LEVEL__
 "###;
 
 #[derive(Debug)]
@@ -58,9 +58,11 @@ impl Assets {
         to_dir: P1,
         out_path: P2,
         tty: P3,
+        log_level: Level,
     ) -> Result<(), MigError> {
         let s2_script = STAGE2_SCRIPT.replace("__TO__", &*to_dir.as_ref().to_string_lossy());
         let s2_script = s2_script.replace("__TTY__", &*tty.as_ref().to_string_lossy());
+        let s2_script = s2_script.replace("__LOG_LEVEL__", log_level.to_string().as_str());
         write(out_path.as_ref(), &s2_script).context(upstream_context!(&format!(
             "Failed to write stage 2 script to: '{}'",
             out_path.as_ref().display()

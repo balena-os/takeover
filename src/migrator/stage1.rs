@@ -305,7 +305,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
     let new_init_path = takeover_dir
         .join("tmp")
         .join(old_init_path.file_name().unwrap());
-    Assets::write_stage2_script(&takeover_dir, &new_init_path, &tty)?;
+    Assets::write_stage2_script(&takeover_dir, &new_init_path, &tty, opts.get_s2_log_level())?;
 
     let block_dev_info = BlockDeviceInfo::new()?;
 
@@ -335,7 +335,6 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
 
     let s2_cfg = Stage2Config {
         log_dev: opts.get_log_to().clone(),
-        log_level: mig_info.get_log_level().to_string(),
         flash_dev: flash_dev.get_dev_path().to_path_buf(),
         pretend: opts.is_pretend(),
         umount_parts: get_umount_parts(flash_dev, &block_dev_info)?,

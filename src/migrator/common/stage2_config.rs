@@ -1,9 +1,6 @@
 use std::path::PathBuf;
-use std::str::FromStr;
 
 use failure::ResultExt;
-use log::warn;
-use mod_logger::Level;
 use serde::{Deserialize, Serialize};
 use serde_yaml;
 
@@ -18,7 +15,6 @@ pub(crate) struct UmountPart {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub(crate) struct Stage2Config {
-    pub log_level: String,
     pub log_dev: Option<PathBuf>,
     pub flash_dev: PathBuf,
     pub pretend: bool,
@@ -31,19 +27,6 @@ pub(crate) struct Stage2Config {
 
 #[allow(dead_code)]
 impl Stage2Config {
-    pub fn get_log_level(&self) -> Level {
-        match Level::from_str(&self.log_level) {
-            Ok(level) => level,
-            Err(why) => {
-                warn!(
-                    "Failed to read error level from stage2 config, error: {:?}",
-                    why
-                );
-                Level::Info
-            }
-        }
-    }
-
     pub fn get_log_dev(&self) -> &Option<PathBuf> {
         &self.log_dev
     }

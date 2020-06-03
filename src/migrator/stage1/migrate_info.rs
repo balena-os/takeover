@@ -2,7 +2,6 @@ use std::fs::{read_to_string, remove_dir_all};
 use std::path::{Path, PathBuf};
 
 use log::{debug, error, info, warn};
-use mod_logger::Level;
 use nix::mount::umount;
 
 use failure::ResultExt;
@@ -26,7 +25,6 @@ pub(crate) struct MigrateInfo {
     assets: Assets,
     mounts: Vec<PathBuf>,
     to_dir: Option<PathBuf>,
-    log_level: Level,
     image_path: PathBuf,
     device: Box<dyn Device>,
     config: BalenaCfgJson,
@@ -128,13 +126,6 @@ impl MigrateInfo {
             os_name: get_os_name()?,
             to_dir: None,
             mounts: Vec::new(),
-            log_level: if opts.is_trace() {
-                Level::Trace
-            } else if opts.is_debug() {
-                Level::Debug
-            } else {
-                Level::Info
-            },
             config,
             image_path,
             device,
@@ -159,10 +150,6 @@ impl MigrateInfo {
 
     pub fn set_to_dir(&mut self, to_dir: &PathBuf) {
         self.to_dir = Some(to_dir.clone())
-    }
-
-    pub fn get_log_level(&self) -> Level {
-        self.log_level
     }
 
     pub fn get_to_dir(&self) -> &Option<PathBuf> {

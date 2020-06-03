@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use log::Level;
 use structopt::StructOpt;
 
 const DEFAULT_CHECK_TIMEOUT: u64 = 10;
@@ -39,12 +40,20 @@ pub struct Options {
         help = "Path to balena config.json"
     )]
     config: Option<PathBuf>,
+    #[structopt(
+        long,
+        default_value = "info",
+        help = "Set log level, one of [error,warn,info,debug,trace]"
+    )]
+    log_level: Level,
+    #[structopt(
+        long,
+        short,
+        help = "Set stage2 log level, one of [error,warn,info,debug,trace]"
+    )]
+    s2_log_level: Option<Level>,
     #[structopt(long, help = "Pretend mode, do not flash device")]
     pretend: bool,
-    #[structopt(long, help = "Enable debug level verbosity")]
-    debug: bool,
-    #[structopt(long, help = "Enable trace level verbosity")]
-    trace: bool,
     #[structopt(long, help = "Internal - stage2 invocation")]
     stage2: bool,
     #[structopt(long, help = "Internal - init process invocation")]
@@ -91,7 +100,6 @@ pub struct Options {
     no_wifis: bool,
     #[structopt(
         long,
-        short,
         value_name = "SSID",
         help = "Create a network manager configuation for configured wifi with SSID"
     )]
@@ -142,12 +150,16 @@ impl Options {
         self.pretend
     }
 
-    pub fn is_debug(&self) -> bool {
-        self.debug
+    pub fn get_log_level(&self) -> Level {
+        self.log_level
     }
 
-    pub fn is_trace(&self) -> bool {
-        self.trace
+    pub fn get_s2_log_level(&self) -> Level {
+        if let Some(level) = self.s2_log_level {
+            level
+        } else {
+            self.log_level
+        }
     }
 
     pub fn is_os_check(&self) -> bool {

@@ -272,8 +272,7 @@ pub(crate) fn read_stage2_config() -> Result<Stage2Config, MigError> {
     }
 }
 
-fn setup_logging<P: AsRef<Path>>(level: Level, log_dev: &Option<P>) {
-    Logger::set_default_level(level);
+fn setup_logging<P: AsRef<Path>>(log_dev: &Option<P>) {
     if log_dev.is_some() {
         // Device should have been mounted by stage2-init
         match dir_exists("/mnt/log/") {
@@ -299,7 +298,6 @@ fn setup_logging<P: AsRef<Path>>(level: Level, log_dev: &Option<P>) {
         }
     }
 
-    info!("Stage 2 log level set to {:?}", level);
     Logger::flush();
     sync();
 }
@@ -973,11 +971,11 @@ pub fn stage2(_opts: Options) {
 
     info!("Stage 2 config was read successfully");
 
-    setup_logging(s2_config.get_log_level(), &s2_config.log_dev);
+    setup_logging(&s2_config.log_dev);
 
     //match kill_procs1(&["takeover"], 15) {
 
-    let _res = kill_procs(s2_config.get_log_level());
+    let _res = kill_procs(_opts.get_s2_log_level());
 
     match copy_files(&s2_config) {
         Ok(_) => (),
