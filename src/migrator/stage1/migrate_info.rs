@@ -1,4 +1,4 @@
-use std::fs::{copy, read_to_string, remove_dir_all};
+use std::fs::{read_to_string, remove_dir_all};
 use std::path::{Path, PathBuf};
 
 use log::{debug, error, info, warn};
@@ -7,10 +7,10 @@ use nix::mount::umount;
 
 use failure::ResultExt;
 
+use crate::stage1::utils::mktemp;
 use crate::{
     common::{
-        defs::BALENA_CONFIG_PATH, file_exists, get_os_name, mig_error::MigError, options::Options,
-        path_append, MigErrCtx, MigErrorKind,
+        file_exists, get_os_name, mig_error::MigError, options::Options, MigErrCtx, MigErrorKind,
     },
     stage1::{
         assets::Assets, device::Device, device_impl::get_device, image_retrieval::download_image,
@@ -144,20 +144,12 @@ impl MigrateInfo {
         })
     }
 
-    pub fn write_config<P: AsRef<Path>>(&mut self, target_dir: P) -> Result<(), MigError> {
-        let target_path = path_append(target_dir.as_ref(), BALENA_CONFIG_PATH);
-
+    pub fn update_config(&mut self) -> Result<(), MigError> {
         if self.config.is_modified() {
+            let target_path = mktemp(false, Some("config.json.XXXX"), Some(&self.work_dir))?;
             self.config.write(&target_path)?;
-        } else {
-            let config_path = self.config.get_path();
-            copy(config_path, &target_path).context(upstream_context!(&format!(
-                "Failed to copy '{}' to {}",
-                config_path.display(),
-                &target_path.display()
-            )))?;
+            info!("Copied config.json to '{}'", target_path.display());
         }
-        info!("Copied config.json to '{}'", target_path.display());
         Ok(())
     }
 

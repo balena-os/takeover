@@ -94,10 +94,10 @@ impl<'a> WpaParser<'a> {
                     }
                 }
                 Err(why) => {
-                    return Err(MigError::from(why.context(MigErrCtx::from_remark(
-                        MigErrorKind::Upstream,
-                        &format!("unexpected read error from {}", wpa_path.display()),
-                    ))));
+                    return Err(from_upstream!(
+                        why,
+                        &format!("unexpected read error from {}", wpa_path.display())
+                    ));
                 }
             }
         }

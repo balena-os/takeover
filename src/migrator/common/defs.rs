@@ -39,7 +39,6 @@ pub const OLD_ROOT_MP: &str = "/mnt/old_root";
 pub const BALENA_BOOT_MP: &str = "/mnt/balena-boot";
 pub const BALENA_PART_MP: &str = "/mnt/balena-part";
 
-pub const TRANSFER_DIR: &str = "/transfer";
 pub const SYSTEM_CONNECTIONS_DIR: &str = "system-connections";
 
 pub const BACKUP_ARCH_NAME: &str = "backup.tgz";

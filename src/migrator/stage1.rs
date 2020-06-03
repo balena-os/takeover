@@ -33,10 +33,9 @@ mod wifi_config;
 use crate::common::{
     call,
     defs::{
-        BALENA_IMAGE_NAME, CP_CMD, OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD,
-        SYSTEM_CONNECTIONS_DIR, TELINIT_CMD, TRANSFER_DIR,
+        CP_CMD, OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD, SYSTEM_CONNECTIONS_DIR, TELINIT_CMD,
     },
-    dir_exists, file_exists, format_size_with_unit, get_mem_info, is_admin,
+    file_exists, format_size_with_unit, get_mem_info, is_admin,
     mig_error::{MigErrCtx, MigError, MigErrorKind},
     options::Options,
     path_append,
@@ -52,38 +51,10 @@ use crate::common::stage2_config::UmountPart;
 use crate::stage1::block_device_info::BlockDevice;
 use std::io::Write;
 
-const XTRA_FS_SIZE: u64 = 10 * 1024 * 1024; // const XTRA_MEM_FREE: u64 = 10 * 1024 * 1024; // 10 MB
+const S1_XTRA_FS_SIZE: u64 = 10 * 1024 * 1024; // const XTRA_MEM_FREE: u64 = 10 * 1024 * 1024; // 10 MB
 
-fn get_required_space(opts: &Options, mig_info: &MigrateInfo) -> Result<u64, MigError> {
-    let mut req_size: u64 = mig_info.get_assets().busybox_size() as u64 + XTRA_FS_SIZE;
-
-    req_size += mig_info
-        .get_image_path()
-        .metadata()
-        .context(upstream_context!(&format!(
-            "Failed to retrieve imagesize for '{}'",
-            mig_info.get_image_path().display()
-        )))?
-        .len() as u64;
-
-    let cfg_path = mig_info.get_balena_cfg().get_path();
-    req_size += cfg_path
-        .metadata()
-        .context(upstream_context!(&format!(
-            "Failed to retrieve file size for '{}'",
-            cfg_path.display()
-        )))?
-        .len() as u64;
-
-    for nwmgr_cfg in opts.get_nwmgr_cfg() {
-        req_size += nwmgr_cfg
-            .metadata()
-            .context(upstream_context!(&format!(
-                "Failed to retrieve file size for '{}'",
-                nwmgr_cfg.display()
-            )))?
-            .len();
-    }
+fn get_required_space(mig_info: &MigrateInfo) -> Result<u64, MigError> {
+    let mut req_size: u64 = mig_info.get_assets().busybox_size() as u64;
 
     let curr_exe = current_exe().context(upstream_context!(
         "Failed to retrieve path of current executable"
@@ -96,22 +67,16 @@ fn get_required_space(opts: &Options, mig_info: &MigrateInfo) -> Result<u64, Mig
         )))?
         .len();
 
-    req_size += mig_info.get_assets().busybox_size() as u64;
-
-    // TODO: account for network manager config and backup
     Ok(req_size)
 }
 
-fn copy_files<P: AsRef<Path>>(mig_info: &mut MigrateInfo, takeover_dir: P) -> Result<(), MigError> {
+fn copy_files<P1: AsRef<Path>, P2: AsRef<Path>>(
+    work_dir: P1,
+    mig_info: &mut MigrateInfo,
+    takeover_dir: P2,
+) -> Result<(), MigError> {
+    let work_dir = work_dir.as_ref();
     let takeover_dir = takeover_dir.as_ref();
-    let transfer_dir = path_append(takeover_dir, TRANSFER_DIR);
-
-    if !dir_exists(&transfer_dir)? {
-        create_dir(&transfer_dir).context(upstream_context!(&format!(
-            "Failed to create transfer directory: '{}'",
-            transfer_dir.display()
-        )))?;
-    }
 
     // *********************************************************
     // write busybox executable to tmpfs
@@ -121,26 +86,14 @@ fn copy_files<P: AsRef<Path>>(mig_info: &mut MigrateInfo, takeover_dir: P) -> Re
     info!("Copied busybox executable to '{}'", busybox.display());
 
     // *********************************************************
-    // write balena image to tmpfs
-
-    let to_image_path = path_append(&transfer_dir, BALENA_IMAGE_NAME);
-    let image_path = mig_info.get_image_path();
-    copy(image_path, &to_image_path).context(upstream_context!(&format!(
-        "Failed to copy '{}' to {}",
-        image_path.display(),
-        &to_image_path.display()
-    )))?;
-    info!("Copied image to '{}'", to_image_path.display());
-
-    // *********************************************************
     // write config.json to tmpfs
 
-    mig_info.write_config(&transfer_dir)?;
+    mig_info.update_config()?;
 
     // *********************************************************
     // write network_manager filess to tmpfs
     let mut nwmgr_cfgs: u64 = 0;
-    let nwmgr_path = path_append(&transfer_dir, SYSTEM_CONNECTIONS_DIR);
+    let nwmgr_path = path_append(&work_dir, SYSTEM_CONNECTIONS_DIR);
     create_dir_all(&nwmgr_path).context(upstream_context!(&format!(
         "Failed to create directory '{}",
         nwmgr_path.display()
@@ -164,11 +117,6 @@ fn copy_files<P: AsRef<Path>>(mig_info: &mut MigrateInfo, takeover_dir: P) -> Re
     for wifi_config in mig_info.get_wifis() {
         wifi_config.create_nwmgr_file(&nwmgr_path, nwmgr_cfgs)?;
     }
-
-    // TODO: copy backup
-
-    // *********************************************************
-    // write this executable to tmpfs
 
     let target_path = path_append(takeover_dir, "takeover");
     let curr_exe = current_exe().context(upstream_context!(
@@ -250,13 +198,13 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
         format_size_with_unit(mem_free)
     );
 
-    let req_space = get_required_space(opts, mig_info)?;
+    let req_space = get_required_space(mig_info)?;
 
     // TODO: maybe kill some procs first
-    if mem_free < req_space + XTRA_FS_SIZE {
+    if mem_free < req_space + S1_XTRA_FS_SIZE {
         error!(
             "Not enough memory space found to copy files to RAMFS, required size is {} free memory is {}",
-            format_size_with_unit(req_space + XTRA_FS_SIZE),
+            format_size_with_unit(req_space + S1_XTRA_FS_SIZE),
             format_size_with_unit(mem_free)
         );
         return Err(MigError::displayed());
@@ -344,7 +292,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
 
     info!("Created directory '{}'", curr_path.display());
 
-    copy_files(mig_info, &takeover_dir)?;
+    copy_files(opts.get_work_dir(), mig_info, &takeover_dir)?;
 
     // *********************************************************
     // setup new init
@@ -391,6 +339,16 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
         flash_dev: flash_dev.get_dev_path().to_path_buf(),
         pretend: opts.is_pretend(),
         umount_parts: get_umount_parts(flash_dev, &block_dev_info)?,
+        work_dir: opts
+            .get_work_dir()
+            .canonicalize()
+            .context(upstream_context!(&format!(
+                "Failed to canonicalize work dir '{}'",
+                opts.get_work_dir().display()
+            )))?,
+        image_path: mig_info.get_image_path().to_path_buf(),
+        config_path: mig_info.get_balena_cfg().get_path().to_path_buf(),
+        backup_path: None,
     };
 
     let s2_cfg_path = takeover_dir.join(STAGE2_CONFIG_NAME);

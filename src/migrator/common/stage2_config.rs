@@ -23,6 +23,10 @@ pub(crate) struct Stage2Config {
     pub flash_dev: PathBuf,
     pub pretend: bool,
     pub umount_parts: Vec<UmountPart>,
+    pub work_dir: PathBuf,
+    pub image_path: PathBuf,
+    pub config_path: PathBuf,
+    pub backup_path: Option<PathBuf>,
 }
 
 #[allow(dead_code)]

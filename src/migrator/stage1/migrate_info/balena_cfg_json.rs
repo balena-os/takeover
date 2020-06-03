@@ -23,9 +23,16 @@ pub(crate) struct BalenaCfgJson {
 
 impl BalenaCfgJson {
     pub fn new<P: AsRef<Path>>(cfg_file: P) -> Result<BalenaCfgJson, MigError> {
-        let cfg_file = cfg_file.as_ref();
+        let cfg_file = cfg_file
+            .as_ref()
+            .canonicalize()
+            .context(upstream_context!(&format!(
+                "Failed to canonicalize path: '{}'",
+                cfg_file.as_ref().display()
+            )))?;
+
         Ok(BalenaCfgJson {
-            config: serde_json::from_reader(BufReader::new(File::open(cfg_file).context(
+            config: serde_json::from_reader(BufReader::new(File::open(&cfg_file).context(
                 MigErrCtx::from_remark(
                     MigErrorKind::Upstream,
                     &format!("new: cannot open file '{}'", cfg_file.display()),
@@ -35,7 +42,7 @@ impl BalenaCfgJson {
                 MigErrorKind::Upstream,
                 &format!("Failed to parse json from file '{}'", cfg_file.display()),
             ))?,
-            file: cfg_file.to_path_buf(),
+            file: cfg_file,
             modified: false,
         })
     }
@@ -63,6 +70,12 @@ impl BalenaCfgJson {
         ))?;
 
         self.modified = false;
+        self.file = target_path
+            .canonicalize()
+            .context(upstream_context!(&format!(
+                "Failed to canonicalize path: '{}'",
+                target_path.display()
+            )))?;
 
         Ok(())
     }

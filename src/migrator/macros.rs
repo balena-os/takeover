@@ -5,6 +5,12 @@ macro_rules! upstream_context {
     }};
 }
 
+macro_rules! from_upstream {
+    (  $err:expr, $comment:expr  ) => {{
+        MigError::from($err.context(upstream_context!($comment)))
+    }};
+}
+
 macro_rules! call_command {
     (  $cmd:expr, $args:expr , $errmsg:expr ) => {
         match call($cmd, $args, true) {

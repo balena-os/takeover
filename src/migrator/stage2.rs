@@ -1,6 +1,6 @@
 #![allow(clippy::missing_safety_doc)]
 
-use std::fs::{copy, create_dir, read_dir, read_to_string, File, OpenOptions};
+use std::fs::{copy, create_dir, create_dir_all, read_dir, read_to_string, File, OpenOptions};
 use std::io::{Read, Write};
 
 use std::os::unix::io::AsRawFd;
@@ -16,7 +16,7 @@ use nix::{
 
 use std::path::{Path, PathBuf};
 
-use failure::ResultExt;
+use failure::{Fail, ResultExt};
 use flate2::read::GzDecoder;
 use libc::{MS_RDONLY, MS_REMOUNT};
 use log::{debug, error, info, trace, warn, Level};
@@ -27,13 +27,13 @@ use crate::common::{
     call,
     defs::{
         BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART, BALENA_CONFIG_PATH,
-        BALENA_DATA_FSTYPE, BALENA_DATA_PART, BALENA_IMAGE_PATH, BALENA_PART_MP, DD_CMD,
-        DISK_BY_LABEL_PATH, FUSER_CMD, LOSETUP_CMD, NIX_NONE, OLD_ROOT_MP, PS_CMD, REBOOT_CMD,
-        STAGE2_CONFIG_NAME, SYSTEM_CONNECTIONS_DIR, TRANSFER_DIR,
+        BALENA_DATA_FSTYPE, BALENA_DATA_PART, BALENA_IMAGE_NAME, BALENA_IMAGE_PATH, BALENA_PART_MP,
+        DD_CMD, DISK_BY_LABEL_PATH, FUSER_CMD, LOSETUP_CMD, NIX_NONE, OLD_ROOT_MP, PS_CMD,
+        REBOOT_CMD, STAGE2_CONFIG_NAME, SYSTEM_CONNECTIONS_DIR,
     },
     dir_exists,
     disk_util::{Disk, PartInfo, PartitionIterator, DEF_BLOCK_SIZE},
-    file_exists, format_size_with_unit,
+    file_exists, format_size_with_unit, get_mem_info,
     mig_error::{MigErrCtx, MigError, MigErrorKind},
     options::Options,
     path_append,
@@ -48,6 +48,11 @@ const VALIDATE_BLOCK_SIZE: usize = 64 * 1024; // 4_194_304;
 
 const BLK_IOC_MAGIC: u8 = 0x12;
 const BLK_RRPART: u8 = 95;
+
+const TRANSFER_DIR: &str = "/transfer";
+
+const S2_XTRA_FS_SIZE: u64 = 10 * 1024 * 1024;
+
 pub(crate) const BUSYBOX_CMD: &str = "/busybox";
 
 ioctl_none!(blk_reread, BLK_IOC_MAGIC, BLK_RRPART);
@@ -61,6 +66,180 @@ pub(crate) fn busybox_reboot() {
     sleep(Duration::from_secs(1));
     info!("rebooting");
     exit(1);
+}
+
+fn get_required_space(s2_cfg: &Stage2Config) -> Result<u64, MigError> {
+    let curr_file = path_append(OLD_ROOT_MP, &s2_cfg.image_path);
+    let mut req_size = curr_file
+        .metadata()
+        .context(upstream_context!(&format!(
+            "Failed to retrieve imagesize for '{}'",
+            curr_file.display()
+        )))?
+        .len() as u64;
+
+    let curr_file = path_append(OLD_ROOT_MP, &s2_cfg.config_path);
+    req_size += curr_file
+        .metadata()
+        .context(upstream_context!(&format!(
+            "Failed to retrieve file size for '{}'",
+            curr_file.display()
+        )))?
+        .len() as u64;
+
+    if let Some(ref backup_path) = s2_cfg.backup_path {
+        let curr_file = path_append(OLD_ROOT_MP, backup_path);
+        req_size += curr_file
+            .metadata()
+            .context(upstream_context!(&format!(
+                "Failed to retrieve file size for '{}'",
+                curr_file.display()
+            )))?
+            .len() as u64;
+    }
+
+    let nwmgr_path = path_append(
+        OLD_ROOT_MP,
+        path_append(&s2_cfg.work_dir, SYSTEM_CONNECTIONS_DIR),
+    );
+
+    for dir_entry in read_dir(&nwmgr_path).context(upstream_context!(&format!(
+        "Failed to read drectory '{}'",
+        nwmgr_path.display()
+    )))? {
+        match dir_entry {
+            Ok(dir_entry) => {
+                req_size += dir_entry
+                    .path()
+                    .metadata()
+                    .context(upstream_context!(&format!(
+                        "Failed to retrieve file size for: '{}'",
+                        dir_entry.path().display()
+                    )))?
+                    .len()
+            }
+            Err(why) => {
+                return Err(from_upstream!(
+                    why,
+                    &format!(
+                        "Failed to retrieve directory entry for '{}'",
+                        nwmgr_path.display()
+                    )
+                ));
+            }
+        }
+    }
+    Ok(req_size)
+}
+
+fn copy_files(s2_cfg: &Stage2Config) -> Result<(), MigError> {
+    let (mem_tot, mem_free) = get_mem_info()?;
+    info!(
+        "Found {} total, {} free memory",
+        format_size_with_unit(mem_tot),
+        format_size_with_unit(mem_free)
+    );
+
+    let req_space = get_required_space(s2_cfg)?;
+
+    if mem_free < req_space + S2_XTRA_FS_SIZE {
+        error!(
+            "Not enough memory space found to copy files to RAMFS, required size is {} free memory is {}",
+            format_size_with_unit(req_space + S2_XTRA_FS_SIZE),
+            format_size_with_unit(mem_free)
+        );
+        return Err(MigError::displayed());
+    }
+
+    // TODO: check free mem against files to copy
+
+    if !dir_exists(TRANSFER_DIR)? {
+        create_dir(TRANSFER_DIR).context(upstream_context!(&format!(
+            "Failed to create transfer directory: '{}'",
+            TRANSFER_DIR
+        )))?;
+    }
+
+    // *********************************************************
+    // write balena image to tmpfs
+
+    let src_path = path_append(OLD_ROOT_MP, &s2_cfg.image_path);
+    let to_path = path_append(TRANSFER_DIR, BALENA_IMAGE_NAME);
+    copy(&src_path, &to_path).context(upstream_context!(&format!(
+        "Failed to copy '{}' to {}",
+        src_path.display(),
+        &to_path.display()
+    )))?;
+    info!("Copied image to '{}'", to_path.display());
+
+    let src_path = path_append(OLD_ROOT_MP, &s2_cfg.config_path);
+    let to_path = path_append(TRANSFER_DIR, BALENA_CONFIG_PATH);
+    copy(&src_path, &to_path).context(upstream_context!(&format!(
+        "Failed to copy '{}' to {}",
+        src_path.display(),
+        &to_path.display()
+    )))?;
+    info!("Copied config to '{}'", to_path.display());
+
+    if let Some(ref backup_path) = s2_cfg.backup_path {
+        let src_path = path_append(OLD_ROOT_MP, backup_path);
+        let to_path = path_append(TRANSFER_DIR, BACKUP_ARCH_NAME);
+        copy(&src_path, &to_path).context(upstream_context!(&format!(
+            "Failed to copy '{}' to {}",
+            src_path.display(),
+            &to_path.display()
+        )))?;
+        info!("Copied backup to '{}'", to_path.display());
+    }
+
+    let nwmgr_path = path_append(
+        OLD_ROOT_MP,
+        path_append(&s2_cfg.work_dir, SYSTEM_CONNECTIONS_DIR),
+    );
+
+    let to_dir = path_append(TRANSFER_DIR, SYSTEM_CONNECTIONS_DIR);
+    if !dir_exists(&to_dir)? {
+        create_dir_all(&to_dir).context(upstream_context!(&format!(
+            "Failed to create directory: '{}'",
+            to_dir.display()
+        )))?;
+    }
+
+    for dir_entry in read_dir(&nwmgr_path).context(upstream_context!(&format!(
+        "Failed to read drectory '{}'",
+        nwmgr_path.display()
+    )))? {
+        match dir_entry {
+            Ok(dir_entry) => {
+                if let Some(filename) = dir_entry.path().file_name() {
+                    let to_path = path_append(&to_dir, filename);
+                    copy(dir_entry.path(), &to_path).context(upstream_context!(&format!(
+                        "Failed to copy '{}' to '{}'",
+                        dir_entry.path().display(),
+                        to_path.display()
+                    )))?;
+                    info!("Copied network config to '{}'", to_path.display());
+                } else {
+                    error!(
+                        "Failed to extract filename from path: '{}'",
+                        dir_entry.path().display()
+                    );
+                    return Err(MigError::displayed());
+                }
+            }
+            Err(why) => {
+                return Err(from_upstream!(
+                    why,
+                    &format!(
+                        "Failed to retrieve directory entry for '{}'",
+                        nwmgr_path.display()
+                    )
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 pub(crate) fn read_stage2_config() -> Result<Stage2Config, MigError> {
@@ -799,6 +978,15 @@ pub fn stage2(_opts: Options) {
     //match kill_procs1(&["takeover"], 15) {
 
     let _res = kill_procs(s2_config.get_log_level());
+
+    match copy_files(&s2_config) {
+        Ok(_) => (),
+        Err(why) => {
+            error!("Failed to copy files to RAMFS, error: {:?}", why);
+            busybox_reboot();
+            return;
+        }
+    }
 
     match unmount_partitions(&s2_config.umount_parts) {
         Ok(_) => (),

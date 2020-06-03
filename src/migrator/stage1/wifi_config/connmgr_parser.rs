@@ -64,10 +64,10 @@ impl ConnMgrParser {
                     continue;
                 }
                 Err(why) => {
-                    return Err(MigError::from(why.context(upstream_context!(&format!(
-                        "unexpected read error from {}",
-                        file_path.display()
-                    )))));
+                    return Err(from_upstream!(
+                        why,
+                        &format!("unexpected read error from {}", file_path.display())
+                    ));
                 }
             }
         }
