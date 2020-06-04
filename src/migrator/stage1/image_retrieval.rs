@@ -19,13 +19,19 @@ use crate::{
     stage1::defs::{DEV_TYPE_GEN_X86_64, DEV_TYPE_INTEL_NUC, DEV_TYPE_RPI3},
 };
 
+use crate::stage1::defs::DEV_TYPE_RPI4_64;
 use crate::stage1::migrate_info::balena_cfg_json::BalenaCfgJson;
 use failure::ResultExt;
 use flate2::{Compression, GzBuilder};
 use nix::mount::{mount, umount, MsFlags};
 
 const FLASHER_DEVICES: [&str; 2] = [DEV_TYPE_INTEL_NUC, DEV_TYPE_GEN_X86_64];
-const SUPPORTED_DEVICES: [&str; 3] = [DEV_TYPE_RPI3, DEV_TYPE_INTEL_NUC, DEV_TYPE_GEN_X86_64];
+const SUPPORTED_DEVICES: [&str; 4] = [
+    DEV_TYPE_RPI3,
+    DEV_TYPE_RPI4_64,
+    DEV_TYPE_INTEL_NUC,
+    DEV_TYPE_GEN_X86_64,
+];
 
 const IMG_NAME_GEN_X86_64: &str = "resin-image-genericx86-64-ext.resinos-img";
 const IMG_NAME_INTEL_NUC: &str = "resin-image-genericx86-64.resinos-img";
