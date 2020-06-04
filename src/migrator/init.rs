@@ -4,7 +4,7 @@ use crate::{
     Options,
 };
 use log::{error, info, trace, warn};
-use mod_logger::{LogDestination, Logger};
+use mod_logger::{LogDestination, Logger, NO_STREAM};
 use std::fs::create_dir_all;
 use std::mem::MaybeUninit;
 use std::os::raw::c_int;
@@ -109,6 +109,16 @@ fn close_fds() -> i32 {
 }
 
 pub fn init(opts: &Options) {
+    Logger::set_default_level(opts.get_s2_log_level());
+    Logger::set_brief_info(false);
+    Logger::set_color(true);
+
+    if let Err(why) = Logger::set_log_dest(&LogDestination::BufferStderr, NO_STREAM) {
+        error!("Failed to initialize logging, error: {:?}", why);
+        busybox_reboot();
+        return;
+    }
+
     info!("Stage 2 entered");
 
     if unsafe { getpid() } != 1 {

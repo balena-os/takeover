@@ -126,12 +126,6 @@ impl MigError {
     pub fn displayed() -> MigError {
         MigError::from(MigErrorKind::Displayed)
     }
-
-    /*
-        pub fn upstream() -> MigError {
-
-        }
-    */
 }
 
 impl From<MigErrorKind> for MigError {

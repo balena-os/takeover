@@ -4,7 +4,7 @@ use failure::ResultExt;
 use serde::{Deserialize, Serialize};
 use serde_yaml;
 
-use crate::common::{MigErrCtx, MigError, MigErrorKind};
+use crate::common::mig_error::{MigErrCtx, MigError, MigErrorKind};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub(crate) struct UmountPart {

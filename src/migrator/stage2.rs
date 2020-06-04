@@ -20,13 +20,12 @@ use failure::{Fail, ResultExt};
 use flate2::read::GzDecoder;
 use libc::{MS_RDONLY, MS_REMOUNT};
 use log::{debug, error, info, trace, warn, Level};
-use mod_logger::{LogDestination, Logger};
+use mod_logger::{LogDestination, Logger, NO_STREAM};
 
-use crate::common::defs::BACKUP_ARCH_NAME;
 use crate::common::{
     call,
     defs::{
-        BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART, BALENA_CONFIG_PATH,
+        BACKUP_ARCH_NAME, BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART, BALENA_CONFIG_PATH,
         BALENA_DATA_FSTYPE, BALENA_DATA_PART, BALENA_IMAGE_NAME, BALENA_IMAGE_PATH, BALENA_PART_MP,
         DD_CMD, DISK_BY_LABEL_PATH, FUSER_CMD, LOSETUP_CMD, NIX_NONE, OLD_ROOT_MP, PS_CMD,
         REBOOT_CMD, STAGE2_CONFIG_NAME, SYSTEM_CONNECTIONS_DIR,
@@ -62,9 +61,9 @@ pub(crate) fn busybox_reboot() {
     Logger::flush();
     sync();
     sleep(Duration::from_secs(3));
+    info!("rebooting");
     let _cmd_res = call_busybox!(&[REBOOT_CMD, "-f"]);
     sleep(Duration::from_secs(1));
-    info!("rebooting");
     exit(1);
 }
 
@@ -957,7 +956,17 @@ fn flash_external(target_path: &Path, image_path: &Path) -> FlashState {
     }
 }
 
-pub fn stage2(_opts: Options) {
+pub fn stage2(opts: &Options) {
+    Logger::set_default_level(opts.get_s2_log_level());
+    Logger::set_brief_info(false);
+    Logger::set_color(true);
+
+    if let Err(why) = Logger::set_log_dest(&LogDestination::BufferStderr, NO_STREAM) {
+        error!("Failed to initialize logging, error: {:?}", why);
+        busybox_reboot();
+        return;
+    }
+
     info!("Stage 2 migrate_worker entered");
 
     let s2_config = match read_stage2_config() {
@@ -975,7 +984,7 @@ pub fn stage2(_opts: Options) {
 
     //match kill_procs1(&["takeover"], 15) {
 
-    let _res = kill_procs(_opts.get_s2_log_level());
+    let _res = kill_procs(opts.get_s2_log_level());
 
     match copy_files(&s2_config) {
         Ok(_) => (),

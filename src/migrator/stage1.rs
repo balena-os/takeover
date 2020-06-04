@@ -43,7 +43,7 @@ use crate::common::{
 };
 
 use block_device_info::BlockDeviceInfo;
-use mod_logger::Logger;
+use mod_logger::{LogDestination, Logger};
 use utils::{mktemp, mount_fs};
 
 use crate::common::defs::NIX_NONE;
@@ -404,7 +404,21 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
     Ok(())
 }
 
-pub fn stage1(opts: Options) -> Result<(), MigError> {
+pub fn stage1(opts: &Options) -> Result<(), MigError> {
+    Logger::set_default_level(opts.get_log_level());
+    Logger::set_brief_info(true);
+    Logger::set_color(true);
+
+    let log_file = PathBuf::from("./stage1.log");
+    if let Err(why) = Logger::set_log_file(&LogDestination::StreamStderr, &log_file, true) {
+        error!(
+            "Failed to set logging to '{}', error: {:?}",
+            log_file.display(),
+            why
+        );
+        return Err(MigError::displayed());
+    }
+
     if !is_admin()? {
         error!("please run this program as root");
         return Err(MigError::from(MigErrorKind::Displayed));

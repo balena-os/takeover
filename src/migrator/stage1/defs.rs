@@ -42,7 +42,6 @@ impl Display for DeviceType {
 #[derive(Debug, Clone)]
 pub(crate) enum OSArch {
     AMD64,
-    #[cfg(target_os = "linux")]
     ARMHF,
     I386,
     /*
