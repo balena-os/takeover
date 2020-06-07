@@ -1,5 +1,5 @@
 use std::fs::{write, OpenOptions};
-use std::io::Write;
+use std::io::{copy, Read};
 use std::path::{Path, PathBuf};
 
 use failure::ResultExt;
@@ -13,9 +13,12 @@ use crate::{
     },
     stage1::defs::OSArch,
 };
+use flate2::read::GzDecoder;
 
-const RPI3_BUSYBOX: &[u8] = include_bytes!("../../../assets/armv7/busybox");
-const X86_64_BUSYBOX: &[u8] = include_bytes!("../../../assets/x86_64/busybox");
+#[cfg(target_arch = "arm")]
+const BUSYBOX_BIN: &[u8] = include_bytes!("../../../assets/armv7/busybox.gz");
+#[cfg(target_arch = "x86_64")]
+const BUSYBOX_BIN: &[u8] = include_bytes!("../../../assets/x86_64/busybox.gz");
 
 const STAGE2_SCRIPT: &str = r###"#!__TO__/busybox sh
 echo "takeover init started"
@@ -39,18 +42,17 @@ pub(crate) struct Assets {
 
 impl Assets {
     pub fn new() -> Assets {
-        if cfg!(target_arch = "arm") {
-            Assets {
-                arch: OSArch::ARMHF,
-                busybox: RPI3_BUSYBOX,
-            }
+        let arch = if cfg!(target_arch = "arm") {
+            OSArch::ARMHF
         } else if cfg!(target_arch = "x86_64") {
-            Assets {
-                arch: OSArch::AMD64,
-                busybox: X86_64_BUSYBOX,
-            }
+            OSArch::AMD64
         } else {
             panic!("No assets are provided in binary - please compile with device feature")
+        };
+
+        Assets {
+            arch,
+            busybox: BUSYBOX_BIN,
         }
     }
 
@@ -84,19 +86,30 @@ impl Assets {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn get_os_arch(&self) -> &OSArch {
-        &self.arch
-    }
+    pub fn busybox_size(&self) -> Result<u64, MigError> {
+        let mut decoder = GzDecoder::new(self.busybox);
+        let mut size: u64 = 0;
+        const BUFFER_SIZE: usize = 0x100000;
+        let mut buffer: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
+        loop {
+            let bytes_read = decoder
+                .read(&mut buffer)
+                .context(upstream_context!("Failed to uncompress busybox executable"))?;
+            if bytes_read > 0 {
+                size += bytes_read as u64
+            } else {
+                break;
+            }
+        }
 
-    pub fn busybox_size(&self) -> usize {
-        self.busybox.len()
+        Ok(size)
     }
 
     pub fn write_to<P: AsRef<Path>>(&self, target_path: P) -> Result<PathBuf, MigError> {
         let target_path = target_path.as_ref().join("busybox");
 
         {
+            let mut decoder = GzDecoder::new(self.busybox);
             let mut target_file = OpenOptions::new()
                 .create(true)
                 .write(true)
@@ -106,25 +119,12 @@ impl Assets {
                     "Failed to open file for writing: '{}'",
                     target_path.display()
                 )))?;
-            target_file
-                .write(self.busybox)
-                .context(upstream_context!(&format!(
-                    "Failed to write to file: '{}'",
-                    target_path.display()
-                )))?;
+
+            copy(&mut decoder, &mut target_file).context(upstream_context!(&format!(
+                "Failed to decompress busybox executable to '{}'",
+                target_path.display()
+            )))?;
         }
-
-        /*
-        let mut busybox_file = OpenOptions::new().create(false).write(true).open(&target_path)
-            .context(MigErrCtx::from_remark(upstream_context!(
-                                            &format!("Failed to set open '{}'", target_path.display())))?;
-
-        let metadata = busybox_file.metadata()
-            .context(upstream_context!(
-                                            &format!("Failed to get metadata for '{}'", target_path.display())))?;
-        let mut permissions = metadata.permissions();
-        permissions.set_mode(0o755);
-        */
 
         let cmd_res = call(CHMOD_CMD, &["+x", &*target_path.to_string_lossy()], true)?;
 

@@ -54,7 +54,7 @@ use std::io::Write;
 const S1_XTRA_FS_SIZE: u64 = 10 * 1024 * 1024; // const XTRA_MEM_FREE: u64 = 10 * 1024 * 1024; // 10 MB
 
 fn get_required_space(mig_info: &MigrateInfo) -> Result<u64, MigError> {
-    let mut req_size: u64 = mig_info.get_assets().busybox_size() as u64;
+    let mut req_size: u64 = mig_info.get_assets().busybox_size()?;
 
     let curr_exe = current_exe().context(upstream_context!(
         "Failed to retrieve path of current executable"

@@ -1,5 +1,4 @@
-use std::fs::{read_to_string, File};
-use std::io::{BufRead, BufReader};
+use std::fs::read_to_string;
 use std::mem::MaybeUninit;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
@@ -91,12 +90,6 @@ pub(crate) fn get_mem_info() -> Result<(u64, u64), MigError> {
     }
 }
 
-#[allow(dead_code)]
-pub(crate) enum DeviceType {
-    RPI3(String),
-    X86_64(String),
-}
-
 /******************************************************************
  * Get OS name from /etc/os-release
  ******************************************************************/
@@ -127,26 +120,6 @@ pub(crate) fn get_os_name() -> Result<String, MigError> {
     }
 }
 
-#[allow(dead_code)]
-pub(crate) fn is_migrator_file<P: AsRef<Path>>(file_name: P) -> Result<bool, MigError> {
-    let path = file_name.as_ref();
-    let file = File::open(path).context(MigErrCtx::from_remark(
-        MigErrorKind::Upstream,
-        &format!("failed to open file '{}'", path.display()),
-    ))?;
-    if let Some(ref line1) = BufReader::new(file).lines().next() {
-        if let Ok(ref line1) = line1 {
-            Ok(Regex::new(r###"^\s*## created by balena-migrate"###)
-                .unwrap()
-                .is_match(&line1))
-        } else {
-            Ok(false)
-        }
-    } else {
-        Ok(false)
-    }
-}
-
 pub(crate) fn is_admin() -> Result<bool, MigError> {
     trace!("is_admin: entered");
     let admin = Some(unsafe { getuid() } == 0);
@@ -157,7 +130,6 @@ pub fn file_exists<P: AsRef<Path>>(file: P) -> bool {
     file.as_ref().exists()
 }
 
-#[allow(dead_code)]
 pub fn dir_exists<P: AsRef<Path>>(name: P) -> Result<bool, MigError> {
     let path = name.as_ref();
     if path.exists() {
@@ -236,23 +208,6 @@ pub fn get_mountpoint<P: AsRef<Path>>(device: P) -> Result<Option<PathBuf>, MigE
                         &format!("Encountered invalid line in /etc/mtab '{}'", line),
                     ));
                 }
-            }
-        } else {
-            warn!("Encountered empty line in /etc/mtab");
-        }
-    }
-    Ok(None)
-}
-
-#[allow(dead_code)]
-pub fn get_root_dev() -> Result<Option<PathBuf>, MigError> {
-    let mtab =
-        read_to_string("/etc/mtab").context(upstream_context!("Failed to read /etc/mtab"))?;
-    for line in mtab.lines() {
-        let words: Vec<&str> = line.split_whitespace().collect();
-        if let Some(mountpoint) = words.get(1) {
-            if *mountpoint == "/" {
-                return Ok(Some(PathBuf::from(&words.get(0).unwrap())));
             }
         } else {
             warn!("Encountered empty line in /etc/mtab");
