@@ -19,6 +19,10 @@ mod nwmgr_parser;
 use nwmgr_parser::parse_nwmgr_config;
 
 mod connmgr_parser;
+use crate::common::{dir_exists, file_exists};
+use crate::stage1::wifi_config::connmgr_parser::CONNMGR_CONFIG_DIR;
+use crate::stage1::wifi_config::nwmgr_parser::NWMGR_CONFIG_DIR;
+use crate::stage1::wifi_config::wpa_parser::WPA_CONFIG_FILE;
 use connmgr_parser::parse_connmgr_config;
 
 pub const BALENA_FILE_TAG: &str = "## created by balena-migrate";
@@ -71,11 +75,11 @@ pub(crate) enum WifiConfig {
 impl<'a> WifiConfig {
     pub fn scan(ssid_filter: &[String]) -> Result<Vec<WifiConfig>, MigError> {
         trace!("WifiConfig::scan: entered with {:?}", ssid_filter);
-        if !pidof("NetworkManager")?.is_empty() {
+        if !pidof("NetworkManager")?.is_empty() && dir_exists(NWMGR_CONFIG_DIR)? {
             Ok(parse_nwmgr_config(ssid_filter)?)
-        } else if !pidof("wpa_supplicant")?.is_empty() {
+        } else if !pidof("wpa_supplicant")?.is_empty() && file_exists(WPA_CONFIG_FILE) {
             Ok(WpaParser::parse_config(ssid_filter)?)
-        } else if !pidof("connman")?.is_empty() {
+        } else if !pidof("wpa_supplicant")?.is_empty() && dir_exists(CONNMGR_CONFIG_DIR)? {
             Ok(parse_connmgr_config(ssid_filter)?)
         } else {
             warn!("No supported network managers found, no wifis will be migrated");

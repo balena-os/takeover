@@ -11,7 +11,7 @@ use failure::{Fail, ResultExt};
 use log::{debug, info, warn};
 use regex::Regex;
 
-const CONNMGR_CONFIG_DIR: &str = "/var/lib/connman";
+pub(crate) const CONNMGR_CONFIG_DIR: &str = "/var/lib/connman";
 
 struct ConnMgrParser {
     skip_re: Regex,

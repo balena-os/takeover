@@ -10,7 +10,7 @@ use crate::{
     stage1::wifi_config::WifiConfig,
 };
 
-const NWMGR_CONFIG_DIR: &str = "/etc/NetworkManager/system-connections";
+pub(crate) const NWMGR_CONFIG_DIR: &str = "/etc/NetworkManager/system-connections";
 
 #[derive(Debug, PartialEq, Clone)]
 enum NwMgrSection {

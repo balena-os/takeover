@@ -16,25 +16,36 @@ use crate::{
         MigErrCtx, MigError, MigErrorKind,
     },
     stage1::api_calls::{get_os_image, get_os_versions, Versions},
-    stage1::defs::{DEV_TYPE_GEN_X86_64, DEV_TYPE_INTEL_NUC, DEV_TYPE_RPI3},
+    stage1::defs::{
+        DEV_TYPE_BBB, DEV_TYPE_BBG, DEV_TYPE_GEN_X86_64, DEV_TYPE_INTEL_NUC, DEV_TYPE_RPI3,
+        DEV_TYPE_RPI4_64,
+    },
 };
 
-use crate::stage1::defs::DEV_TYPE_RPI4_64;
 use crate::stage1::migrate_info::balena_cfg_json::BalenaCfgJson;
 use failure::ResultExt;
 use flate2::{Compression, GzBuilder};
 use nix::mount::{mount, umount, MsFlags};
 
-const FLASHER_DEVICES: [&str; 2] = [DEV_TYPE_INTEL_NUC, DEV_TYPE_GEN_X86_64];
-const SUPPORTED_DEVICES: [&str; 4] = [
+const FLASHER_DEVICES: [&str; 4] = [
+    DEV_TYPE_INTEL_NUC,
+    DEV_TYPE_GEN_X86_64,
+    DEV_TYPE_BBG,
+    DEV_TYPE_BBB,
+];
+const SUPPORTED_DEVICES: [&str; 6] = [
     DEV_TYPE_RPI3,
     DEV_TYPE_RPI4_64,
     DEV_TYPE_INTEL_NUC,
     DEV_TYPE_GEN_X86_64,
+    DEV_TYPE_BBG,
+    DEV_TYPE_BBB,
 ];
 
 const IMG_NAME_GEN_X86_64: &str = "resin-image-genericx86-64-ext.resinos-img";
 const IMG_NAME_INTEL_NUC: &str = "resin-image-genericx86-64.resinos-img";
+const IMG_NAME_BBG: &str = "resin-image-beaglebone-green.resinos-img";
+const IMG_NAME_BBB: &str = "resin-image-beaglebone-black.resinos-img";
 
 fn parse_versions(versions: &Versions) -> Vec<Version> {
     let mut sem_vers: Vec<Version> = versions
@@ -217,11 +228,14 @@ fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
             ),
         ))?;
 
+        debug!("retrieving path for device type '{}'", device_type);
         let img_path = match device_type {
             DEV_TYPE_INTEL_NUC => path_append(path_append(&mount_path, "opt"), IMG_NAME_INTEL_NUC),
             DEV_TYPE_GEN_X86_64 => {
                 path_append(path_append(&mount_path, "opt"), IMG_NAME_GEN_X86_64)
             }
+            DEV_TYPE_BBB => path_append(path_append(&mount_path, "opt"), IMG_NAME_BBB),
+            DEV_TYPE_BBG => path_append(path_append(&mount_path, "opt"), IMG_NAME_BBG),
             _ => {
                 error!(
                     "Encountered undefined image name for device type {}",

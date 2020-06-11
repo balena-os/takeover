@@ -13,7 +13,7 @@ use std::path::Path;
 use crate::common::file_exists;
 use failure::{Fail, ResultExt};
 
-const WPA_CONFIG_FILE: &str = "/etc/wpa_supplicant/wpa_supplicant.conf";
+pub(crate) const WPA_CONFIG_FILE: &str = "/etc/wpa_supplicant/wpa_supplicant.conf";
 
 #[derive(Debug, PartialEq, Clone)]
 enum WpaState {

@@ -5,6 +5,10 @@ use std::fmt::{self, Display};
 pub enum MigErrorKind {
     #[fail(display = "A required item could not be found")]
     NotFound,
+    #[fail(display = "The file could not be found")]
+    FileNotFound,
+    #[fail(display = "The device could not be found")]
+    DeviceNotFound,
     #[fail(display = "An duplicate item was encountered where it should be unique")]
     Duplicate,
     #[fail(display = "An error occured in an upstream function")]

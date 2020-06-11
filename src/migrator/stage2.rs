@@ -27,8 +27,8 @@ use crate::common::{
     defs::{
         BACKUP_ARCH_NAME, BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART, BALENA_CONFIG_PATH,
         BALENA_DATA_FSTYPE, BALENA_DATA_PART, BALENA_IMAGE_NAME, BALENA_IMAGE_PATH, BALENA_PART_MP,
-        DD_CMD, DISK_BY_LABEL_PATH, FUSER_CMD, LOSETUP_CMD, NIX_NONE, OLD_ROOT_MP, PS_CMD,
-        REBOOT_CMD, STAGE2_CONFIG_NAME, SYSTEM_CONNECTIONS_DIR,
+        DD_CMD, DISK_BY_LABEL_PATH, FUSER_CMD, NIX_NONE, OLD_ROOT_MP, PS_CMD, REBOOT_CMD,
+        STAGE2_CONFIG_NAME, SYSTEM_CONNECTIONS_DIR,
     },
     dir_exists,
     disk_util::{Disk, PartInfo, PartitionIterator, DEF_BLOCK_SIZE},
@@ -38,6 +38,9 @@ use crate::common::{
     path_append,
     stage2_config::{Stage2Config, UmountPart},
 };
+
+mod loop_device;
+use loop_device::LoopDevice;
 
 const DD_BLOCK_SIZE: usize = 128 * 1024; // 4_194_304;
 
@@ -402,6 +405,7 @@ fn unmount_partitions(mountpoints: &[UmountPart]) -> Result<(), MigError> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn part_reread(device: &Path) -> Result<i32, MigError> {
     // try ioctrl #define BLKRRPART  _IO(0x12,95)	/* re-read partition table */
     match OpenOptions::new()
@@ -505,38 +509,45 @@ fn transfer_boot_files<P: AsRef<Path>>(dev_root: P) -> Result<(), MigError> {
 
     Ok(())
 }
-
+/*
 fn raw_mount_partition<P1: AsRef<Path>, P2: AsRef<Path>>(
+    loop_device: &LoopDevice,
     partition: &PartInfo,
     device: P2,
     mountpoint: P1,
     fs_type: &str,
 ) -> Result<String, MigError> {
-    let loop_dev = call_busybox!(
-        &[LOSETUP_CMD, "-f"],
-        "Failed determine next free loop device"
-    )?;
-
     let byte_offset = partition.start_lba * DEF_BLOCK_SIZE as u64;
+    let size_limit = partition.num_sectors * DEF_BLOCK_SIZE as u64;
 
-    call_busybox!(
-        &[
-            LOSETUP_CMD,
-            "-o",
-            &byte_offset.to_string(),
-            "-f",
-            &*device.as_ref().to_string_lossy(),
-        ],
-        "Failed to loop-mount partition"
-    )?;
+    debug!(
+        "file '{}' exists: {}",
+        device.as_ref().display(),
+        file_exists(&device)
+    );
+
+    let mut loop_device =
+        match LoopDevice::for_file(device, Some(byte_offset), Some(size_limit), None) {
+            Ok(loop_device) => loop_device,
+            Err(why) => {
+                error!(
+                    "Failed to loop mount device '{}' with offset {}, sizelimit {}, error {:?}",
+                    device.as_ref().display(),
+                    byte_offset,
+                    size_limit,
+                    why
+                );
+                return Err(MigError::displayed());
+            }
+        };
 
     info!(
         "Loop-mounted {} on '{}'",
-        loop_dev,
+        loop_device.get_path().display(),
         mountpoint.as_ref().display()
     );
     mount(
-        Some(loop_dev.as_str()),
+        Some(loop_device.get_path()),
         mountpoint.as_ref(),
         Some(fs_type.as_bytes()),
         MsFlags::empty(),
@@ -565,10 +576,10 @@ fn raw_umount_partition<P: AsRef<Path>>(device: &str, mountpoint: P) -> Result<(
     Ok(())
 }
 
+ */
+
 fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
     debug!("raw_mount_balena called");
-    let mut disk = Disk::from_drive_file(device, None)?;
-    let part_iterator = PartitionIterator::new(&mut disk)?;
 
     let backup_path = path_append(TRANSFER_DIR, BACKUP_ARCH_NAME);
 
@@ -579,75 +590,144 @@ fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
         )))?;
     }
 
-    for partition in part_iterator {
-        debug!(
-            "partition: {}, start: {}, sectors: {}",
-            partition.index, partition.start_lba, partition.num_sectors
-        );
+    let (boot_part, data_part) = {
+        let mut disk = Disk::from_drive_file(device, None)?;
+        let part_iterator = PartitionIterator::new(&mut disk)?;
+        let mut boot_part: Option<PartInfo> = None;
+        let mut data_part: Option<PartInfo> = None;
 
-        match partition.index {
-            1 => {
-                // boot partition
-                // losetup -o offset --sizelimit size --show -f log.img
-                let loop_dev =
-                    raw_mount_partition(&partition, device, BALENA_PART_MP, BALENA_BOOT_FSTYPE)?;
+        for partition in part_iterator {
+            debug!(
+                "partition: {}, start: {}, sectors: {}",
+                partition.index, partition.start_lba, partition.num_sectors
+            );
 
-                info!(
-                    "Mounted boot partition as {} on {}",
-                    loop_dev, BALENA_PART_MP
-                );
-                // TODO: copy files
-
-                transfer_boot_files(BALENA_PART_MP)?;
-
-                sync();
-
-                raw_umount_partition(&loop_dev, BALENA_PART_MP)?;
-
-                if !file_exists(&backup_path) {
-                    return Ok(());
+            match partition.index {
+                1 => {
+                    boot_part = Some(partition);
                 }
-            }
-            2..=4 => debug!("Skipping partition {}", partition.index),
-            5 => {
-                // TODO: transfer backup
-                if file_exists(&backup_path) {
-                    let loop_dev = raw_mount_partition(
-                        &partition,
-                        device,
-                        BALENA_PART_MP,
-                        BALENA_DATA_FSTYPE,
-                    )?;
-
-                    info!(
-                        "Mounted data partition as {} on {}",
-                        loop_dev, BALENA_PART_MP
-                    );
-                    // TODO: copy files
-
-                    let target_path = path_append(BALENA_PART_MP, BACKUP_ARCH_NAME);
-                    copy(&backup_path, &target_path).context(upstream_context!(&format!(
-                        "Failed to copy '{}' to '{}'",
-                        backup_path.display(),
-                        target_path.display()
-                    )))?;
-
-                    sync();
-
-                    raw_umount_partition(&loop_dev, BALENA_PART_MP)?;
-
-                    return Ok(());
+                2..=4 => debug!("Skipping partition {}", partition.index),
+                5 => {
+                    data_part = Some(partition);
+                    break;
                 }
-            }
-            _ => {
-                error!("Invalid partition index encountered: {}", partition.index);
-                return Err(MigError::displayed());
+                _ => {
+                    error!("Invalid partition index encountered: {}", partition.index);
+                    return Err(MigError::displayed());
+                }
             }
         }
+
+        if let Some(boot_part) = boot_part {
+            if let Some(data_part) = data_part {
+                (boot_part, data_part)
+            } else {
+                error!("Data partition could not be found on '{}", device.display());
+                return Err(MigError::displayed());
+            }
+        } else {
+            error!("Boot partition could not be found on '{}", device.display());
+            return Err(MigError::displayed());
+        }
+    };
+
+    let mut loop_device = LoopDevice::get_free()?;
+    info!("Create loop device: '{}'", loop_device.get_path().display());
+    let byte_offset = boot_part.start_lba * DEF_BLOCK_SIZE as u64;
+    let size_limit = boot_part.num_sectors * DEF_BLOCK_SIZE as u64;
+
+    loop_device.setup(&device, Some(byte_offset), Some(size_limit))?;
+    info!(
+        "Setup device '{}' with offset {}, sizelimit {} on '{}'",
+        device.display(),
+        byte_offset,
+        size_limit,
+        loop_device.get_path().display()
+    );
+
+    mount(
+        Some(loop_device.get_path()),
+        BALENA_PART_MP,
+        Some(BALENA_BOOT_FSTYPE.as_bytes()),
+        MsFlags::empty(),
+        NIX_NONE,
+    )
+    .context(upstream_context!(&format!(
+        "Failed to mount {} on {}",
+        loop_device.get_path().display(),
+        BALENA_PART_MP
+    )))?;
+
+    info!(
+        "Mounted boot partition as {} on {}",
+        loop_device.get_path().display(),
+        BALENA_PART_MP
+    );
+    // TODO: copy files
+
+    transfer_boot_files(BALENA_PART_MP)?;
+
+    sync();
+
+    umount(BALENA_PART_MP).context(upstream_context!("Failed to unmount boot partition"))?;
+
+    info!("Unmounted boot partition from {}", BALENA_PART_MP);
+
+    if file_exists(&backup_path) {
+        let byte_offset = data_part.start_lba * DEF_BLOCK_SIZE as u64;
+        let size_limit = data_part.num_sectors * DEF_BLOCK_SIZE as u64;
+
+        loop_device.modify_offset(byte_offset, size_limit)?;
+
+        info!(
+            "Setup device '{}' with offset {}, sizelimit {} on '{}'",
+            device.display(),
+            byte_offset,
+            size_limit,
+            loop_device.get_path().display()
+        );
+
+        mount(
+            Some(loop_device.get_path()),
+            BALENA_PART_MP,
+            Some(BALENA_DATA_FSTYPE.as_bytes()),
+            MsFlags::empty(),
+            NIX_NONE,
+        )
+        .context(upstream_context!(&format!(
+            "Failed to mount {} on {}",
+            loop_device.get_path().display(),
+            BALENA_PART_MP
+        )))?;
+
+        info!(
+            "Mounted data partition as {} on {}",
+            loop_device.get_path().display(),
+            BALENA_PART_MP
+        );
+
+        // TODO: copy files
+
+        let target_path = path_append(BALENA_PART_MP, BACKUP_ARCH_NAME);
+        copy(&backup_path, &target_path).context(upstream_context!(&format!(
+            "Failed to copy '{}' to '{}'",
+            backup_path.display(),
+            target_path.display()
+        )))?;
+
+        sync();
+
+        umount(BALENA_PART_MP).context(upstream_context!("Failed to unmount boot partition"))?;
+
+        info!("Unmounted data partition from {}", BALENA_PART_MP);
     }
+
+    loop_device.unset()?;
+
     Ok(())
 }
 
+#[allow(dead_code)]
 fn sys_mount_balena() -> Result<(), MigError> {
     debug!("sys_mount_balena called");
     sleep(Duration::from_secs(1));
@@ -728,6 +808,14 @@ fn sys_mount_balena() -> Result<(), MigError> {
 }
 
 fn transfer_files(device: &Path) -> Result<(), MigError> {
+    debug!(
+        "file '{}' exists: {}",
+        device.display(),
+        file_exists(device)
+    );
+
+    raw_mount_balena(device)
+    /*
     match part_reread(device) {
         Ok(_) => {
             if file_exists(path_append(DISK_BY_LABEL_PATH, BALENA_BOOT_PART)) {
@@ -738,6 +826,7 @@ fn transfer_files(device: &Path) -> Result<(), MigError> {
         }
         Err(_) => raw_mount_balena(device),
     }
+    */
 }
 
 enum FlashState {
