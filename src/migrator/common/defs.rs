@@ -5,7 +5,7 @@ pub(crate) const SWAPOFF_CMD: &str = "swapoff";
 pub(crate) const CP_CMD: &str = "cp";
 pub(crate) const TELINIT_CMD: &str = "telinit";
 pub(crate) const REBOOT_CMD: &str = "reboot";
-pub(crate) const LOSETUP_CMD: &str = "losetup";
+
 pub(crate) const MOKUTIL_CMD: &str = "mokutil";
 pub(crate) const WHEREIS_CMD: &str = "whereis";
 pub(crate) const PIDOF_CMD: &str = "pidof";

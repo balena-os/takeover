@@ -33,14 +33,12 @@ use crate::common::{
     dir_exists,
     disk_util::{Disk, PartInfo, PartitionIterator, DEF_BLOCK_SIZE},
     file_exists, format_size_with_unit, get_mem_info,
+    loop_device::LoopDevice,
     mig_error::{MigErrCtx, MigError, MigErrorKind},
     options::Options,
     path_append,
     stage2_config::{Stage2Config, UmountPart},
 };
-
-mod loop_device;
-use loop_device::LoopDevice;
 
 const DD_BLOCK_SIZE: usize = 128 * 1024; // 4_194_304;
 
@@ -631,7 +629,7 @@ fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
         }
     };
 
-    let mut loop_device = LoopDevice::get_free()?;
+    let mut loop_device = LoopDevice::get_free(true)?;
     info!("Create loop device: '{}'", loop_device.get_path().display());
     let byte_offset = boot_part.start_lba * DEF_BLOCK_SIZE as u64;
     let size_limit = boot_part.num_sectors * DEF_BLOCK_SIZE as u64;

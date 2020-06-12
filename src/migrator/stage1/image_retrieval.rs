@@ -8,9 +8,9 @@ use semver::{Identifier, Version, VersionReq};
 
 use crate::{
     common::{
-        call,
-        defs::{LOSETUP_CMD, NIX_NONE},
+        defs::NIX_NONE,
         disk_util::{Disk, PartitionIterator, PartitionReader},
+        loop_device::LoopDevice,
         path_append,
         stream_progress::StreamProgress,
         MigErrCtx, MigError, MigErrorKind,
@@ -187,21 +187,9 @@ fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
 
         info!("Finished root_a partition extraction, now mounting to extract balena OS image");
 
-        let cmd_res = call(
-            LOSETUP_CMD,
-            &["--show", "-f", &*extract_file_name.to_string_lossy()],
-            true,
-        )?;
-        let loop_dev = if !cmd_res.status.success() {
-            error!(
-                "Failed to loop mount root_a partition from file '{}'",
-                extract_file_name.display()
-            );
-            return Err(MigError::displayed());
-        } else {
-            cmd_res.stdout
-        };
-        debug!("loop device is '{}'", loop_dev);
+        let mut loop_device = LoopDevice::for_file(&extract_file_name, None, None, None, true)?;
+
+        debug!("loop device is '{}'", loop_device.get_path().display());
 
         let mount_path = path_append(work_dir, "mnt_root_a");
         if !mount_path.exists() {
@@ -213,7 +201,7 @@ fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
 
         debug!("mount path is '{}'", mount_path.display());
         mount(
-            Some(loop_dev.as_bytes()),
+            Some(loop_device.get_path()),
             &mount_path,
             Some(b"ext4".as_ref()),
             MsFlags::empty(),
@@ -223,7 +211,7 @@ fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
             MigErrorKind::Upstream,
             &format!(
                 "Failed to mount '{}' on '{}",
-                loop_dev,
+                loop_device.get_path().display(),
                 mount_path.display()
             ),
         ))?;
@@ -316,22 +304,7 @@ fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
             }
         }
 
-        match call(LOSETUP_CMD, &["-d", &loop_dev], true) {
-            Ok(cmd_res) => {
-                if !cmd_res.status.success() {
-                    warn!(
-                        "Failed to remove loop device '{}', stderr: '{}'",
-                        loop_dev, cmd_res.stderr
-                    );
-                }
-            }
-            Err(why) => {
-                warn!(
-                    "Failed to remove loop device '{}', error: {:?}",
-                    loop_dev, why
-                );
-            }
-        };
+        loop_device.unset()?;
 
         if let Err(why) = fs::remove_file(&extract_file_name) {
             warn!(

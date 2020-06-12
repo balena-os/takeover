@@ -96,12 +96,13 @@ pub struct LoopDevice {
     fd: Fd,
     path: PathBuf,
     file: Option<PathBuf>,
+    unset: bool,
 }
 
 impl LoopDevice {
     /// create or open loop device for index
 
-    pub fn from_index(loop_index: u32) -> Result<LoopDevice, MigError> {
+    pub fn from_index(loop_index: u32, auto_unset: bool) -> Result<LoopDevice, MigError> {
         let path = PathBuf::from(&format!("/dev/loop{}", loop_index));
 
         // try to open device file
@@ -112,6 +113,7 @@ impl LoopDevice {
                     path,
                     fd,
                     file: None,
+                    unset: auto_unset,
                 };
 
                 match loop_dev.get_loop_info() {
@@ -147,6 +149,7 @@ impl LoopDevice {
                             path,
                             fd,
                             file: None,
+                            unset: auto_unset,
                         });
                     } else {
                         return Err(MigError::from_remark(
@@ -170,23 +173,23 @@ impl LoopDevice {
     }
 
     /// create a loop device associated with the given file
-    #[allow(dead_code)]
     pub fn for_file<P: AsRef<Path>>(
         file: P,
         offset: Option<u64>,
         size_limit: Option<u64>,
         loop_index: Option<u32>,
+        auto_unset: bool,
     ) -> Result<LoopDevice, MigError> {
         let mut loop_device = if let Some(loop_index) = loop_index {
-            LoopDevice::from_index(loop_index)?
+            LoopDevice::from_index(loop_index, auto_unset)?
         } else {
-            LoopDevice::get_free()?
+            LoopDevice::get_free(auto_unset)?
         };
         loop_device.setup(file, offset, size_limit)?;
         Ok(loop_device)
     }
 
-    pub fn get_free() -> Result<LoopDevice, MigError> {
+    pub fn get_free(auto_unset: bool) -> Result<LoopDevice, MigError> {
         // Find a free loop device, try use /dev/loop-control first
         match Fd::open("/dev/loop-control", O_RDWR | O_CLOEXEC) {
             Ok(file_fd) => {
@@ -201,14 +204,14 @@ impl LoopDevice {
                     ))
                 } else {
                     // success, return loop number and open device fd
-                    Ok(LoopDevice::from_index(ioctl_res as u32)?)
+                    Ok(LoopDevice::from_index(ioctl_res as u32, auto_unset)?)
                 }
             }
             Err(why) => {
                 if why.kind() == MigErrorKind::FileNotFound {
                     // if /dev/loop-control does not exist scan for free devices manually
                     for loop_idx in 0..MAX_LOOP {
-                        let loop_dev = LoopDevice::from_index(loop_idx)?;
+                        let loop_dev = LoopDevice::from_index(loop_idx, auto_unset)?;
                         if loop_dev.file.is_some() {
                             // device is in use
                             continue;
@@ -233,6 +236,11 @@ impl LoopDevice {
     /// retrieve the loop devices path
     pub fn get_path(&self) -> &Path {
         self.path.as_path()
+    }
+
+    #[allow(dead_code)]
+    pub fn set_auto_unset(&mut self, auto_unset: bool) {
+        self.unset = auto_unset;
     }
 
     fn set_info<P: AsRef<Path>>(
@@ -339,9 +347,10 @@ impl LoopDevice {
         }
     }
 
-    pub fn unset(&self) -> Result<(), MigError> {
+    pub fn unset(&mut self) -> Result<(), MigError> {
         let ioctl_res = unsafe { ioctl(self.fd.get_fd(), IOCTL_LOOP_CLR_FD) };
         if ioctl_res == 0 {
+            self.file = None;
             Ok(())
         } else {
             Err(MigError::from_remark(
@@ -383,7 +392,7 @@ impl LoopDevice {
     pub fn get_loop_infos() -> Result<Vec<LoopInfo64>, MigError> {
         let mut loop_infos: Vec<LoopInfo64> = Vec::new();
         for loop_idx in 0..MAX_LOOP {
-            let loop_dev = match LoopDevice::from_index(loop_idx) {
+            let loop_dev = match LoopDevice::from_index(loop_idx, false) {
                 Ok(loop_dev) => loop_dev,
                 Err(why) => {
                     if why.kind() == MigErrorKind::FileNotFound {
@@ -414,6 +423,16 @@ impl LoopDevice {
             }
         }
         Ok(loop_infos)
+    }
+}
+
+impl Drop for LoopDevice {
+    fn drop(&mut self) {
+        if self.unset {
+            if self.file.is_some() {
+                let _res = self.unset();
+            }
+        }
     }
 }
 

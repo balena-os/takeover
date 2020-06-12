@@ -13,6 +13,8 @@ pub(crate) mod stage2_config;
 
 pub(crate) mod defs;
 
+pub(crate) mod loop_device;
+
 pub mod mig_error;
 pub use mig_error::{MigErrCtx, MigError, MigErrorKind};
 
