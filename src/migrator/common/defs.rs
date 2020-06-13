@@ -38,3 +38,8 @@ pub const SYSTEM_CONNECTIONS_DIR: &str = "system-connections";
 pub const BACKUP_ARCH_NAME: &str = "backup.tgz";
 
 pub const NIX_NONE: Option<&'static [u8]> = None;
+
+#[cfg(not(target_env = "musl"))]
+pub(crate) type IoctlReq = u64;
+#[cfg(target_env = "musl")]
+pub(crate) type IoctlReq = i32;

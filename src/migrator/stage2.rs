@@ -1,7 +1,5 @@
-#![allow(clippy::missing_safety_doc)]
-
 use std::fs::{copy, create_dir, create_dir_all, read_dir, read_to_string, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 
 use std::os::unix::io::AsRawFd;
 use std::process::{exit, Command, Stdio};
@@ -9,7 +7,6 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use nix::{
-    ioctl_none,
     mount::{mount, umount, MsFlags},
     unistd::sync,
 };
@@ -18,10 +15,11 @@ use std::path::{Path, PathBuf};
 
 use failure::{Fail, ResultExt};
 use flate2::read::GzDecoder;
-use libc::{MS_RDONLY, MS_REMOUNT};
+use libc::{ioctl, MS_RDONLY, MS_REMOUNT};
 use log::{debug, error, info, trace, warn, Level};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
+use crate::common::defs::IoctlReq;
 use crate::common::{
     call,
     defs::{
@@ -46,16 +44,13 @@ const VALIDATE_MAX_ERR: usize = 20;
 const DO_VALIDATE: bool = true;
 const VALIDATE_BLOCK_SIZE: usize = 64 * 1024; // 4_194_304;
 
-const BLK_IOC_MAGIC: u8 = 0x12;
-const BLK_RRPART: u8 = 95;
+const IOCTL_BLK_RRPART: IoctlReq = 0x1295;
 
 const TRANSFER_DIR: &str = "/transfer";
 
 const S2_XTRA_FS_SIZE: u64 = 10 * 1024 * 1024;
 
 pub(crate) const BUSYBOX_CMD: &str = "/busybox";
-
-ioctl_none!(blk_reread, BLK_IOC_MAGIC, BLK_RRPART);
 
 pub(crate) fn busybox_reboot() {
     trace!("reboot entered");
@@ -404,7 +399,7 @@ fn unmount_partitions(mountpoints: &[UmountPart]) -> Result<(), MigError> {
 }
 
 #[allow(dead_code)]
-fn part_reread(device: &Path) -> Result<i32, MigError> {
+fn part_reread(device: &Path) -> Result<(), MigError> {
     // try ioctrl #define BLKRRPART  _IO(0x12,95)	/* re-read partition table */
     match OpenOptions::new()
         .read(true)
@@ -412,24 +407,24 @@ fn part_reread(device: &Path) -> Result<i32, MigError> {
         .create(false)
         .open(device)
     {
-        Ok(file) => match unsafe { blk_reread(file.as_raw_fd()) } {
-            Ok(res) => {
+        Ok(file) => {
+            let ioctl_res = unsafe { ioctl(file.as_raw_fd(), IOCTL_BLK_RRPART) };
+            if ioctl_res == 0 {
                 debug!(
                     "Device BLKRRPART IOCTRL to '{}' returned {}",
                     device.display(),
-                    res
+                    ioctl_res
                 );
-                Ok(res)
-            }
-            Err(why) => {
+                Ok(())
+            } else {
                 error!(
-                    "Device BLKRRPART IOCTRL to '{}' failed with error: {:?}",
+                    "Device BLKRRPART IOCTRL to '{}' failed with error: {}",
                     device.display(),
-                    why
+                    io::Error::last_os_error()
                 );
                 Err(MigError::displayed())
             }
-        },
+        }
         Err(why) => {
             error!(
                 "Failed to open device '{}', error: {:?}",

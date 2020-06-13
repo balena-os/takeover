@@ -13,18 +13,23 @@ use std::io;
 
 use std::os::raw::c_int;
 
-use crate::common::mig_error::{MigErrCtx, MigError, MigErrorKind};
+use crate::common::{
+    defs::IoctlReq,
+    mig_error::{MigErrCtx, MigError, MigErrorKind},
+};
 use log::debug;
 
-use libc::{close, ioctl, makedev, mknod, open, EAGAIN, ENOENT, ENXIO, O_CLOEXEC, O_RDWR, S_IFBLK};
+use libc::{
+    self, close, ioctl, makedev, mknod, open, EAGAIN, ENOENT, ENXIO, O_CLOEXEC, O_RDWR, S_IFBLK,
+};
 
 const MAX_LOOP: u32 = 1024;
 
-const IOCTL_LOOP_SET_FD: u64 = 0x4c00;
-const IOCTL_LOOP_CLR_FD: u64 = 0x4c01;
-const IOCTL_LOOP_CTL_GET_FREE: u64 = 0x4c82;
-const IOCTL_LOOP_GET_STATUS_64: u64 = 0x4c05;
-const IOCTL_LOOP_SET_STATUS_64: u64 = 0x4c04;
+const IOCTL_LOOP_SET_FD: IoctlReq = 0x4c00;
+const IOCTL_LOOP_CLR_FD: IoctlReq = 0x4c01;
+const IOCTL_LOOP_CTL_GET_FREE: IoctlReq = 0x4c82;
+const IOCTL_LOOP_GET_STATUS_64: IoctlReq = 0x4c05;
+const IOCTL_LOOP_SET_STATUS_64: IoctlReq = 0x4c04;
 
 // from /usr/src/linux/loop.h
 
