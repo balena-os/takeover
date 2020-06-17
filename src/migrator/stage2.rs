@@ -629,6 +629,14 @@ fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
     let byte_offset = boot_part.start_lba * DEF_BLOCK_SIZE as u64;
     let size_limit = boot_part.num_sectors * DEF_BLOCK_SIZE as u64;
 
+    debug!(
+        "Setting up device '{}' with offset {}, sizelimit {} on '{}'",
+        device.display(),
+        byte_offset,
+        size_limit,
+        loop_device.get_path().display()
+    );
+
     loop_device.setup(&device, Some(byte_offset), Some(size_limit))?;
     info!(
         "Setup device '{}' with offset {}, sizelimit {} on '{}'",

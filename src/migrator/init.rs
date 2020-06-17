@@ -5,7 +5,9 @@ use crate::{
 };
 use log::{error, info, trace, warn};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
+use std::ffi::CString;
 use std::fs::create_dir_all;
+use std::io;
 use std::mem::MaybeUninit;
 use std::os::raw::c_int;
 use std::path::{Path, PathBuf};
@@ -22,7 +24,10 @@ use nix::{
     unistd::sync,
 };
 
-use libc::{close, getpid, sigfillset, sigprocmask, sigset_t, wait, SIG_BLOCK};
+use libc::{
+    close, dup2, getpid, open, sigfillset, sigprocmask, sigset_t, wait, O_CREAT, O_TRUNC, O_WRONLY,
+    SIG_BLOCK, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO,
+};
 
 fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<(), MigError> {
     let log_dev = log_dev.as_ref();
@@ -82,9 +87,47 @@ fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<(), MigError> {
     }
 }
 
-fn close_fds() -> i32 {
-    const START_FD: i32 = 0;
-    let mut close_count = 0;
+fn redirect_fd(file_name: &str, old_fd: c_int, mode: c_int) -> Result<(), MigError> {
+    let filename = CString::new(file_name)
+        .context(upstream_context!(&format!(
+            "Invalid filename: '{}'",
+            file_name
+        )))?
+        .into_raw();
+
+    let new_fd = unsafe { open(filename, mode) };
+    unsafe { CString::from_raw(filename) };
+    if new_fd >= 0 {
+        let res = unsafe { dup2(new_fd, old_fd) };
+        if res >= 0 {
+            unsafe { close(new_fd) };
+            Ok(())
+        } else {
+            error!(
+                "Failed to redirect STDOUT to '{}', error: {}",
+                file_name,
+                io::Error::last_os_error()
+            );
+            Err(MigError::displayed())
+        }
+    } else {
+        error!(
+            "Failed to open '{}', error: {}",
+            file_name,
+            io::Error::last_os_error()
+        );
+        Err(MigError::displayed())
+    }
+}
+
+fn close_fds() -> Result<i32, MigError> {
+    unsafe { close(STDIN_FILENO) };
+
+    redirect_fd("/stdout.log", STDOUT_FILENO, O_WRONLY | O_CREAT | O_TRUNC)?;
+    redirect_fd("/stderr.log", STDERR_FILENO, O_WRONLY | O_CREAT | O_TRUNC)?;
+
+    const START_FD: i32 = 3;
+    let mut close_count = 1;
     for fd in START_FD..1024 {
         unsafe {
             match fcntl(fd, F_GETFD) {
@@ -105,7 +148,7 @@ fn close_fds() -> i32 {
             }
         };
     }
-    close_count
+    Ok(close_count)
 }
 
 pub fn init(opts: &Options) {
@@ -122,14 +165,22 @@ pub fn init(opts: &Options) {
     info!("Stage 2 entered");
 
     if unsafe { getpid() } != 1 {
-        error!("Process must be pid 1 to run stage2");
+        error!("Process must be pid 1 to run init");
         busybox_reboot();
         return;
     }
 
     info!("Stage 2 check pid success!");
 
-    info!("Stage 2 closed {} fd's", close_fds());
+    let closed_fds = match close_fds() {
+        Ok(fds) => fds,
+        Err(_) => {
+            error!("Failed close open files");
+            busybox_reboot();
+            return;
+        }
+    };
+    info!("Stage 2 closed {} fd's", closed_fds);
 
     let s2_config = match read_stage2_config() {
         Ok(s2_config) => s2_config,

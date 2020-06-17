@@ -8,8 +8,9 @@ use std::time::Duration;
 
 use nix::errno::errno;
 use std::cmp::min;
-use std::ffi::{CStr, CString};
+use std::ffi::{CString, OsStr, OsString};
 use std::io;
+use std::os::unix::ffi::OsStrExt;
 
 use std::os::raw::c_int;
 
@@ -17,7 +18,7 @@ use crate::common::{
     defs::IoctlReq,
     mig_error::{MigErrCtx, MigError, MigErrorKind},
 };
-use log::debug;
+use log::{debug, trace};
 
 use libc::{
     self, close, ioctl, makedev, mknod, open, EAGAIN, ENOENT, ENXIO, O_CLOEXEC, O_RDWR, S_IFBLK,
@@ -83,8 +84,8 @@ impl Debug for LoopInfo64 {
             .field("lo_encrypt_type", &self.lo_encrypt_type)
             .field("lo_encrypt_key_size", &self.lo_encrypt_key_size)
             .field("lo_flags", &self.lo_flags)
-            .field("lo_file_name", &u8_slice_to_string(&self.lo_file_name))
-            .field("lo_crypt_name", &u8_slice_to_string(&self.lo_crypt_name))
+            .field("lo_file_name", &cbuffer_to_pathbuf(&self.lo_file_name))
+            .field("lo_crypt_name", &hex_dump(&self.lo_crypt_name))
             .field(
                 "lo_encrypt_key",
                 &key_to_string(
@@ -124,8 +125,7 @@ impl LoopDevice {
                 match loop_dev.get_loop_info() {
                     Ok(loop_info) => {
                         // valid loop info, grab path
-                        loop_dev.file =
-                            Some(PathBuf::from(cbuffer_to_string(&loop_info.lo_file_name)))
+                        loop_dev.file = Some(cbuffer_to_pathbuf(&loop_info.lo_file_name))
                     }
                     Err(why) => {
                         if why.kind() != MigErrorKind::DeviceNotFound {
@@ -254,9 +254,18 @@ impl LoopDevice {
         offset: u64,
         sizelimit: u64,
     ) -> Result<(), MigError> {
+        trace!(
+            "set_info: entered on '{}' with file: '{}', offset: 0x{:x}, size limit: 0x{:x}",
+            self.path.display(),
+            file.as_ref().display(),
+            offset,
+            sizelimit
+        );
         let mut loop_info: LoopInfo64 = unsafe { MaybeUninit::zeroed().assume_init() };
 
         path_to_cbuffer(file, &mut loop_info.lo_file_name)?;
+        debug!("lo_file_name:\n{}", hex_dump(&loop_info.lo_file_name));
+
         loop_info.lo_offset = offset;
         loop_info.lo_sizelimit = sizelimit;
 
@@ -297,6 +306,14 @@ impl LoopDevice {
         offset: Option<u64>,
         sizelimit: Option<u64>,
     ) -> Result<(), MigError> {
+        trace!(
+            "setup: on '{}' entered with '{}', offset: {}, size limit: {}",
+            self.path.display(),
+            file.as_ref().display(),
+            offset.is_some(),
+            sizelimit.is_some()
+        );
+
         if self.file.is_some() {
             return Err(MigError::from_remark(
                 MigErrorKind::InvState,
@@ -322,9 +339,18 @@ impl LoopDevice {
             0
         };
 
+        debug!("setup: calling IOCTL_LOOP_SET_FD",);
+
         let ioctl_res = unsafe { ioctl(self.fd.get_fd(), IOCTL_LOOP_SET_FD, file_fd.get_fd()) };
         if ioctl_res == 0 {
             // TODO: possibly initialze LoopInfo using get_loop_info_for_index
+            debug!(
+                "setup: offset: calling setinfo with file: '{}', offset: 0x{:x}, sizelimit: 0x{:x}",
+                abs_file.display(),
+                offset,
+                sizelimit
+            );
+
             self.set_info(&abs_file, offset, sizelimit)?;
             self.file = Some(abs_file);
             // TODO: cleanup (unset file)
@@ -441,36 +467,6 @@ impl Drop for LoopDevice {
     }
 }
 
-fn path_to_cstring<P: AsRef<Path>>(path: P) -> Result<CString, MigError> {
-    Ok(
-        CString::new(&*path.as_ref().to_string_lossy()).context(upstream_context!(&format!(
-            "Failed to convert path '{}' to c_str",
-            path.as_ref().display()
-        )))?,
-    )
-}
-
-fn cbuffer_to_string(buffer: &[u8]) -> String {
-    let c_string = buffer.as_ptr() as *const i8;
-    let temp = unsafe { CStr::from_ptr(c_string) };
-    String::from(&*temp.to_string_lossy())
-}
-
-fn path_to_cbuffer<P: AsRef<Path>>(path: P, buffer: &mut [u8]) -> Result<(), MigError> {
-    let c_string = path_to_cstring(path)?;
-    let src = c_string.to_bytes();
-    if src.len() > buffer.len() {
-        return Err(MigError::from_remark(
-            MigErrorKind::InvParam,
-            "path_to_cbuffer: insufficient target buffer size",
-        ));
-    }
-    for idx in 0..src.len() {
-        buffer[idx] = src[idx];
-    }
-    Ok(())
-}
-
 struct Fd {
     fd: c_int,
 }
@@ -479,12 +475,18 @@ impl Fd {
     fn get_fd(&self) -> c_int {
         self.fd
     }
+
     fn open<P: AsRef<Path>>(file: P, mode: c_int) -> Result<Fd, MigError> {
         let file_name = path_to_cstring(&file)?;
         let fname_ptr = file_name.into_raw();
         let fd = unsafe { open(fname_ptr, mode) };
         let _file_name = unsafe { CString::from_raw(fname_ptr) };
         if fd >= 0 {
+            debug!(
+                "Fd::open: opened path: '{}' as fd {}",
+                file.as_ref().display(),
+                fd
+            );
             Ok(Fd { fd })
         } else {
             if errno() == ENOENT {
@@ -517,6 +519,52 @@ impl Drop for Fd {
     }
 }
 
+fn path_to_cstring<P: AsRef<Path>>(path: P) -> Result<CString, MigError> {
+    let temp: OsString = path.as_ref().into();
+    Ok(
+        CString::new(temp.as_bytes()).context(upstream_context!(&format!(
+            "Failed to convert path to CString: '{}'",
+            path.as_ref().display()
+        )))?,
+    )
+}
+
+fn path_to_cbuffer<P: AsRef<Path>>(path: P, buffer: &mut [u8]) -> Result<(), MigError> {
+    let c_string = path_to_cstring(path)?;
+    let src = c_string.to_bytes_with_nul();
+    if src.len() > buffer.len() {
+        return Err(MigError::from_remark(
+            MigErrorKind::InvParam,
+            "path_to_cbuffer: insufficient target buffer size",
+        ));
+    }
+    buffer[0..src.len()].copy_from_slice(src);
+    Ok(())
+}
+
+fn cbuffer_to_pathbuf(buffer: &[u8]) -> PathBuf {
+    let mut num_chars = buffer.len();
+    for (idx, el) in buffer.iter().enumerate() {
+        if *el == 0 {
+            num_chars = idx;
+            break;
+        }
+    }
+
+    PathBuf::from(OsStr::from_bytes(&buffer[0..num_chars]))
+}
+
+/// check if buffer contains a valid c_string
+#[allow(dead_code)]
+fn check_str_buffer(buffer: &[u8]) -> bool {
+    for el in buffer {
+        if *el == 0 {
+            return true;
+        }
+    }
+    return false;
+}
+
 pub(crate) fn key_to_string(key: &[u8], max_len: Option<usize>) -> String {
     let max_len = if let Some(max_len) = max_len {
         min(max_len, key.len())
@@ -531,29 +579,22 @@ pub(crate) fn key_to_string(key: &[u8], max_len: Option<usize>) -> String {
     res
 }
 
-pub(crate) fn u8_slice_to_string(str: &[u8]) -> Result<String, MigError> {
-    u8_ptr_to_string(str.as_ptr(), Some(str.len()))
-}
-
-pub(crate) fn u8_ptr_to_string(str: *const u8, max_len: Option<usize>) -> Result<String, MigError> {
-    let max_len = if let Some(max_len) = max_len {
-        max_len
-    } else {
-        256
-    };
-
-    let mut res: Vec<u8> = Vec::new();
-    for idx in 0..max_len {
-        let curr_ptr: *const u8 = unsafe { str.offset(idx as isize) };
-        let curr_val = unsafe { *curr_ptr };
-        if curr_val == 0 {
-            break;
-        } else {
-            res.push(curr_val);
+pub fn hex_dump(buffer: &[u8]) -> String {
+    let mut idx = 0;
+    let mut output = String::new();
+    while idx < buffer.len() {
+        output.push_str(&format!("0x{:08x}: ", idx));
+        for _ in 0..min(buffer.len() - idx, 16) {
+            let byte = buffer[idx];
+            let char: char = if (byte as u8).is_ascii_alphanumeric() {
+                char::from(byte as u8)
+            } else {
+                '.'
+            };
+            output.push_str(&format!("{:02x} {}  ", byte, char));
+            idx += 1;
         }
+        output.push('\n');
     }
-    let temp = CString::new(res).context(upstream_context!(
-        "Failed to create CString from c_char pointer"
-    ))?;
-    Ok(String::from(&*temp.to_string_lossy()))
+    output
 }
