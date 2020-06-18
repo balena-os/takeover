@@ -21,7 +21,8 @@ use crate::common::{
 use log::{debug, trace};
 
 use libc::{
-    self, close, ioctl, makedev, mknod, open, EAGAIN, ENOENT, ENXIO, O_CLOEXEC, O_RDWR, S_IFBLK,
+    self, close, ioctl, makedev, mknod, open, EAGAIN, ENODEV, ENOENT, ENXIO, O_CLOEXEC, O_RDWR,
+    S_IFBLK,
 };
 
 const MAX_LOOP: u32 = 1024;
@@ -109,6 +110,11 @@ impl LoopDevice {
     /// create or open loop device for index
 
     pub fn from_index(loop_index: u32, auto_unset: bool) -> Result<LoopDevice, MigError> {
+        trace!(
+            "from_index: entered with index {}, autounset: {}",
+            loop_index,
+            auto_unset
+        );
         let path = PathBuf::from(&format!("/dev/loop{}", loop_index));
 
         // try to open device file
@@ -213,15 +219,22 @@ impl LoopDevice {
                 }
             }
             Err(why) => {
+                debug!("open /dev/loop-control returned error {:?}", why.kind());
                 if why.kind() == MigErrorKind::FileNotFound {
                     // if /dev/loop-control does not exist scan for free devices manually
+                    debug!("/dev/loop-control does not exist scanning for free devices manually");
                     for loop_idx in 0..MAX_LOOP {
-                        let loop_dev = LoopDevice::from_index(loop_idx, auto_unset)?;
-                        if loop_dev.file.is_some() {
-                            // device is in use
-                            continue;
+                        if PathBuf::from(&format!("/dev/loop{}", loop_idx)).exists() {
+                            let mut loop_dev = LoopDevice::from_index(loop_idx, false)?;
+                            if loop_dev.file.is_some() {
+                                // device is in use
+                                continue;
+                            } else {
+                                loop_dev.unset = auto_unset;
+                                return Ok(loop_dev);
+                            }
                         } else {
-                            return Ok(loop_dev);
+                            return Ok(LoopDevice::from_index(loop_idx, auto_unset)?);
                         }
                     }
                     Err(MigError::from_remark(
@@ -329,7 +342,7 @@ impl LoopDevice {
                 file.as_ref().display()
             )))?;
 
-        let file_fd = Fd::open(&abs_file, O_RDWR | O_CLOEXEC)?;
+        let file_fd = Fd::open(&abs_file, O_RDWR)?;
 
         let offset = if let Some(offset) = offset { offset } else { 0 };
 
@@ -423,34 +436,24 @@ impl LoopDevice {
     pub fn get_loop_infos() -> Result<Vec<LoopInfo64>, MigError> {
         let mut loop_infos: Vec<LoopInfo64> = Vec::new();
         for loop_idx in 0..MAX_LOOP {
-            let loop_dev = match LoopDevice::from_index(loop_idx, false) {
-                Ok(loop_dev) => loop_dev,
-                Err(why) => {
-                    if why.kind() == MigErrorKind::FileNotFound {
-                        continue;
-                    } else {
-                        return Err(from_upstream!(
-                            why,
-                            &format!("Failed to open loop device for index {}", loop_idx)
-                        ));
+            if PathBuf::from(&format!("/dev/loop{}", loop_idx)).exists() {
+                match LoopDevice::from_index(loop_idx, false) {
+                    Ok(loop_dev) => {
+                        if loop_dev.file.is_some() {
+                            loop_infos.push(loop_dev.get_loop_info()?);
+                        }
+                    }
+                    Err(why) => {
+                        if why.kind() == MigErrorKind::FileNotFound {
+                            continue;
+                        } else {
+                            return Err(from_upstream!(
+                                why,
+                                &format!("Failed to open loop device for index {}", loop_idx)
+                            ));
+                        }
                     }
                 }
-            };
-            match loop_dev.get_loop_info() {
-                Ok(loop_info) => {
-                    loop_infos.push(loop_info);
-                }
-                Err(why) => match why.kind() {
-                    MigErrorKind::DeviceNotFound | MigErrorKind::FileNotFound => {
-                        continue;
-                    }
-                    _ => {
-                        return Err(from_upstream!(
-                            why,
-                            &format!("Failed to open device for index {}", loop_idx)
-                        ))
-                    }
-                },
             }
         }
         Ok(loop_infos)
@@ -489,7 +492,14 @@ impl Fd {
             );
             Ok(Fd { fd })
         } else {
-            if errno() == ENOENT {
+            let err_no = errno();
+            debug!(
+                "Fd:open: failed to open file '{}', error {}, ",
+                file.as_ref().display(),
+                err_no,
+            );
+
+            if (err_no == ENOENT) || (err_no == ENODEV) {
                 Err(MigError::from_remark(
                     MigErrorKind::FileNotFound,
                     &format!(

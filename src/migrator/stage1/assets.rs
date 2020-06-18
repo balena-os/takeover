@@ -20,6 +20,8 @@ const BUSYBOX_BIN: &[u8] = include_bytes!("../../../assets/armv7/busybox.gz");
 #[cfg(target_arch = "x86_64")]
 const BUSYBOX_BIN: &[u8] = include_bytes!("../../../assets/x86_64/busybox.gz");
 
+const BUILD_NUM: &[u8] = include_bytes!("../../../assets/build.num");
+
 const STAGE2_SCRIPT: &str = r###"#!__TO__/busybox sh
 echo "takeover init started"
 if [ -f "__TO____TTY__" ]; then 
@@ -54,6 +56,19 @@ impl Assets {
             arch,
             busybox: BUSYBOX_BIN,
         }
+    }
+
+    pub fn get_build_num() -> Result<u32, MigError> {
+        let build_str = String::from_utf8(BUILD_NUM.to_owned()).context(upstream_context!(
+            &format!("Failed to parse string from build num {:?}", BUILD_NUM)
+        ))?;
+
+        Ok(build_str
+            .parse::<u32>()
+            .context(upstream_context!(&format!(
+                "Failed to parse buuild num from string '{}'",
+                build_str
+            )))?)
     }
 
     pub fn write_stage2_script<P1: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(

@@ -70,6 +70,8 @@ pub struct Options {
     no_nwmgr_check: bool,
     #[structopt(long, help = "Do not migrate host-name")]
     no_keep_name: bool,
+    #[structopt(long, help = "print build num and exit")]
+    build_num: bool,
     #[structopt(
         long,
         value_name = "TIMEOUT",
@@ -150,6 +152,9 @@ impl Options {
         self.pretend
     }
 
+    pub fn is_build_num(&self) -> bool {
+        self.build_num
+    }
     pub fn get_log_level(&self) -> Level {
         self.log_level
     }

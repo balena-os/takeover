@@ -13,7 +13,7 @@ use nix::{
 
 use failure::ResultExt;
 use libc::MS_BIND;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 
 pub(crate) mod migrate_info;
 use migrate_info::MigrateInfo;
@@ -252,6 +252,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
 
     let curr_path = takeover_dir.join("dev");
     if mount_fs(&curr_path, "dev", "devtmpfs", mig_info).is_err() {
+        warn!("Failed to mount devtmpfs on /dev, trying to copy device nodes");
         mount_fs(&curr_path, "tmpfs", "tmpfs", mig_info)?;
 
         let cmd_res = call(
@@ -261,7 +262,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
         )?;
         if !cmd_res.status.success() {
             error!(
-                "Failed to copy /dev file systemto '{}', error : '{}",
+                "Failed to copy /dev file system to '{}', error : '{}",
                 curr_path.display(),
                 cmd_res.stderr
             );
@@ -276,6 +277,12 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
             )))?;
         }
     }
+
+    debug!(
+        "check if /dev/loop-control exists: in old /dev: {}, in new /dev: {}",
+        file_exists("/dev/loop-control"),
+        file_exists(path_append(&curr_path, "loop-control"))
+    );
 
     let curr_path = takeover_dir.join("dev/pts");
     mount_fs(&curr_path, "devpts", "devpts", mig_info)?;
@@ -409,6 +416,11 @@ pub fn stage1(opts: &Options) -> Result<(), MigError> {
     Logger::set_brief_info(true);
     Logger::set_color(true);
 
+    if opts.is_build_num() {
+        println!("build: {}", Assets::get_build_num()?);
+        return Ok(());
+    }
+
     let log_file = PathBuf::from("./stage1.log");
     if let Err(why) = Logger::set_log_file(&LogDestination::StreamStderr, &log_file, true) {
         error!(
@@ -428,7 +440,7 @@ pub fn stage1(opts: &Options) -> Result<(), MigError> {
 
     match prepare(&opts, &mut mig_info) {
         Ok(_) => {
-            info!("Takeover initiated successfully, please wait for the device to reboot");
+            info!("Takeover initiated successfully, please wait for the device to be reflashed and reboot");
             Logger::flush();
             sync();
             sleep(Duration::from_secs(10));
