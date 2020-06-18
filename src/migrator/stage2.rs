@@ -1072,6 +1072,11 @@ pub fn stage2(opts: &Options) {
 
     setup_logging(&s2_config.log_dev);
 
+    if (opts.get_s2_log_level() == Level::Debug) || (opts.get_s2_log_level() == Level::Trace) {
+        use crate::common::debug::check_loop_control;
+        check_loop_control("Stage2 init", "/dev");
+    }
+
     //match kill_procs1(&["takeover"], 15) {
 
     let _res = kill_procs(opts.get_s2_log_level());
@@ -1091,6 +1096,11 @@ pub fn stage2(opts: &Options) {
             error!("unmount_partitions failed; {:?}", why);
             busybox_reboot();
         }
+    }
+
+    if (opts.get_s2_log_level() == Level::Debug) || (opts.get_s2_log_level() == Level::Trace) {
+        use crate::common::debug::check_loop_control;
+        check_loop_control("Stage2 before flash", "/dev");
     }
 
     if s2_config.pretend {
@@ -1129,11 +1139,19 @@ pub fn stage2(opts: &Options) {
         }
     }
 
-    if let Err(why) = transfer_files(&s2_config.flash_dev) {
-        error!("Failed to transfer files to balena OS, error: {:?}", why);
+    sleep(Duration::from_secs(5));
+
+    if (opts.get_s2_log_level() == Level::Debug) || (opts.get_s2_log_level() == Level::Trace) {
+        use crate::common::debug::check_loop_control;
+        check_loop_control("Stage2 after flash", "/dev");
     }
 
-    info!("Migration succeded successfully");
+    if let Err(why) = transfer_files(&s2_config.flash_dev) {
+        error!("Failed to transfer files to balena OS, error: {:?}", why);
+    } else {
+        info!("Migration succeded successfully");
+    }
+
     sync();
 
     busybox_reboot();

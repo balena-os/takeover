@@ -138,7 +138,7 @@ impl LoopDevice {
                             return Err(from_upstream!(
                                 why,
                                 &format!(
-                                    "failed to retrieve loop info from device'{}'",
+                                    "from_index: failed to retrieve loop info from device'{}'",
                                     loop_dev.path.display()
                                 )
                             ));
@@ -166,7 +166,7 @@ impl LoopDevice {
                         return Err(MigError::from_remark(
                             MigErrorKind::Upstream,
                             &format!(
-                                "Failed to create device node '{}', error {}",
+                                "from_index: Failed to create device node '{}', error {}",
                                 path.display(),
                                 io::Error::last_os_error().to_string()
                             ),
@@ -176,7 +176,7 @@ impl LoopDevice {
                     // some other error opening device
                     Err(from_upstream!(
                         why,
-                        &format!("Failed to open device '{}'", path.display())
+                        &format!("from_index: Failed to open device '{}'", path.display())
                     ))
                 }
             }
@@ -209,7 +209,7 @@ impl LoopDevice {
                     Err(MigError::from_remark(
                         MigErrorKind::Upstream,
                         &format!(
-                            "ioctl IOCTL_LOOP_CTL_GET_FREE failed with error: {}",
+                            "get_free: ioctl IOCTL_LOOP_CTL_GET_FREE failed with error: {}",
                             io::Error::last_os_error().to_string()
                         ),
                     ))
@@ -219,10 +219,13 @@ impl LoopDevice {
                 }
             }
             Err(why) => {
-                debug!("open /dev/loop-control returned error {:?}", why.kind());
+                debug!(
+                    "get_free: open /dev/loop-control returned error {:?}",
+                    why.kind()
+                );
                 if why.kind() == MigErrorKind::FileNotFound {
                     // if /dev/loop-control does not exist scan for free devices manually
-                    debug!("/dev/loop-control does not exist scanning for free devices manually");
+                    debug!("get_free: /dev/loop-control does not exist scanning for free devices manually");
                     for loop_idx in 0..MAX_LOOP {
                         if PathBuf::from(&format!("/dev/loop{}", loop_idx)).exists() {
                             let mut loop_dev = LoopDevice::from_index(loop_idx, false)?;
@@ -239,12 +242,12 @@ impl LoopDevice {
                     }
                     Err(MigError::from_remark(
                         MigErrorKind::NotFound,
-                        "No free loop device was found",
+                        "get_free: No free loop device was found",
                     ))
                 } else {
                     Err(MigError::from_remark(
                         MigErrorKind::NotFound,
-                        "Unable to open /dev/loop-control",
+                        "get_free: Unable to open /dev/loop-control",
                     ))
                 }
             }
@@ -277,21 +280,27 @@ impl LoopDevice {
         let mut loop_info: LoopInfo64 = unsafe { MaybeUninit::zeroed().assume_init() };
 
         path_to_cbuffer(file, &mut loop_info.lo_file_name)?;
-        debug!("lo_file_name:\n{}", hex_dump(&loop_info.lo_file_name));
+        debug!(
+            "set_info: lo_file_name:\n{}",
+            hex_dump(&loop_info.lo_file_name)
+        );
 
         loop_info.lo_offset = offset;
         loop_info.lo_sizelimit = sizelimit;
 
         let mut retries = 3;
         loop {
-            debug!("calling IOCTL_LOOP_SET_STATUS_64, attempt {}", 4 - retries);
+            debug!(
+                "set_info: calling IOCTL_LOOP_SET_STATUS_64, attempt {}",
+                4 - retries
+            );
             let ioctl_res =
                 unsafe { ioctl(self.fd.get_fd(), IOCTL_LOOP_SET_STATUS_64, &loop_info) };
             if ioctl_res == 0 {
                 return Ok(());
             } else {
                 debug!(
-                    "ioctl IOCTL_LOOP_SET_STATUS_64 returned {}",
+                    "set_info: ioctl IOCTL_LOOP_SET_STATUS_64 returned {}",
                     io::Error::last_os_error()
                 );
                 if errno() == EAGAIN {
@@ -303,7 +312,7 @@ impl LoopDevice {
                     return Err(MigError::from_remark(
                         MigErrorKind::Upstream,
                         &format!(
-                            "ioctl IOCTL_LOOP_SET_STATUS_64 failed on device '{}', error {}",
+                            "set_info: ioctl IOCTL_LOOP_SET_STATUS_64 failed on device '{}', error {}",
                             self.path.display(),
                             io::Error::last_os_error()
                         ),
@@ -338,7 +347,7 @@ impl LoopDevice {
             .as_ref()
             .canonicalize()
             .context(upstream_context!(&format!(
-                "Failed to canonicalize path '{}'",
+                "setup: Failed to canonicalize path '{}'",
                 file.as_ref().display()
             )))?;
 
@@ -372,7 +381,7 @@ impl LoopDevice {
             Err(MigError::from_remark(
                 MigErrorKind::Upstream,
                 &format!(
-                    "ioctrl IOCTL_LOOP_SET_FD failed on device '{}' with error {}",
+                    "setup: ioctrl IOCTL_LOOP_SET_FD failed on device '{}' with error {}",
                     self.path.display(),
                     io::Error::last_os_error().to_string()
                 ),
@@ -386,7 +395,10 @@ impl LoopDevice {
         } else {
             Err(MigError::from_remark(
                 MigErrorKind::InvState,
-                &format!("Device has no associated file: '{}'", self.path.display()),
+                &format!(
+                    "modify_offset: Device has no associated file: '{}'",
+                    self.path.display()
+                ),
             ))
         }
     }
@@ -400,7 +412,7 @@ impl LoopDevice {
             Err(MigError::from_remark(
                 MigErrorKind::Upstream,
                 &format!(
-                    "Failed to reset loop device '{}', error: {}",
+                    "unset: Failed to reset loop device '{}', error: {}",
                     self.path.display(),
                     io::Error::last_os_error()
                 ),
@@ -417,13 +429,16 @@ impl LoopDevice {
             if errno() == ENXIO {
                 Err(MigError::from_remark(
                     MigErrorKind::DeviceNotFound,
-                    &format!("Not a valid loop device: '{}'", self.path.display()),
+                    &format!(
+                        "get_loop_info: Not a valid loop device: '{}'",
+                        self.path.display()
+                    ),
                 ))
             } else {
                 Err(MigError::from_remark(
                     MigErrorKind::Upstream,
                     &format!(
-                        "ioctl IOCTL_LOOP_GET_STATUS_64 on '{}' failed with error {}",
+                        "get_loop_info: ioctl IOCTL_LOOP_GET_STATUS_64 on '{}' failed with error {}",
                         self.path.display(),
                         io::Error::last_os_error().to_string()
                     ),
@@ -449,7 +464,10 @@ impl LoopDevice {
                         } else {
                             return Err(from_upstream!(
                                 why,
-                                &format!("Failed to open loop device for index {}", loop_idx)
+                                &format!(
+                                    "get_loop_infos: Failed to open loop device for index {}",
+                                    loop_idx
+                                )
                             ));
                         }
                     }
@@ -503,7 +521,7 @@ impl Fd {
                 Err(MigError::from_remark(
                     MigErrorKind::FileNotFound,
                     &format!(
-                        "Failed to open file '{}', error {}",
+                        "Fd::open: Failed to open file '{}', error {}",
                         file.as_ref().display(),
                         io::Error::last_os_error()
                     ),
@@ -512,7 +530,7 @@ impl Fd {
                 Err(MigError::from_remark(
                     MigErrorKind::Upstream,
                     &format!(
-                        "Failed to open file '{}', error {}",
+                        "Fd::open: Failed to open file '{}', error {}",
                         file.as_ref().display(),
                         io::Error::last_os_error()
                     ),

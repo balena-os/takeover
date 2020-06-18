@@ -20,7 +20,7 @@ const BUSYBOX_BIN: &[u8] = include_bytes!("../../../assets/armv7/busybox.gz");
 #[cfg(target_arch = "x86_64")]
 const BUSYBOX_BIN: &[u8] = include_bytes!("../../../assets/x86_64/busybox.gz");
 
-const BUILD_NUM: &[u8] = include_bytes!("../../../assets/build.num");
+const BUILD_NUM: &[u8] = include_bytes!("../../../build.num");
 
 const STAGE2_SCRIPT: &str = r###"#!__TO__/busybox sh
 echo "takeover init started"

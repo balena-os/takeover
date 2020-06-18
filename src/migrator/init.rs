@@ -25,8 +25,8 @@ use nix::{
 };
 
 use libc::{
-    close, dup2, getpid, open, sigfillset, sigprocmask, sigset_t, wait, O_CREAT, O_TRUNC, O_WRONLY,
-    SIG_BLOCK, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO,
+    close, dup2, getpid, open, pipe, sigfillset, sigprocmask, sigset_t, wait, O_CREAT, O_TRUNC,
+    O_WRONLY, SIG_BLOCK, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO,
 };
 
 fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<(), MigError> {
@@ -121,7 +121,27 @@ fn redirect_fd(file_name: &str, old_fd: c_int, mode: c_int) -> Result<(), MigErr
 }
 
 fn close_fds() -> Result<i32, MigError> {
-    unsafe { close(STDIN_FILENO) };
+    let mut pipe_fds: [c_int; 2] = [0; 2];
+    let sys_rc = unsafe { pipe(pipe_fds.as_mut_ptr()) };
+
+    if sys_rc >= 0 {
+        let sys_rc = unsafe { dup2(pipe_fds[0], STDIN_FILENO) };
+        if sys_rc >= 0 {
+            let _sys_rc = unsafe { close(pipe_fds[0]) };
+        } else {
+            error!(
+                "Failed to dup2 pipe read handle to stdin, error: {}",
+                io::Error::last_os_error()
+            );
+            return Err(MigError::displayed());
+        }
+    } else {
+        error!(
+            "Failed to create pipe for stdin, error: {}",
+            io::Error::last_os_error()
+        );
+        return Err(MigError::displayed());
+    }
 
     redirect_fd("/stdout.log", STDOUT_FILENO, O_WRONLY | O_CREAT | O_TRUNC)?;
     redirect_fd("/stderr.log", STDERR_FILENO, O_WRONLY | O_CREAT | O_TRUNC)?;
@@ -129,6 +149,10 @@ fn close_fds() -> Result<i32, MigError> {
     const START_FD: i32 = 3;
     let mut close_count = 1;
     for fd in START_FD..1024 {
+        if fd == pipe_fds[1] {
+            // dont't close the stdin pipe
+            continue;
+        }
         unsafe {
             match fcntl(fd, F_GETFD) {
                 Ok(_) => {

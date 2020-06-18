@@ -22,6 +22,7 @@ pub mod options;
 use crate::common::defs::PIDOF_CMD;
 pub use options::Options;
 
+pub(crate) mod debug;
 pub(crate) mod disk_util;
 pub(crate) mod stream_progress;
 

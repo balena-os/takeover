@@ -13,7 +13,7 @@ use nix::{
 
 use failure::ResultExt;
 use libc::MS_BIND;
-use log::{debug, error, info, warn};
+use log::{debug, error, info, warn, Level};
 
 pub(crate) mod migrate_info;
 use migrate_info::MigrateInfo;
@@ -278,11 +278,12 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
         }
     }
 
-    debug!(
-        "check if /dev/loop-control exists: in old /dev: {}, in new /dev: {}",
-        file_exists("/dev/loop-control"),
-        file_exists(path_append(&curr_path, "loop-control"))
-    );
+    if (opts.get_log_level() == Level::Debug) || (opts.get_log_level() == Level::Trace) {
+        use crate::common::debug::check_loop_control;
+        check_loop_control("After dev mount", &curr_path);
+    } else {
+        debug!("(??)Log Level: {:?}", opts.get_log_level());
+    }
 
     let curr_path = takeover_dir.join("dev/pts");
     mount_fs(&curr_path, "devpts", "devpts", mig_info)?;
