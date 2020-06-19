@@ -52,6 +52,11 @@ pub struct Options {
         help = "Set stage2 log level, one of [error,warn,info,debug,trace]"
     )]
     s2_log_level: Option<Level>,
+    #[structopt(
+        long,
+        help = "Scripted mode - no interactive acknoledgement of takeover"
+    )]
+    no_ack: bool,
     #[structopt(long, help = "Pretend mode, do not flash device")]
     pretend: bool,
     #[structopt(long, help = "Internal - stage2 invocation")]
@@ -70,8 +75,14 @@ pub struct Options {
     no_nwmgr_check: bool,
     #[structopt(long, help = "Do not migrate host-name")]
     no_keep_name: bool,
-    #[structopt(long, help = "print build num and exit")]
+    #[structopt(long, help = "Debug - print build num and exit")]
     build_num: bool,
+    #[structopt(
+        short,
+        long,
+        help = "Download image only, do not check device and migrate"
+    )]
+    download_only: bool,
     #[structopt(
         long,
         value_name = "TIMEOUT",
@@ -142,6 +153,14 @@ impl Options {
         } else {
             "default"
         }
+    }
+
+    pub fn is_no_ack(&self) -> bool {
+        self.no_ack
+    }
+
+    pub fn is_migrate(&self) -> bool {
+        !self.download_only
     }
 
     pub fn get_config(&self) -> &Option<PathBuf> {

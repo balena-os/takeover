@@ -31,14 +31,6 @@ pub enum MigErrorKind {
     FeatureMissing,
     #[fail(display = "A spawned process returned an error code")]
     ExecProcess,
-    #[fail(display = "An error occurred calling a WINAPI")]
-    WinApi,
-    #[fail(display = "Initialization of WMI")]
-    WmiInit,
-    #[fail(display = "A WMI query failed")]
-    WmiQueryFailed,
-    #[fail(display = "A Powershell command failed")]
-    PSFailed,
     #[fail(display = "You are not authorized to execute this command")]
     AuthError,
     #[fail(display = "Mutual access failed")]
@@ -47,6 +39,8 @@ pub enum MigErrorKind {
     NoMatch,
     #[fail(display = "Timeout waiting for event")]
     Timeout,
+    #[fail(display = "Image was downloaded - not migrating")]
+    ImageDownloaded,
 
     // errors that have had their messages displayed elsewhere
     #[fail(display = "Displayed")]

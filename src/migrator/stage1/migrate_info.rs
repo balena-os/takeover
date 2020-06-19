@@ -45,7 +45,10 @@ impl MigrateInfo {
             error!("The required parameter --config/-c was not provided");
             return Err(MigError::displayed());
         };
-        config.check(opts, &*device)?;
+
+        if opts.is_migrate() {
+            config.check(opts, &*device)?;
+        }
 
         info!(
             "config.json is for device type {}",
@@ -83,6 +86,13 @@ impl MigrateInfo {
                     image_path.display()
                 )))?
         };
+
+        if !opts.is_migrate() {
+            return Err(MigError::from_remark(
+                MigErrorKind::ImageDownloaded,
+                "Image downloaded successfully",
+            ));
+        }
 
         debug!("image path: '{}'", image_path.display());
 
