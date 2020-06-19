@@ -29,26 +29,28 @@ impl IntelNuc {
             "Manjaro Linux",
         ];
 
-        if !check_os(SUPPORTED_OSSES, opts, "Generic x86_64/Intel Nuc")? {
-            return Err(MigError::displayed());
-        }
+        if opts.is_migrate() {
+            if !check_os(SUPPORTED_OSSES, opts, "Generic x86_64/Intel Nuc")? {
+                return Err(MigError::displayed());
+            }
 
-        // **********************************************************************
-        // ** AMD64 specific initialisation/checks
-        // **********************************************************************
+            // **********************************************************************
+            // ** AMD64 specific initialisation/checks
+            // **********************************************************************
 
-        let secure_boot = is_secure_boot()?;
-        info!(
-            "Secure boot is {}enabled",
-            if secure_boot { "" } else { "not " }
-        );
-
-        if secure_boot {
-            error!(
-                "{} does not currently support systems with secure boot enabled.",
-                env!("CARGO_PKG_NAME")
+            let secure_boot = is_secure_boot()?;
+            info!(
+                "Secure boot is {}enabled",
+                if secure_boot { "" } else { "not " }
             );
-            return Err(MigError::displayed());
+
+            if secure_boot {
+                error!(
+                    "{} does not currently support systems with secure boot enabled.",
+                    env!("CARGO_PKG_NAME")
+                );
+                return Err(MigError::displayed());
+            }
         }
         Ok(IntelNuc)
     }

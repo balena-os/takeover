@@ -68,7 +68,7 @@ impl RaspberryPi2 {
     pub fn from_config(opts: &Options) -> Result<RaspberryPi2, MigError> {
         const SUPPORTED_OSSES: &[&str] = &["Raspbian GNU/Linux 10 (buster)"];
 
-        if !check_os(SUPPORTED_OSSES, opts, "Raspberry PI 2")? {
+        if opts.is_migrate() && !check_os(SUPPORTED_OSSES, opts, "Raspberry PI 2")? {
             return Err(MigError::displayed());
         }
 
@@ -96,7 +96,7 @@ impl RaspberryPi3 {
             "Raspbian GNU/Linux 10 (buster)",
         ];
 
-        if !check_os(SUPPORTED_OSSES, opts, "Raspberry PI 3")? {
+        if opts.is_migrate() && !check_os(SUPPORTED_OSSES, opts, "Raspberry PI 3")? {
             return Err(MigError::displayed());
         }
 
@@ -124,7 +124,7 @@ impl RaspberryPi4_64 {
             "Raspbian GNU/Linux 10 (buster)",
         ];
 
-        if !check_os(SUPPORTED_OSSES, opts, "Raspberry PI 4")? {
+        if opts.is_migrate() && !check_os(SUPPORTED_OSSES, opts, "Raspberry PI 4")? {
             return Err(MigError::displayed());
         }
 

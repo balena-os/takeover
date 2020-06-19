@@ -1,5 +1,6 @@
 use std::env::{current_exe, set_current_dir};
 use std::fs::{copy, create_dir, create_dir_all, read_link, remove_dir_all, OpenOptions};
+use std::io::Write;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -11,7 +12,8 @@ use nix::{
     unistd::sync,
 };
 
-use failure::ResultExt;
+use failure::{Fail, ResultExt};
+
 use libc::MS_BIND;
 use log::{debug, error, info, warn, Level};
 
@@ -49,7 +51,6 @@ use utils::{mktemp, mount_fs};
 use crate::common::defs::NIX_NONE;
 use crate::common::stage2_config::UmountPart;
 use crate::stage1::block_device_info::BlockDevice;
-use std::io::Write;
 
 const S1_XTRA_FS_SIZE: u64 = 10 * 1024 * 1024; // const XTRA_MEM_FREE: u64 = 10 * 1024 * 1024; // 10 MB
 
@@ -177,6 +178,7 @@ fn get_umount_parts(
 
 fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
     info!("Preparing for takeover..");
+
     // *********************************************************
     // turn off swap
     if let Ok(cmd_res) = call(SWAPOFF_CMD, &["-a"], true) {
@@ -432,26 +434,62 @@ pub fn stage1(opts: &Options) -> Result<(), MigError> {
         return Err(MigError::displayed());
     }
 
+    let mut mig_info = match MigrateInfo::new(&opts) {
+        Ok(mig_info) => mig_info,
+        Err(why) => {
+            if why.kind() == MigErrorKind::ImageDownloaded {
+                return Ok(());
+            } else {
+                return Err(from_upstream!(why, "Failed to create migrate info"));
+            }
+        }
+    };
+
     if !is_admin()? {
         error!("please run this program as root");
         return Err(MigError::from(MigErrorKind::Displayed));
     }
 
-    let mut mig_info = MigrateInfo::new(&opts)?;
-
-    match prepare(&opts, &mut mig_info) {
-        Ok(_) => {
-            info!("Takeover initiated successfully, please wait for the device to be reflashed and reboot");
-            Logger::flush();
-            sync();
-            sleep(Duration::from_secs(10));
-            Ok(())
-        }
-        Err(why) => {
-            if opts.is_cleanup() {
-                mig_info.umount_all();
+    if !opts.is_no_ack() {
+        println!("{} will prepare your device for migration. Are you sure you want to migrate this device: [Y/n]", env!("CARGO_PKG_NAME"));
+        loop {
+            let mut buffer = String::new();
+            match std::io::stdin().read_line(&mut buffer) {
+                Ok(_) => match buffer.trim() {
+                    "Y" => {
+                        break;
+                    }
+                    "n" => {
+                        info!("Terminating on user request");
+                        return Err(MigError::displayed());
+                    }
+                    _ => {
+                        println!("please type Y for yes or n for no");
+                        continue;
+                    }
+                },
+                Err(why) => return Err(from_upstream!(why, "Failed to read line from stdin")),
             }
-            Err(why)
         }
+    }
+
+    if opts.is_migrate() {
+        match prepare(&opts, &mut mig_info) {
+            Ok(_) => {
+                info!("Takeover initiated successfully, please wait for the device to be reflashed and reboot");
+                Logger::flush();
+                sync();
+                sleep(Duration::from_secs(10));
+                Ok(())
+            }
+            Err(why) => {
+                if opts.is_cleanup() {
+                    mig_info.umount_all();
+                }
+                Err(why)
+            }
+        }
+    } else {
+        Ok(())
     }
 }

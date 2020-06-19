@@ -22,6 +22,7 @@ use crate::{
     },
 };
 
+use crate::common::is_admin;
 use crate::stage1::migrate_info::balena_cfg_json::BalenaCfgJson;
 use failure::ResultExt;
 use flate2::{Compression, GzBuilder};
@@ -365,6 +366,10 @@ pub(crate) fn download_image(
     );
 
     if FLASHER_DEVICES.contains(&device_type) {
+        if !is_admin()? {
+            error!("please run this program as root");
+            return Err(MigError::from(MigErrorKind::Displayed));
+        }
         extract_image(stream, &img_file_name, device_type, work_dir)?;
     } else {
         debug!("Downloading file '{}'", img_file_name.display());
