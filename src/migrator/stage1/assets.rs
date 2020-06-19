@@ -104,7 +104,7 @@ impl Assets {
     pub fn busybox_size(&self) -> Result<u64, MigError> {
         let mut decoder = GzDecoder::new(self.busybox);
         let mut size: u64 = 0;
-        const BUFFER_SIZE: usize = 0x100000;
+        const BUFFER_SIZE: usize = 0x0010_0000;
         let mut buffer: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
         loop {
             let bytes_read = decoder

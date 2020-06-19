@@ -17,15 +17,13 @@ fn main(opts: Options) {
         init(&opts);
         // not supposed to return
         exit_code = 1;
-    } else {
-        if let Err(why) = stage1(&opts) {
-            exit_code = 1;
-            match why.kind() {
-                MigErrorKind::Displayed => (),
-                _ => error!("Migrate stage 1 returned error: {:?}", why),
-            };
+    } else if let Err(why) = stage1(&opts) {
+        exit_code = 1;
+        match why.kind() {
+            MigErrorKind::Displayed => (),
+            _ => error!("Migrate stage 1 returned error: {:?}", why),
         };
-    }
+    };
 
     Logger::flush();
     exit(exit_code);

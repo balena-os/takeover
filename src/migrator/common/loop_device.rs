@@ -152,25 +152,25 @@ impl LoopDevice {
                 if why.kind() == MigErrorKind::FileNotFound {
                     // file does not exist - try to create device node
                     let c_path = path_to_cstring(&path)?.into_raw();
-                    let res = unsafe { mknod(c_path, S_IFBLK | 0644, makedev(7, loop_index)) };
+                    let res = unsafe { mknod(c_path, S_IFBLK | 0o0644, makedev(7, loop_index)) };
                     let _c_path = unsafe { CString::from_raw(c_path) };
                     if res == 0 {
                         let fd = Fd::open(&path, O_RDWR | O_CLOEXEC)?;
-                        return Ok(LoopDevice {
+                        Ok(LoopDevice {
                             path,
                             fd,
                             file: None,
                             unset: auto_unset,
-                        });
+                        })
                     } else {
-                        return Err(MigError::from_remark(
+                        Err(MigError::from_remark(
                             MigErrorKind::Upstream,
                             &format!(
                                 "from_index: Failed to create device node '{}', error {}",
                                 path.display(),
                                 io::Error::last_os_error().to_string()
                             ),
-                        ));
+                        ))
                     }
                 } else {
                     // some other error opening device
@@ -425,25 +425,23 @@ impl LoopDevice {
         let ioctl_res = unsafe { ioctl(self.fd.get_fd(), IOCTL_LOOP_GET_STATUS_64, &loop_info) };
         if ioctl_res == 0 {
             Ok(loop_info)
+        } else if errno() == ENXIO {
+            Err(MigError::from_remark(
+                MigErrorKind::DeviceNotFound,
+                &format!(
+                    "get_loop_info: Not a valid loop device: '{}'",
+                    self.path.display()
+                ),
+            ))
         } else {
-            if errno() == ENXIO {
-                Err(MigError::from_remark(
-                    MigErrorKind::DeviceNotFound,
-                    &format!(
-                        "get_loop_info: Not a valid loop device: '{}'",
-                        self.path.display()
-                    ),
-                ))
-            } else {
-                Err(MigError::from_remark(
-                    MigErrorKind::Upstream,
-                    &format!(
-                        "get_loop_info: ioctl IOCTL_LOOP_GET_STATUS_64 on '{}' failed with error {}",
-                        self.path.display(),
-                        io::Error::last_os_error().to_string()
-                    ),
-                ))
-            }
+            Err(MigError::from_remark(
+                MigErrorKind::Upstream,
+                &format!(
+                    "get_loop_info: ioctl IOCTL_LOOP_GET_STATUS_64 on '{}' failed with error {}",
+                    self.path.display(),
+                    io::Error::last_os_error().to_string()
+                ),
+            ))
         }
     }
 
@@ -480,10 +478,8 @@ impl LoopDevice {
 
 impl Drop for LoopDevice {
     fn drop(&mut self) {
-        if self.unset {
-            if self.file.is_some() {
-                let _res = self.unset();
-            }
+        if self.unset && self.file.is_some() {
+            let _res = self.unset();
         }
     }
 }
@@ -543,7 +539,6 @@ impl Fd {
 impl Drop for Fd {
     fn drop(&mut self) {
         unsafe { close(self.fd) };
-        ()
     }
 }
 
@@ -590,7 +585,7 @@ fn check_str_buffer(buffer: &[u8]) -> bool {
             return true;
         }
     }
-    return false;
+    false
 }
 
 pub(crate) fn key_to_string(key: &[u8], max_len: Option<usize>) -> String {
