@@ -1,13 +1,7 @@
 #[macro_export]
 macro_rules! upstream_context {
     (  $x:expr  ) => {{
-        MigErrCtx::from_remark(MigErrorKind::Upstream, $x)
-    }};
-}
-
-macro_rules! from_upstream {
-    (  $err:expr, $comment:expr  ) => {{
-        MigError::from($err.context(upstream_context!($comment)))
+        MigErrCtx::from_remark(ErrorKind::Upstream, $x)
     }};
 }
 
@@ -18,8 +12,8 @@ macro_rules! call_command {
                 if cmd_res.status.success() {
                     Ok(cmd_res.stdout)
                 } else {
-                    Err(MigError::from_remark(
-                        MigErrorKind::ExecProcess,
+                    Err(Error::with_context(
+                        ErrorKind::ExecProcess,
                         &format!("{}, stderr: {}", $errmsg, cmd_res.stderr),
                     ))
                 }
@@ -33,8 +27,8 @@ macro_rules! call_command {
                 if cmd_res.status.success() {
                     Ok(cmd_res.stdout)
                 } else {
-                    Err(MigError::from_remark(
-                        MigErrorKind::ExecProcess,
+                    Err(Error::with_context(
+                        ErrorKind::ExecProcess,
                         &format!("stderr: {}", cmd_res.stderr),
                     ))
                 }

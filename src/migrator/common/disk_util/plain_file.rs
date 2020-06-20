@@ -1,9 +1,8 @@
-use failure::ResultExt;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use crate::common::{disk_util::image_file::ImageFile, MigErrCtx, MigError, MigErrorKind};
+use crate::common::{disk_util::image_file::ImageFile, Error, ErrorKind, Result, ToError};
 
 pub(crate) struct PlainFile {
     path: PathBuf,
@@ -11,7 +10,7 @@ pub(crate) struct PlainFile {
 }
 
 impl PlainFile {
-    pub fn new(path: &Path) -> Result<PlainFile, MigError> {
+    pub fn new(path: &Path) -> Result<PlainFile> {
         let file = match OpenOptions::new()
             .write(false)
             .read(true)
@@ -20,8 +19,8 @@ impl PlainFile {
         {
             Ok(file) => file,
             Err(why) => {
-                return Err(MigError::from_remark(
-                    MigErrorKind::Upstream,
+                return Err(Error::with_context(
+                    ErrorKind::Upstream,
                     &format!(
                         "failed to open file for reading: '{}', error {:?}",
                         path.display(),
@@ -39,17 +38,14 @@ impl PlainFile {
 }
 
 impl ImageFile for PlainFile {
-    fn fill(&mut self, offset: u64, buffer: &mut [u8]) -> Result<(), MigError> {
+    fn fill(&mut self, offset: u64, buffer: &mut [u8]) -> Result<()> {
         self.file
             .seek(SeekFrom::Start(offset))
-            .context(MigErrCtx::from_remark(
-                MigErrorKind::Upstream,
-                &format!("failed to seek to offset {}", offset),
-            ))?;
+            .upstream_with_context(&format!("failed to seek to offset {}", offset))?;
         match self.file.read_exact(buffer) {
             Ok(_) => Ok(()),
-            Err(why) => Err(MigError::from_remark(
-                MigErrorKind::Upstream,
+            Err(why) => Err(Error::with_context(
+                ErrorKind::Upstream,
                 &format!(
                     "failed to read from file: '{}', error {:?}",
                     self.path.display(),

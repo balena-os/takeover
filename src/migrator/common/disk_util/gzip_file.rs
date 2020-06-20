@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 const DEF_READ_BUFFER: usize = 1024 * 1024;
 
-use crate::common::{disk_util::image_file::ImageFile, MigError, MigErrorKind};
+use crate::common::{disk_util::image_file::ImageFile, Error, ErrorKind, Result};
 
 pub(crate) struct GZipFile {
     path: PathBuf,
@@ -15,7 +15,7 @@ pub(crate) struct GZipFile {
 }
 
 impl GZipFile {
-    pub fn new(path: &Path) -> Result<GZipFile, MigError> {
+    pub fn new(path: &Path) -> Result<GZipFile> {
         trace!("new: entered with '{}'", path.display());
         let file = match OpenOptions::new()
             .write(false)
@@ -25,8 +25,8 @@ impl GZipFile {
         {
             Ok(file) => file,
             Err(why) => {
-                return Err(MigError::from_remark(
-                    MigErrorKind::Upstream,
+                return Err(Error::with_context(
+                    ErrorKind::Upstream,
                     &format!(
                         "failed to open file for reading: '{}', error {:?}",
                         path.display(),
@@ -43,7 +43,7 @@ impl GZipFile {
         })
     }
 
-    fn reset(&mut self) -> Result<(), MigError> {
+    fn reset(&mut self) -> Result<()> {
         trace!("reset: entered");
         let file = match OpenOptions::new()
             .write(false)
@@ -53,8 +53,8 @@ impl GZipFile {
         {
             Ok(file) => file,
             Err(why) => {
-                return Err(MigError::from_remark(
-                    MigErrorKind::Upstream,
+                return Err(Error::with_context(
+                    ErrorKind::Upstream,
                     &format!(
                         "failed to reopen file for reading: '{}', error {:?}",
                         self.path.display(),
@@ -69,7 +69,7 @@ impl GZipFile {
         Ok(())
     }
 
-    fn seek(&mut self, offset: u64) -> Result<(), MigError> {
+    fn seek(&mut self, offset: u64) -> Result<()> {
         trace!(
             "seek: entered with offset {}, bytes_read: {}",
             offset,
@@ -104,8 +104,8 @@ impl GZipFile {
                             }
                         }
                         Err(why) => {
-                            return Err(MigError::from_remark(
-                                MigErrorKind::Upstream,
+                            return Err(Error::with_context(
+                                ErrorKind::Upstream,
                                 &format!(
                                     "seek: failed to reopen file for reading: '{}', error {:?}",
                                     self.path.display(),
@@ -125,8 +125,8 @@ impl GZipFile {
                         self.bytes_read = offset;
                         Ok(())
                     }
-                    Err(why) => Err(MigError::from_remark(
-                        MigErrorKind::Upstream,
+                    Err(why) => Err(Error::with_context(
+                        ErrorKind::Upstream,
                         &format!(
                             "seek: failed to read from file  file '{}', error {:?}",
                             self.path.display(),
@@ -144,7 +144,7 @@ impl GZipFile {
 }
 
 impl ImageFile for GZipFile {
-    fn fill(&mut self, offset: u64, buffer: &mut [u8]) -> Result<(), MigError> {
+    fn fill(&mut self, offset: u64, buffer: &mut [u8]) -> Result<()> {
         trace!(
             "fill: entered with offset {}, size {}",
             offset,
@@ -159,8 +159,8 @@ impl ImageFile for GZipFile {
                 self.bytes_read = offset + buffer.len() as u64;
                 Ok(())
             }
-            Err(why) => Err(MigError::from_remark(
-                MigErrorKind::Upstream,
+            Err(why) => Err(Error::with_context(
+                ErrorKind::Upstream,
                 &format!(
                     "failed to read from file: '{}', error {:?}",
                     self.path.display(),

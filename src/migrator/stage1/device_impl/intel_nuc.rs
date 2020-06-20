@@ -2,7 +2,7 @@ use log::{error, info};
 
 use crate::stage1::device_impl::check_os;
 use crate::{
-    common::{MigError, Options},
+    common::{Error, Options, Result},
     // linux_common::is_secure_boot,
     stage1::{
         defs::{DeviceType, DEV_TYPE_GEN_X86_64, DEV_TYPE_INTEL_NUC},
@@ -16,7 +16,7 @@ const X86_SLUGS: [&str; 2] = [DEV_TYPE_INTEL_NUC, DEV_TYPE_GEN_X86_64];
 pub(crate) struct IntelNuc;
 
 impl IntelNuc {
-    pub fn from_config(opts: &Options) -> Result<IntelNuc, MigError> {
+    pub fn from_config(opts: &Options) -> Result<IntelNuc> {
         const SUPPORTED_OSSES: &[&str] = &[
             "Ubuntu 18.04.4 LTS",
             "Ubuntu 18.04.3 LTS",
@@ -31,7 +31,7 @@ impl IntelNuc {
 
         if opts.is_migrate() {
             if !check_os(SUPPORTED_OSSES, opts, "Generic x86_64/Intel Nuc")? {
-                return Err(MigError::displayed());
+                return Err(Error::displayed());
             }
 
             // **********************************************************************
@@ -49,7 +49,7 @@ impl IntelNuc {
                     "{} does not currently support systems with secure boot enabled.",
                     env!("CARGO_PKG_NAME")
                 );
-                return Err(MigError::displayed());
+                return Err(Error::displayed());
             }
         }
         Ok(IntelNuc)

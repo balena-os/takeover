@@ -12,8 +12,6 @@ use nix::{
     unistd::sync,
 };
 
-use failure::{Fail, ResultExt};
-
 use libc::MS_BIND;
 use log::{debug, error, info, warn, Level};
 
@@ -37,8 +35,8 @@ use crate::common::{
     defs::{
         CP_CMD, OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD, SYSTEM_CONNECTIONS_DIR, TELINIT_CMD,
     },
+    error::{Error, ErrorKind, Result, ToError},
     file_exists, format_size_with_unit, get_mem_info, is_admin,
-    mig_error::{MigErrCtx, MigError, MigErrorKind},
     options::Options,
     path_append,
     stage2_config::Stage2Config,
@@ -54,18 +52,17 @@ use crate::stage1::block_device_info::BlockDevice;
 
 const S1_XTRA_FS_SIZE: u64 = 10 * 1024 * 1024; // const XTRA_MEM_FREE: u64 = 10 * 1024 * 1024; // 10 MB
 
-fn get_required_space(mig_info: &MigrateInfo) -> Result<u64, MigError> {
+fn get_required_space(mig_info: &MigrateInfo) -> Result<u64> {
     let mut req_size: u64 = mig_info.get_assets().busybox_size()?;
 
-    let curr_exe = current_exe().context(upstream_context!(
-        "Failed to retrieve path of current executable"
-    ))?;
+    let curr_exe =
+        current_exe().upstream_with_context("Failed to retrieve path of current executable")?;
     req_size += curr_exe
         .metadata()
-        .context(upstream_context!(&format!(
+        .upstream_with_context(&format!(
             "Failed to retrieve file size for '{}'",
             curr_exe.display()
-        )))?
+        ))?
         .len();
 
     Ok(req_size)
@@ -75,7 +72,7 @@ fn copy_files<P1: AsRef<Path>, P2: AsRef<Path>>(
     work_dir: P1,
     mig_info: &mut MigrateInfo,
     takeover_dir: P2,
-) -> Result<(), MigError> {
+) -> Result<()> {
     let work_dir = work_dir.as_ref();
     let takeover_dir = takeover_dir.as_ref();
 
@@ -95,19 +92,19 @@ fn copy_files<P1: AsRef<Path>, P2: AsRef<Path>>(
     // write network_manager filess to tmpfs
     let mut nwmgr_cfgs: u64 = 0;
     let nwmgr_path = path_append(&work_dir, SYSTEM_CONNECTIONS_DIR);
-    create_dir_all(&nwmgr_path).context(upstream_context!(&format!(
+    create_dir_all(&nwmgr_path).upstream_with_context(&format!(
         "Failed to create directory '{}",
         nwmgr_path.display()
-    )))?;
+    ))?;
 
     for source_file in mig_info.get_nwmgr_files() {
         nwmgr_cfgs += 1;
         let target_file = path_append(&nwmgr_path, &format!("balena-{:02}", nwmgr_cfgs));
-        copy(&source_file, &target_file).context(upstream_context!(&format!(
+        copy(&source_file, &target_file).upstream_with_context(&format!(
             "Failed to copy '{}' to '{}'",
             source_file.display(),
             target_file.display()
-        )))?;
+        ))?;
         info!(
             "Copied '{}' to '{}'",
             source_file.display(),
@@ -120,15 +117,14 @@ fn copy_files<P1: AsRef<Path>, P2: AsRef<Path>>(
     }
 
     let target_path = path_append(takeover_dir, "takeover");
-    let curr_exe = current_exe().context(upstream_context!(
-        "Failed to retrieve path of current executable"
-    ))?;
+    let curr_exe =
+        current_exe().upstream_with_context("Failed to retrieve path of current executable")?;
 
-    copy(&curr_exe, &target_path).context(upstream_context!(&format!(
+    copy(&curr_exe, &target_path).upstream_with_context(&format!(
         "Failed to copy current executable '{}' to '{}",
         curr_exe.display(),
         target_path.display()
-    )))?;
+    ))?;
 
     info!("Copied current executable to '{}'", target_path.display());
     Ok(())
@@ -137,7 +133,7 @@ fn copy_files<P1: AsRef<Path>, P2: AsRef<Path>>(
 fn get_umount_parts(
     flash_dev: &Rc<Box<dyn BlockDevice>>,
     block_dev_info: &BlockDeviceInfo,
-) -> Result<Vec<UmountPart>, MigError> {
+) -> Result<Vec<UmountPart>> {
     let mut umount_parts: Vec<UmountPart> = Vec::new();
 
     for device in block_dev_info.get_devices().values() {
@@ -176,7 +172,7 @@ fn get_umount_parts(
     Ok(umount_parts)
 }
 
-fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
+fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     info!("Preparing for takeover..");
 
     // *********************************************************
@@ -186,7 +182,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
             info!("SWAP was disabled successfully");
         } else {
             error!("Failed to disable SWAP, stderr: '{}'", cmd_res.stderr);
-            return Err(MigError::displayed());
+            return Err(Error::displayed());
         }
     }
 
@@ -209,7 +205,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
             format_size_with_unit(req_space + S1_XTRA_FS_SIZE),
             format_size_with_unit(mem_free)
         );
-        return Err(MigError::displayed());
+        return Err(Error::displayed());
     }
 
     // *********************************************************
@@ -227,19 +223,19 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
     mount_fs(&takeover_dir, "tmpfs", "tmpfs", mig_info)?;
 
     let curr_path = takeover_dir.join("etc");
-    create_dir(&curr_path).context(upstream_context!(&format!(
+    create_dir(&curr_path).upstream_with_context(&format!(
         "Failed to create directory '{}'",
         curr_path.display()
-    )))?;
+    ))?;
 
     // *********************************************************
     // initialize essential paths
 
     let curr_path = curr_path.join("mtab");
-    symlink("/proc/mounts", &curr_path).context(upstream_context!(&format!(
+    symlink("/proc/mounts", &curr_path).upstream_with_context(&format!(
         "Failed to create symlink /proc/mounts to '{}'",
         curr_path.display()
-    )))?;
+    ))?;
 
     info!("Created mtab in  '{}'", curr_path.display());
 
@@ -268,15 +264,15 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
                 curr_path.display(),
                 cmd_res.stderr
             );
-            return Err(MigError::displayed());
+            return Err(Error::displayed());
         }
 
         let curr_path = takeover_dir.join("dev/pts");
         if curr_path.exists() {
-            remove_dir_all(&curr_path).context(upstream_context!(&format!(
+            remove_dir_all(&curr_path).upstream_with_context(&format!(
                 "Failed to delete directory '{}'",
                 curr_path.display()
-            )))?;
+            ))?;
         }
     }
 
@@ -295,10 +291,10 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
 
     let curr_path = path_append(&takeover_dir, OLD_ROOT_MP);
 
-    create_dir_all(&curr_path).context(upstream_context!(&format!(
+    create_dir_all(&curr_path).upstream_with_context(&format!(
         "Failed to create directory '{}'",
         curr_path.display()
-    )))?;
+    ))?;
 
     info!("Created directory '{}'", curr_path.display());
 
@@ -308,10 +304,10 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
     // setup new init
 
     let tty = read_link("/proc/self/fd/1")
-        .context(upstream_context!("Failed to read link for /proc/self/fd/1"))?;
+        .upstream_with_context("Failed to read link for /proc/self/fd/1")?;
 
-    let old_init_path = read_link("/proc/1/exe")
-        .context(upstream_context!("Failed to read link for /proc/1/exe"))?;
+    let old_init_path =
+        read_link("/proc/1/exe").upstream_with_context("Failed to read link for /proc/1/exe")?;
     let new_init_path = takeover_dir
         .join("tmp")
         .join(old_init_path.file_name().unwrap());
@@ -327,7 +323,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
                 "Could not find configured flash device '{}'",
                 flash_dev.display()
             );
-            return Err(MigError::displayed());
+            return Err(Error::displayed());
         }
     } else {
         block_dev_info.get_root_device()
@@ -338,7 +334,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
             "The device could not be found: '{}'",
             flash_dev.get_dev_path().display()
         );
-        return Err(MigError::displayed());
+        return Err(Error::displayed());
     }
 
     // collect partitions that need to be unmounted
@@ -351,10 +347,10 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
         work_dir: opts
             .get_work_dir()
             .canonicalize()
-            .context(upstream_context!(&format!(
+            .upstream_with_context(&format!(
                 "Failed to canonicalize work dir '{}'",
                 opts.get_work_dir().display()
-            )))?,
+            ))?,
         image_path: mig_info.get_image_path().to_path_buf(),
         config_path: mig_info.get_balena_cfg().get_path().to_path_buf(),
         backup_path: None,
@@ -365,27 +361,27 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
         .create(true)
         .write(true)
         .open(&s2_cfg_path)
-        .context(upstream_context!(&format!(
+        .upstream_with_context(&format!(
             "Failed to open stage2 config file for writing: '{}'",
             s2_cfg_path.display()
-        )))?;
+        ))?;
 
     let s2_cfg_txt = s2_cfg.serialize()?;
     debug!("Stage 2 config: \n{}", s2_cfg_txt);
 
     s2_cfg_file
         .write(s2_cfg_txt.as_bytes())
-        .context(upstream_context!(&format!(
+        .upstream_with_context(&format!(
             "Failed to write stage2 config file to '{}'",
             s2_cfg_path.display()
-        )))?;
+        ))?;
 
     info!("Wrote stage2 config to '{}'", s2_cfg_path.display());
 
-    set_current_dir(&takeover_dir).context(upstream_context!(&format!(
+    set_current_dir(&takeover_dir).upstream_with_context(&format!(
         "Failed to change current dir to '{}'",
         takeover_dir.display()
-    )))?;
+    ))?;
 
     mount(
         Some(&new_init_path),
@@ -394,11 +390,11 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
         MsFlags::from_bits(MS_BIND).unwrap(),
         NIX_NONE,
     )
-    .context(upstream_context!(&format!(
+    .upstream_with_context(&format!(
         "Failed to bind-mount '{}' to '{}'",
         new_init_path.display(),
         old_init_path.display()
-    )))?;
+    ))?;
 
     info!("Bind-mounted new init as '{}'", new_init_path.display());
 
@@ -406,7 +402,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
     let cmd_res = call(TELINIT_CMD, &["u"], true)?;
     if !cmd_res.status.success() {
         error!("Call to telinit failed, stderr: '{}'", cmd_res.stderr);
-        return Err(MigError::displayed());
+        return Err(Error::displayed());
     }
 
     info!("Restarted init");
@@ -414,7 +410,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<(), MigError> {
     Ok(())
 }
 
-pub fn stage1(opts: &Options) -> Result<(), MigError> {
+pub fn stage1(opts: &Options) -> Result<()> {
     Logger::set_default_level(opts.get_log_level());
     Logger::set_brief_info(true);
     Logger::set_color(true);
@@ -431,23 +427,26 @@ pub fn stage1(opts: &Options) -> Result<(), MigError> {
             log_file.display(),
             why
         );
-        return Err(MigError::displayed());
+        return Err(Error::displayed());
     }
 
     let mut mig_info = match MigrateInfo::new(&opts) {
         Ok(mig_info) => mig_info,
         Err(why) => {
-            if why.kind() == MigErrorKind::ImageDownloaded {
+            if why.kind() == ErrorKind::ImageDownloaded {
                 return Ok(());
             } else {
-                return Err(from_upstream!(why, "Failed to create migrate info"));
+                return Err(Error::from_upstream(
+                    From::from(why),
+                    "Failed to create migrate info",
+                ));
             }
         }
     };
 
     if !is_admin()? {
         error!("please run this program as root");
-        return Err(MigError::from(MigErrorKind::Displayed));
+        return Err(Error::displayed());
     }
 
     if !opts.is_no_ack() {
@@ -461,14 +460,19 @@ pub fn stage1(opts: &Options) -> Result<(), MigError> {
                     }
                     "n" => {
                         info!("Terminating on user request");
-                        return Err(MigError::displayed());
+                        return Err(Error::displayed());
                     }
                     _ => {
                         println!("please type Y for yes or n for no");
                         continue;
                     }
                 },
-                Err(why) => return Err(from_upstream!(why, "Failed to read line from stdin")),
+                Err(why) => {
+                    return Err(Error::from_upstream(
+                        From::from(why),
+                        "Failed to read line from stdin",
+                    ))
+                }
             }
         }
     }

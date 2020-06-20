@@ -1,4 +1,3 @@
-use failure::ResultExt;
 use log::{debug, error, warn};
 use regex::Regex;
 use std::fs::{read_dir, read_to_string};
@@ -6,7 +5,7 @@ use std::path::Path;
 
 use crate::stage1::wifi_config::NwmgrFile;
 use crate::{
-    common::{dir_exists, MigErrCtx, MigError, MigErrorKind},
+    common::{dir_exists, Error, ErrorKind, Result, ToError},
     stage1::wifi_config::WifiConfig,
 };
 
@@ -40,7 +39,7 @@ impl ParserState {
     fn new() -> ParserState {
         ParserState {
             skip_re: Regex::new(r##"^(\s*#.*|\s*)$"##).unwrap(),
-            section_re: Regex::new(r##"^\s*\[([^\]]+)\]"##).unwrap(),
+            section_re: Regex::new(r##"^\s*\[([^]]+)]"##).unwrap(),
             param_re: Regex::new(r##"^\s*([^= #]+)\s*=\s*(\S.*)$"##).unwrap(),
             // id_re: Regex::new(r##"^\s*id\s*=.*"##).unwrap(),
             section: NwMgrSection::Other,
@@ -66,14 +65,11 @@ impl ParserState {
         cfg_file: P,
         ssid_filter: &[String],
         wifis: &mut Vec<WifiConfig>,
-    ) -> Result<(), MigError> {
+    ) -> Result<()> {
         let cfg_file = cfg_file.as_ref();
         if cfg_file.is_file() {
             for line in read_to_string(cfg_file)
-                .context(upstream_context!(&format!(
-                    "failed to read file: '{}'",
-                    cfg_file.display()
-                )))?
+                .upstream_with_context(&format!("failed to read file: '{}'", cfg_file.display()))?
                 .lines()
             {
                 match self.parse_line(line) {
@@ -175,7 +171,7 @@ impl ParserState {
     }
 }
 
-pub(crate) fn replace_nwmgr_id(content: &str, id: &str) -> Result<String, MigError> {
+pub(crate) fn replace_nwmgr_id(content: &str, id: &str) -> Result<String> {
     let mut res = String::new();
     let mut parser = ParserState::new();
     let mut found = false;
@@ -190,20 +186,18 @@ pub(crate) fn replace_nwmgr_id(content: &str, id: &str) -> Result<String, MigErr
     if found {
         Ok(res)
     } else {
-        Err(MigError::from_remark(
-            MigErrorKind::InvState,
+        Err(Error::with_context(
+            ErrorKind::InvState,
             "No NetworkManager connection Id found",
         ))
     }
 }
 
-pub(crate) fn parse_nwmgr_config(ssid_filter: &[String]) -> Result<Vec<WifiConfig>, MigError> {
+pub(crate) fn parse_nwmgr_config(ssid_filter: &[String]) -> Result<Vec<WifiConfig>> {
     if dir_exists(NWMGR_CONFIG_DIR)? {
         let mut wifis: Vec<WifiConfig> = Vec::new();
-        let paths = read_dir(NWMGR_CONFIG_DIR).context(upstream_context!(&format!(
-            "Failed to list directory '{}'",
-            NWMGR_CONFIG_DIR
-        )))?;
+        let paths = read_dir(NWMGR_CONFIG_DIR)
+            .upstream_with_context(&format!("Failed to list directory '{}'", NWMGR_CONFIG_DIR))?;
 
         let mut parser = ParserState::new();
         for dir_entry in paths {
@@ -217,7 +211,7 @@ pub(crate) fn parse_nwmgr_config(ssid_filter: &[String]) -> Result<Vec<WifiConfi
                         "Failed to read directory entry of '{}', error: {:?}",
                         NWMGR_CONFIG_DIR, why
                     );
-                    return Err(MigError::displayed());
+                    return Err(Error::displayed());
                 }
             }
         }
@@ -227,6 +221,6 @@ pub(crate) fn parse_nwmgr_config(ssid_filter: &[String]) -> Result<Vec<WifiConfi
             "Network manager configuration directory could not be found: '{}'",
             NWMGR_CONFIG_DIR
         );
-        Err(MigError::displayed())
+        Err(Error::displayed())
     }
 }

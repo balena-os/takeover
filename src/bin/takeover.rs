@@ -3,7 +3,7 @@ use std::process::exit;
 
 use mod_logger::Logger;
 
-use takeover::{init, stage1, stage2, MigErrorKind, Options};
+use takeover::{init, stage1, stage2, ErrorKind, Options};
 
 #[paw::main]
 fn main(opts: Options) {
@@ -20,7 +20,7 @@ fn main(opts: Options) {
     } else if let Err(why) = stage1(&opts) {
         exit_code = 1;
         match why.kind() {
-            MigErrorKind::Displayed => (),
+            ErrorKind::Displayed => (),
             _ => error!("Migrate stage 1 returned error: {:?}", why),
         };
     };

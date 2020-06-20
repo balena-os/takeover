@@ -1,5 +1,5 @@
 use crate::{
-    common::{MigErrCtx, MigError, MigErrorKind},
+    common::{Error, Result, ToError},
     stage1::wifi_config::{Params, WifiConfig},
 };
 
@@ -11,7 +11,6 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use crate::common::file_exists;
-use failure::{Fail, ResultExt};
 
 pub(crate) const WPA_CONFIG_FILE: &str = "/etc/wpa_supplicant/wpa_supplicant.conf";
 
@@ -35,7 +34,7 @@ pub(crate) struct WpaParser<'a> {
 }
 
 impl<'a> WpaParser<'a> {
-    pub fn parse_config(ssid_filter: &[String]) -> Result<Vec<WifiConfig>, MigError> {
+    pub fn parse_config(ssid_filter: &[String]) -> Result<Vec<WifiConfig>> {
         trace!("from_wpa: entered with {:?}", ssid_filter);
 
         if file_exists(WPA_CONFIG_FILE) {
@@ -45,7 +44,7 @@ impl<'a> WpaParser<'a> {
             parser.parse_file(WPA_CONFIG_FILE)
         } else {
             debug!("parse_config: file not found: '{}'", WPA_CONFIG_FILE);
-            Err(MigError::displayed())
+            Err(Error::displayed())
         }
     }
 
@@ -56,7 +55,7 @@ impl<'a> WpaParser<'a> {
             net_start_re: Regex::new(r#"^\s*network\s*=\s*\{\s*$"#).unwrap(),
             net_param1_re: Regex::new(r#"^\s*(\S+)\s*=\s*"([^"]+)"\s*$"#).unwrap(),
             net_param2_re: Regex::new(r#"^\s*(\S+)\s*=\s*(\S+)\s*$"#).unwrap(),
-            net_end_re: Regex::new(r#"^\s*\}\s*$"#).unwrap(),
+            net_end_re: Regex::new(r#"^\s*}\s*$"#).unwrap(),
             state: WpaState::Init,
             last_state: WpaState::Init,
             ssid: None,
@@ -64,13 +63,11 @@ impl<'a> WpaParser<'a> {
         }
     }
 
-    pub fn parse_file<P: AsRef<Path>>(&mut self, wpa_path: P) -> Result<Vec<WifiConfig>, MigError> {
+    pub fn parse_file<P: AsRef<Path>>(&mut self, wpa_path: P) -> Result<Vec<WifiConfig>> {
         let mut wifis: Vec<WifiConfig> = Vec::new();
         let wpa_path = wpa_path.as_ref();
-        let file = File::open(wpa_path).context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            &format!("failed to open file {}", wpa_path.display()),
-        ))?;
+        let file = File::open(wpa_path)
+            .upstream_with_context(&format!("failed to open file {}", wpa_path.display()))?;
 
         for line in BufReader::new(file).lines() {
             if self.last_state != self.state {
@@ -94,9 +91,9 @@ impl<'a> WpaParser<'a> {
                     }
                 }
                 Err(why) => {
-                    return Err(from_upstream!(
-                        why,
-                        &format!("unexpected read error from {}", wpa_path.display())
+                    return Err(Error::from_upstream(
+                        From::from(why),
+                        &format!("unexpected read error from {}", wpa_path.display()),
                     ));
                 }
             }

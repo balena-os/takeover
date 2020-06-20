@@ -1,9 +1,8 @@
 use crate::{
-    common::{MigErrCtx, MigError, MigErrorKind, Options},
+    common::{Error, ErrorKind, Options, Result, ToError},
     stage1::{device::Device, utils::check_tcp_connect},
 };
 
-use failure::ResultExt;
 use log::{error, info};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -22,80 +21,72 @@ pub(crate) struct BalenaCfgJson {
 }
 
 impl BalenaCfgJson {
-    pub fn new<P: AsRef<Path>>(cfg_file: P) -> Result<BalenaCfgJson, MigError> {
+    pub fn new<P: AsRef<Path>>(cfg_file: P) -> Result<BalenaCfgJson> {
         let cfg_file = cfg_file
             .as_ref()
             .canonicalize()
-            .context(upstream_context!(&format!(
+            .upstream_with_context(&format!(
                 "Failed to canonicalize path: '{}'",
                 cfg_file.as_ref().display()
-            )))?;
+            ))?;
 
         Ok(BalenaCfgJson {
-            config: serde_json::from_reader(BufReader::new(File::open(&cfg_file).context(
-                MigErrCtx::from_remark(
-                    MigErrorKind::Upstream,
-                    &format!("new: cannot open file '{}'", cfg_file.display()),
-                ),
-            )?))
-            .context(MigErrCtx::from_remark(
-                MigErrorKind::Upstream,
-                &format!("Failed to parse json from file '{}'", cfg_file.display()),
+            config: serde_json::from_reader(BufReader::new(
+                File::open(&cfg_file).upstream_with_context(&format!(
+                    "new: cannot open file '{}'",
+                    cfg_file.display()
+                ))?,
+            ))
+            .upstream_with_context(&format!(
+                "Failed to parse json from file '{}'",
+                cfg_file.display()
             ))?,
             file: cfg_file,
             modified: false,
         })
     }
 
-    pub fn write<P: AsRef<Path>>(&mut self, target_path: P) -> Result<(), MigError> {
+    pub fn write<P: AsRef<Path>>(&mut self, target_path: P) -> Result<()> {
         let target_path = target_path.as_ref();
         let out_file = OpenOptions::new()
             .create(true)
             .write(true)
             .open(target_path)
-            .context(MigErrCtx::from_remark(
-                MigErrorKind::Upstream,
-                &format!(
-                    "Failed to open file for writing: '{}'",
-                    target_path.display()
-                ),
+            .upstream_with_context(&format!(
+                "Failed to open file for writing: '{}'",
+                target_path.display()
             ))?;
 
-        serde_json::to_writer(out_file, &self.config).context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            &format!(
-                "Failed save modified config.json to '{}'",
-                target_path.display()
-            ),
+        serde_json::to_writer(out_file, &self.config).upstream_with_context(&format!(
+            "Failed save modified config.json to '{}'",
+            target_path.display()
         ))?;
 
         self.modified = false;
-        self.file = target_path
-            .canonicalize()
-            .context(upstream_context!(&format!(
-                "Failed to canonicalize path: '{}'",
-                target_path.display()
-            )))?;
+        self.file = target_path.canonicalize().upstream_with_context(&format!(
+            "Failed to canonicalize path: '{}'",
+            target_path.display()
+        ))?;
 
         Ok(())
     }
 
-    pub fn check(&self, opts: &Options, device: &dyn Device) -> Result<(), MigError> {
+    pub fn check(&self, opts: &Options, device: &dyn Device) -> Result<()> {
         info!("Configured for application id: {}", self.get_app_id()?);
 
         let device_type = self.get_device_type()?;
         if !device.supports_device_type(device_type.as_str()) {
             error!("The devicetype configured in config.json ({}) is not supported by the detected device type {:?}",
                    device_type, device.get_device_type());
-            return Err(MigError::displayed());
+            return Err(Error::displayed());
         }
 
         if opts.is_api_check() {
             let api_endpoint = &self.get_api_endpoint()?;
 
-            let api_url = Url::parse(&api_endpoint).context(MigErrCtx::from_remark(
-                MigErrorKind::Upstream,
-                &format!("Failed to parse balena api url '{}'", api_endpoint),
+            let api_url = Url::parse(&api_endpoint).upstream_with_context(&format!(
+                "Failed to parse balena api url '{}'",
+                api_endpoint
             ))?;
 
             if let Some(api_host) = api_url.host() {
@@ -113,14 +104,14 @@ impl BalenaCfgJson {
                         "failed to connect to api server @ {}:{} your device might not come online",
                         api_endpoint, api_port
                     );
-                    return Err(MigError::displayed());
+                    return Err(Error::displayed());
                 }
             } else {
                 error!(
                     "failed to parse api server url from config.json: {}",
                     api_endpoint
                 );
-                return Err(MigError::displayed());
+                return Err(Error::displayed());
             }
         }
 
@@ -135,7 +126,7 @@ impl BalenaCfgJson {
                     "failed to connect to vpn server @ {}:{} your device might not come online",
                     vpn_endpoint, vpn_port
                 );
-                return Err(MigError::displayed());
+                return Err(Error::displayed());
             }
         }
 
@@ -146,13 +137,13 @@ impl BalenaCfgJson {
         self.modified
     }
 
-    fn get_str_val(&self, name: &str) -> Result<String, MigError> {
+    fn get_str_val(&self, name: &str) -> Result<String> {
         if let Some(value) = self.config.get(name) {
             if let Some(value) = value.as_str() {
                 Ok(value.to_string())
             } else {
-                Err(MigError::from_remark(
-                    MigErrorKind::InvParam,
+                Err(Error::with_context(
+                    ErrorKind::InvParam,
                     &format!(
                         "Invalid type encountered for '{}', expected String, found {:?} in config.json",
                         name, value
@@ -160,25 +151,25 @@ impl BalenaCfgJson {
                 ))
             }
         } else {
-            Err(MigError::from_remark(
-                MigErrorKind::NotFound,
+            Err(Error::with_context(
+                ErrorKind::NotFound,
                 &format!("Key could not be found in config.json: '{}'", name),
             ))
         }
     }
 
-    fn get_uint_val(&self, name: &str) -> Result<u64, MigError> {
+    fn get_uint_val(&self, name: &str) -> Result<u64> {
         if let Some(value) = self.config.get(name) {
             if let Some(value) = value.as_u64() {
                 Ok(value)
             } else if let Some(str_val) = value.as_str() {
-                Ok(str_val.parse::<u64>().context(MigErrCtx::from_remark(
-                    MigErrorKind::Upstream,
-                    &format!("Failed to parse uint value for '{}' from config.json", name),
+                Ok(str_val.parse::<u64>().upstream_with_context(&format!(
+                    "Failed to parse uint value for '{}' from config.json",
+                    name
                 ))?)
             } else {
-                Err(MigError::from_remark(
-                    MigErrorKind::InvParam,
+                Err(Error::with_context(
+                    ErrorKind::InvParam,
                     &format!(
                         "Invalid type encountered for '{}', expected uint, found {:?}",
                         name, value
@@ -186,14 +177,14 @@ impl BalenaCfgJson {
                 ))
             }
         } else {
-            Err(MigError::from_remark(
-                MigErrorKind::NotFound,
+            Err(Error::with_context(
+                ErrorKind::NotFound,
                 &format!("Key could not be found in config.json: '{}'", name),
             ))
         }
     }
 
-    /*pub fn get_hostname(&self) -> Result<String, MigError> {
+    /*pub fn get_hostname(&self) -> Result<String, Error> {
         self.get_str_val("hostname")
     }*/
 
@@ -210,27 +201,27 @@ impl BalenaCfgJson {
         }
     }
 
-    pub fn get_app_id(&self) -> Result<u64, MigError> {
+    pub fn get_app_id(&self) -> Result<u64> {
         self.get_uint_val("applicationId")
     }
 
-    pub fn get_api_key(&self) -> Result<String, MigError> {
+    pub fn get_api_key(&self) -> Result<String> {
         self.get_str_val("apiKey")
     }
 
-    pub fn get_api_endpoint(&self) -> Result<String, MigError> {
+    pub fn get_api_endpoint(&self) -> Result<String> {
         self.get_str_val("apiEndpoint")
     }
 
-    fn get_vpn_endpoint(&self) -> Result<String, MigError> {
+    fn get_vpn_endpoint(&self) -> Result<String> {
         self.get_str_val("vpnEndpoint")
     }
 
-    fn get_vpn_port(&self) -> Result<u64, MigError> {
+    fn get_vpn_port(&self) -> Result<u64> {
         self.get_uint_val("vpnPort")
     }
 
-    pub fn get_device_type(&self) -> Result<String, MigError> {
+    pub fn get_device_type(&self) -> Result<String> {
         self.get_str_val("deviceType")
     }
 

@@ -1,4 +1,3 @@
-use failure::ResultExt;
 use log::{info, trace, warn};
 use std::fs::{read_to_string, File};
 use std::io::Write;
@@ -7,23 +6,19 @@ use std::path::{Path, PathBuf};
 #[cfg(target_os = "windows")]
 use crate::common::call;
 
-use crate::{
-    common::{path_append, pidof, MigErrCtx, MigError, MigErrorKind},
-    stage1::wifi_config::nwmgr_parser::replace_nwmgr_id,
-};
-
-mod wpa_parser;
-use wpa_parser::WpaParser;
-
-mod nwmgr_parser;
-use nwmgr_parser::parse_nwmgr_config;
-
 mod connmgr_parser;
-use crate::common::{dir_exists, file_exists};
-use crate::stage1::wifi_config::connmgr_parser::CONNMGR_CONFIG_DIR;
-use crate::stage1::wifi_config::nwmgr_parser::NWMGR_CONFIG_DIR;
-use crate::stage1::wifi_config::wpa_parser::WPA_CONFIG_FILE;
-use connmgr_parser::parse_connmgr_config;
+mod nwmgr_parser;
+mod wpa_parser;
+
+use crate::{
+    common::{dir_exists, file_exists, path_append, pidof, Result, ToError},
+    stage1::wifi_config::{
+        connmgr_parser::{parse_connmgr_config, CONNMGR_CONFIG_DIR},
+        nwmgr_parser::NWMGR_CONFIG_DIR,
+        nwmgr_parser::{parse_nwmgr_config, replace_nwmgr_id},
+        wpa_parser::{WpaParser, WPA_CONFIG_FILE},
+    },
+};
 
 pub const BALENA_FILE_TAG: &str = "## created by balena-migrate";
 //const NWM_CONFIG_DIR: &str = "/etc/NetworkManager/system-connections/";
@@ -73,7 +68,7 @@ pub(crate) enum WifiConfig {
 }
 
 impl<'a> WifiConfig {
-    pub fn scan(ssid_filter: &[String]) -> Result<Vec<WifiConfig>, MigError> {
+    pub fn scan(ssid_filter: &[String]) -> Result<Vec<WifiConfig>> {
         trace!("WifiConfig::scan: entered with {:?}", ssid_filter);
         if !pidof("NetworkManager")?.is_empty() && dir_exists(NWMGR_CONFIG_DIR)? {
             Ok(parse_nwmgr_config(ssid_filter)?)
@@ -98,15 +93,13 @@ impl<'a> WifiConfig {
         &self,
         base_path: P,
         index: u64,
-    ) -> Result<u64, MigError> {
+    ) -> Result<u64> {
         let base_path = base_path.as_ref();
         let path = path_append(base_path, &format!("resin-wifi-{}", index));
 
         info!("Creating NetworkManager file in '{}'", path.display());
-        let mut nwmgr_file = File::create(&path).context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            &format!("Failed to create file in '{}'", path.display()),
-        ))?;
+        let mut nwmgr_file = File::create(&path)
+            .upstream_with_context(&format!("Failed to create file in '{}'", path.display()))?;
 
         let name = path.file_name().unwrap().to_string_lossy();
 
@@ -126,10 +119,10 @@ impl<'a> WifiConfig {
                 content.push_str(
                     replace_nwmgr_id(
                         read_to_string(&nwmgr_file.file)
-                            .context(upstream_context!(&format!(
+                            .upstream_with_context(&format!(
                                 "Failed to read file '{}'",
                                 nwmgr_file.file.display()
-                            )))?
+                            ))?
                             .as_str(),
                         &name,
                     )?
@@ -143,10 +136,7 @@ impl<'a> WifiConfig {
 
         nwmgr_file
             .write_all(content.as_bytes())
-            .context(MigErrCtx::from_remark(
-                MigErrorKind::Upstream,
-                &format!("failed to write new '{:?}'", path.display()),
-            ))?;
+            .upstream_with_context(&format!("failed to write new '{:?}'", path.display()))?;
         Ok(index)
     }
 }

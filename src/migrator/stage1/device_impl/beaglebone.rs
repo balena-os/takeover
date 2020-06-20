@@ -2,13 +2,12 @@ use log::{debug, error, trace};
 use regex::Regex;
 
 use crate::{
-    common::{MigError, MigErrorKind},
+    common::{Error, ErrorKind, Options, Result},
     stage1::{
         defs::{DeviceType, DEV_TYPE_BBB, DEV_TYPE_BBG, DEV_TYPE_BBXM},
         device::Device,
         device_impl::check_os,
     },
-    Options,
 };
 
 const SUPPORTED_OSSES: [&str; 4] = [
@@ -28,10 +27,7 @@ const BBXM_SLUGS: [&str; 1] = [DEV_TYPE_BBXM];
 
 // TODO: check location of uEnv.txt or other files files to improve reliability
 
-pub(crate) fn is_bb(
-    opts: &Options,
-    model_string: &str,
-) -> Result<Option<Box<dyn Device>>, MigError> {
+pub(crate) fn is_bb(opts: &Options, model_string: &str) -> Result<Option<Box<dyn Device>>> {
     trace!(
         "Beaglebone::is_bb: entered with model string: '{}'",
         model_string
@@ -65,7 +61,7 @@ pub(crate) fn is_bb(
             _ => {
                 let message = format!("The beaglebone model reported by your device ('{}') is not supported by balena-migrate", model);
                 error!("{}", message);
-                Err(MigError::from_remark(MigErrorKind::InvParam, &message))
+                Err(Error::with_context(ErrorKind::InvParam, &message))
             }
         }
     } else {
@@ -78,9 +74,9 @@ pub(crate) struct BeagleboneGreen {}
 
 impl BeagleboneGreen {
     // this is used in stage1
-    fn from_config(opts: &Options) -> Result<BeagleboneGreen, MigError> {
+    fn from_config(opts: &Options) -> Result<BeagleboneGreen> {
         if !check_os(&SUPPORTED_OSSES, opts, "Beaglebone Green")? {
-            return Err(MigError::displayed());
+            return Err(Error::displayed());
         }
 
         Ok(BeagleboneGreen {})
@@ -101,9 +97,9 @@ pub(crate) struct BeagleboneBlack {}
 
 impl BeagleboneBlack {
     // this is used in stage1
-    fn from_config(opts: &Options) -> Result<BeagleboneBlack, MigError> {
+    fn from_config(opts: &Options) -> Result<BeagleboneBlack> {
         if !check_os(&SUPPORTED_OSSES, opts, "Beaglebone Black")? {
-            return Err(MigError::displayed());
+            return Err(Error::displayed());
         }
 
         Ok(BeagleboneBlack {})
@@ -124,9 +120,9 @@ pub(crate) struct BeagleboardXM {}
 
 impl BeagleboardXM {
     // this is used in stage1
-    fn from_config(opts: &Options) -> Result<BeagleboardXM, MigError> {
+    fn from_config(opts: &Options) -> Result<BeagleboardXM> {
         if opts.is_migrate() && !check_os(&SUPPORTED_OSSES, opts, "Beagleboard XM")? {
-            return Err(MigError::displayed());
+            return Err(Error::displayed());
         }
 
         Ok(BeagleboardXM {})

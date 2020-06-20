@@ -2,10 +2,9 @@ use std::collections::HashMap;
 use std::fs::read_to_string;
 use std::path::{Path, PathBuf};
 
-use failure::ResultExt;
 use log::{debug, error, trace};
 
-use crate::common::{MigErrCtx, MigError, MigErrorKind};
+use crate::common::{Error, Result, ToError};
 
 #[derive(Clone, Debug)]
 pub(crate) struct Mount {
@@ -27,9 +26,9 @@ impl Mount {
 pub(crate) type MountTab = HashMap<PathBuf, Mount>;
 
 impl Mount {
-    pub fn from_mtab() -> Result<MountTab, MigError> {
-        let mtab_str = read_to_string("/etc/mtab")
-            .context(upstream_context!("Failed to read from '/etc/mtab'"))?;
+    pub fn from_mtab() -> Result<MountTab> {
+        let mtab_str =
+            read_to_string("/etc/mtab").upstream_with_context("Failed to read from '/etc/mtab'")?;
 
         let mut mounts: MountTab = MountTab::new();
 
@@ -37,7 +36,7 @@ impl Mount {
             let columns: Vec<&str> = line.split_whitespace().collect();
             if columns.len() < 3 {
                 error!("Failed to parse /etc/mtab line {} : '{}'", line_no, line);
-                return Err(MigError::displayed());
+                return Err(Error::displayed());
             }
 
             let device_name = columns[0];

@@ -3,7 +3,6 @@ use std::mem::MaybeUninit;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 
-use failure::ResultExt;
 use libc::getuid;
 use regex::Regex;
 
@@ -15,11 +14,15 @@ pub(crate) mod defs;
 
 pub(crate) mod loop_device;
 
-pub mod mig_error;
-pub use mig_error::{MigErrCtx, MigError, MigErrorKind};
+pub mod error;
+pub use error::{Error, ErrorKind, Result, ToError};
+
+// pub mod mig_error;
+// pub use error::{MigErrCtx, Error, ErrorKind};
 
 pub mod options;
 use crate::common::defs::PIDOF_CMD;
+
 pub use options::Options;
 
 pub(crate) mod debug;
@@ -36,7 +39,7 @@ pub(crate) struct CmdRes {
     pub status: ExitStatus,
 }
 
-pub(crate) fn call(cmd: &str, args: &[&str], trim_stdout: bool) -> Result<CmdRes, MigError> {
+pub(crate) fn call(cmd: &str, args: &[&str], trim_stdout: bool) -> Result<CmdRes> {
     trace!("call: '{}' called with {:?}, {}", cmd, args, trim_stdout);
 
     match Command::new(cmd)
@@ -59,29 +62,29 @@ pub(crate) fn call(cmd: &str, args: &[&str], trim_stdout: bool) -> Result<CmdRes
         }
         Err(why) => {
             error!("call: output failed for command: '{}': {:?}", cmd, why);
-            Err(MigError::from_remark(
-                MigErrorKind::Upstream,
+            Err(Error::with_context(
+                ErrorKind::Upstream,
                 &format!("call: failed to execute: command {} '{:?}'", cmd, args),
             ))
         }
     }
 }
 
-pub(crate) fn pidof(proc_name: &str) -> Result<Vec<u32>, MigError> {
+pub(crate) fn pidof(proc_name: &str) -> Result<Vec<u32>> {
     let cmd_res = call(PIDOF_CMD, &[proc_name], true)?;
     let mut res: Vec<u32> = Vec::new();
     if cmd_res.status.success() {
         for pid in cmd_res.stdout.split_whitespace() {
-            res.push(pid.parse::<u32>().context(upstream_context!(&format!(
+            res.push(pid.parse::<u32>().upstream_with_context(&format!(
                 "pidof: Failed to parse string to u32: '{}'",
                 pid
-            )))?);
+            ))?);
         }
     }
     Ok(res)
 }
 
-pub(crate) fn get_mem_info() -> Result<(u64, u64), MigError> {
+pub(crate) fn get_mem_info() -> Result<(u64, u64)> {
     trace!("get_mem_info: entered");
     // TODO: could add loads, uptime if needed
     let mut s_info: libc::sysinfo = unsafe { MaybeUninit::<libc::sysinfo>::zeroed().assume_init() };
@@ -89,7 +92,7 @@ pub(crate) fn get_mem_info() -> Result<(u64, u64), MigError> {
     if res == 0 {
         Ok((s_info.totalram as u64, s_info.freeram as u64))
     } else {
-        Err(MigError::from(MigErrorKind::NotImpl))
+        Err(Error::new(ErrorKind::NotImpl))
     }
 }
 
@@ -97,7 +100,7 @@ pub(crate) fn get_mem_info() -> Result<(u64, u64), MigError> {
  * Get OS name from /etc/os-release
  ******************************************************************/
 
-pub(crate) fn get_os_name() -> Result<String, MigError> {
+pub(crate) fn get_os_name() -> Result<String> {
     trace!("get_os_name: entered");
 
     // TODO: implement other source as fallback
@@ -107,8 +110,8 @@ pub(crate) fn get_os_name() -> Result<String, MigError> {
         if let Some(os_name) = parse_file(OS_RELEASE_FILE, &Regex::new(OS_NAME_REGEX).unwrap())? {
             Ok(os_name[1].clone())
         } else {
-            Err(MigError::from_remark(
-                MigErrorKind::NotFound,
+            Err(Error::with_context(
+                ErrorKind::NotFound,
                 &format!(
                     "get_os_name: could not be located in file {}",
                     OS_RELEASE_FILE
@@ -116,14 +119,14 @@ pub(crate) fn get_os_name() -> Result<String, MigError> {
             ))
         }
     } else {
-        Err(MigError::from_remark(
-            MigErrorKind::NotFound,
+        Err(Error::with_context(
+            ErrorKind::NotFound,
             &format!("get_os_name: could not locate file {}", OS_RELEASE_FILE),
         ))
     }
 }
 
-pub(crate) fn is_admin() -> Result<bool, MigError> {
+pub(crate) fn is_admin() -> Result<bool> {
     trace!("is_admin: entered");
     let admin = Some(unsafe { getuid() } == 0);
     Ok(admin.unwrap())
@@ -133,16 +136,16 @@ pub fn file_exists<P: AsRef<Path>>(file: P) -> bool {
     file.as_ref().exists()
 }
 
-pub fn dir_exists<P: AsRef<Path>>(name: P) -> Result<bool, MigError> {
+pub fn dir_exists<P: AsRef<Path>>(name: P) -> Result<bool> {
     let path = name.as_ref();
     if path.exists() {
         Ok(name
             .as_ref()
             .metadata()
-            .context(upstream_context!(&format!(
+            .upstream_with_context(&format!(
                 "dir_exists: failed to retrieve metadata for path: '{}'",
                 path.display()
-            )))?
+            ))?
             .file_type()
             .is_dir())
     } else {
@@ -150,15 +153,10 @@ pub fn dir_exists<P: AsRef<Path>>(name: P) -> Result<bool, MigError> {
     }
 }
 
-pub(crate) fn parse_file<P: AsRef<Path>>(
-    fname: P,
-    regex: &Regex,
-) -> Result<Option<Vec<String>>, MigError> {
+pub(crate) fn parse_file<P: AsRef<Path>>(fname: P, regex: &Regex) -> Result<Option<Vec<String>>> {
     let path = fname.as_ref();
-    let os_info = read_to_string(path).context(upstream_context!(&format!(
-        "File read '{}'",
-        path.display()
-    )))?;
+    let os_info =
+        read_to_string(path).upstream_with_context(&format!("File read '{}'", path.display()))?;
 
     for line in os_info.lines() {
         debug!("parse_file: line: '{}'", line);
@@ -195,10 +193,9 @@ pub fn format_size_with_unit(size: u64) -> String {
     }
 }
 
-pub fn get_mountpoint<P: AsRef<Path>>(device: P) -> Result<Option<PathBuf>, MigError> {
+pub fn get_mountpoint<P: AsRef<Path>>(device: P) -> Result<Option<PathBuf>> {
     let device_str = &*device.as_ref().to_string_lossy();
-    let mtab =
-        read_to_string("/etc/mtab").context(upstream_context!("Failed to read /etc/mtab"))?;
+    let mtab = read_to_string("/etc/mtab").upstream_with_context("Failed to read /etc/mtab")?;
     for line in mtab.lines() {
         let words: Vec<&str> = line.split_whitespace().collect();
         if let Some(device) = words.get(0) {
@@ -206,8 +203,8 @@ pub fn get_mountpoint<P: AsRef<Path>>(device: P) -> Result<Option<PathBuf>, MigE
                 if let Some(mountpoint) = words.get(1) {
                     return Ok(Some(PathBuf::from(mountpoint)));
                 } else {
-                    return Err(MigError::from_remark(
-                        MigErrorKind::InvState,
+                    return Err(Error::with_context(
+                        ErrorKind::InvState,
                         &format!("Encountered invalid line in /etc/mtab '{}'", line),
                     ));
                 }

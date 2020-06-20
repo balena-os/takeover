@@ -22,9 +22,6 @@ features = ["blocking", "json"]
 [dependencies.url]
 version = "2.1.1"
 
-[dependencies.failure]
-version = "0.1.8"
-
 [dependencies.paw]
 version = "1.0"
 

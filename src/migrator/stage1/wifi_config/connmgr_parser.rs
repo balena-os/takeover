@@ -1,5 +1,5 @@
 use crate::{
-    common::{dir_exists, path_append, MigErrCtx, MigError, MigErrorKind},
+    common::{dir_exists, path_append, Error, ErrorKind, Result, ToError},
     stage1::wifi_config::{Params, WifiConfig},
 };
 
@@ -7,7 +7,6 @@ use std::fs::{read_dir, File};
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use failure::{Fail, ResultExt};
 use log::{debug, info, warn};
 use regex::Regex;
 
@@ -26,14 +25,12 @@ impl ConnMgrParser {
         }
     }
 
-    fn parse_conmgr_file(&self, file_path: &Path) -> Result<Option<WifiConfig>, MigError> {
+    fn parse_conmgr_file(&self, file_path: &Path) -> Result<Option<WifiConfig>> {
         let mut ssid = String::from("");
         let mut psk: Option<String> = None;
 
-        let file = File::open(file_path).context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            &format!("failed to open file {}", file_path.display()),
-        ))?;
+        let file = File::open(file_path)
+            .upstream_with_context(&format!("failed to open file {}", file_path.display()))?;
 
         for line in BufReader::new(file).lines() {
             match line {
@@ -64,9 +61,9 @@ impl ConnMgrParser {
                     continue;
                 }
                 Err(why) => {
-                    return Err(from_upstream!(
-                        why,
-                        &format!("unexpected read error from {}", file_path.display())
+                    return Err(Error::from_upstream(
+                        From::from(why),
+                        &format!("unexpected read error from {}", file_path.display()),
                     ));
                 }
             }
@@ -80,13 +77,13 @@ impl ConnMgrParser {
     }
 }
 
-pub(crate) fn parse_connmgr_config(ssid_filter: &[String]) -> Result<Vec<WifiConfig>, MigError> {
+pub(crate) fn parse_connmgr_config(ssid_filter: &[String]) -> Result<Vec<WifiConfig>> {
     let mut wifis: Vec<WifiConfig> = Vec::new();
 
     if dir_exists(CONNMGR_CONFIG_DIR)? {
-        let paths = read_dir(CONNMGR_CONFIG_DIR).context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            &format!("Failed to list directory '{}'", CONNMGR_CONFIG_DIR),
+        let paths = read_dir(CONNMGR_CONFIG_DIR).upstream_with_context(&format!(
+            "Failed to list directory '{}'",
+            CONNMGR_CONFIG_DIR
         ))?;
 
         let parser = ConnMgrParser::new();
@@ -127,8 +124,8 @@ pub(crate) fn parse_connmgr_config(ssid_filter: &[String]) -> Result<Vec<WifiCon
                     warn!("Not processing invalid path '{}'", path.path().display());
                 }
             } else {
-                return Err(MigError::from_remark(
-                    MigErrorKind::Upstream,
+                return Err(Error::with_context(
+                    ErrorKind::Upstream,
                     &format!(
                         "Error reading entry from directory '{}'",
                         CONNMGR_CONFIG_DIR

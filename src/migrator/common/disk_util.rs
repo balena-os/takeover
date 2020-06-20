@@ -1,9 +1,10 @@
 use log::{debug, error, trace};
-use std::io::{Error, ErrorKind, Read};
+use std::io::{self, Read};
 use std::mem;
 use std::path::{Path, PathBuf};
+use std::result;
 
-use crate::common::{MigError, MigErrorKind};
+use crate::common::{Error, ErrorKind, Result};
 
 mod image_file;
 pub(crate) use image_file::ImageFile;
@@ -33,7 +34,7 @@ pub(crate) enum LabelType {
 }
 #[allow(dead_code)]
 impl LabelType {
-    pub fn from_device<P: AsRef<Path>>(device_path: P) -> Result<LabelType, MigError> {
+    pub fn from_device<P: AsRef<Path>>(device_path: P) -> Result<LabelType> {
         let device_path = device_path.as_ref();
         // TODO: provide propper device block size
         Ok(Disk::from_drive_file(device_path, None)?.get_label()?)
@@ -137,7 +138,7 @@ pub(crate) struct Disk {
 
 #[allow(dead_code)]
 impl Disk {
-    pub fn from_gzip_stream<R: Read + 'static>(stream: R) -> Result<Disk, MigError> {
+    pub fn from_gzip_stream<R: Read + 'static>(stream: R) -> Result<Disk> {
         Ok(Disk {
             disk: Box::new(GZipStream::new(stream)?),
             // writable: false,
@@ -146,7 +147,7 @@ impl Disk {
     }
 
     #[cfg(target_os = "linux")]
-    pub fn from_gzip_img<P: AsRef<Path>>(image: P) -> Result<Disk, MigError> {
+    pub fn from_gzip_img<P: AsRef<Path>>(image: P) -> Result<Disk> {
         Ok(Disk {
             disk: Box::new(GZipFile::new(image.as_ref())?),
             // writable: false,
@@ -158,7 +159,7 @@ impl Disk {
         drive: P,
         // writable: bool,
         block_size: Option<u64>,
-    ) -> Result<Disk, MigError> {
+    ) -> Result<Disk> {
         Ok(Disk {
             disk: Box::new(PlainFile::new(drive.as_ref())?),
             // writable,
@@ -174,14 +175,14 @@ impl Disk {
         self.disk.get_path()
     }
 
-    pub fn get_label(&mut self) -> Result<LabelType, MigError> {
+    pub fn get_label(&mut self) -> Result<LabelType> {
         match self.read_mbr(0) {
             Ok(mbr) => match PartitionType::from_ptype(mbr.part_tbl[0].ptype) {
                 PartitionType::GPT => Ok(LabelType::GPT),
                 _ => Ok(LabelType::Dos),
             },
             Err(why) => {
-                if why.kind() == MigErrorKind::InvParam {
+                if why.kind() == ErrorKind::InvParam {
                     Ok(LabelType::Other)
                 } else {
                     Err(why)
@@ -190,7 +191,7 @@ impl Disk {
         }
     }
 
-    fn read_mbr(&mut self, block_idx: u64) -> Result<MasterBootRecord, MigError> {
+    fn read_mbr(&mut self, block_idx: u64) -> Result<MasterBootRecord> {
         let mut buffer: [u8; DEF_BLOCK_SIZE] = [0; DEF_BLOCK_SIZE];
 
         self.disk
@@ -199,8 +200,8 @@ impl Disk {
         let mbr: MasterBootRecord = unsafe { mem::transmute(buffer) };
 
         if (mbr.boot_sig1 != 0x55) || (mbr.boot_sig2 != 0xAA) {
-            return Err(MigError::from_remark(
-                MigErrorKind::InvParam,
+            return Err(Error::with_context(
+                ErrorKind::InvParam,
                 &format!(
                     "Encountered an invalid MBR signature, expected 0x55, 0xAA,  got {:x}, {:x}",
                     mbr.boot_sig1, mbr.boot_sig2
@@ -222,7 +223,7 @@ pub(crate) struct PartitionIterator<'a> {
 }
 
 impl<'a> PartitionIterator<'a> {
-    pub fn new(disk: &mut Disk) -> Result<PartitionIterator, MigError> {
+    pub fn new(disk: &mut Disk) -> Result<PartitionIterator> {
         let offset: u64 = 0;
         let mbr = disk.read_mbr(offset)?;
         let disk_id = mbr.get_disk_id();
@@ -489,7 +490,7 @@ impl<'a> PartitionReader<'a> {
 }
 
 impl<'a> Read for PartitionReader<'a> {
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
+    fn read(&mut self, buf: &mut [u8]) -> result::Result<usize, io::Error> {
         if self.bytes_left == 0 {
             Ok(0)
         } else {
@@ -510,7 +511,7 @@ impl<'a> Read for PartitionReader<'a> {
                     self.bytes_left -= size as u64;
                     Ok(size)
                 }
-                Err(why) => Err(Error::new(ErrorKind::UnexpectedEof, why.to_string())),
+                Err(why) => Err(io::Error::new(io::ErrorKind::UnexpectedEof, why)),
             }
         }
     }

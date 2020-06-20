@@ -13,7 +13,6 @@ use nix::{
 
 use std::path::{Path, PathBuf};
 
-use failure::{Fail, ResultExt};
 use flate2::read::GzDecoder;
 use libc::{ioctl, MS_RDONLY, MS_REMOUNT};
 use log::{debug, error, info, trace, warn, Level};
@@ -30,9 +29,9 @@ use crate::common::{
     },
     dir_exists,
     disk_util::{Disk, PartInfo, PartitionIterator, DEF_BLOCK_SIZE},
+    error::{Error, ErrorKind, Result, ToError},
     file_exists, format_size_with_unit, get_mem_info,
     loop_device::LoopDevice,
-    mig_error::{MigErrCtx, MigError, MigErrorKind},
     options::Options,
     path_append,
     stage2_config::{Stage2Config, UmountPart},
@@ -63,33 +62,33 @@ pub(crate) fn busybox_reboot() {
     exit(1);
 }
 
-fn get_required_space(s2_cfg: &Stage2Config) -> Result<u64, MigError> {
+fn get_required_space(s2_cfg: &Stage2Config) -> Result<u64> {
     let curr_file = path_append(OLD_ROOT_MP, &s2_cfg.image_path);
     let mut req_size = curr_file
         .metadata()
-        .context(upstream_context!(&format!(
+        .upstream_with_context(&format!(
             "Failed to retrieve imagesize for '{}'",
             curr_file.display()
-        )))?
+        ))?
         .len() as u64;
 
     let curr_file = path_append(OLD_ROOT_MP, &s2_cfg.config_path);
     req_size += curr_file
         .metadata()
-        .context(upstream_context!(&format!(
+        .upstream_with_context(&format!(
             "Failed to retrieve file size for '{}'",
             curr_file.display()
-        )))?
+        ))?
         .len() as u64;
 
     if let Some(ref backup_path) = s2_cfg.backup_path {
         let curr_file = path_append(OLD_ROOT_MP, backup_path);
         req_size += curr_file
             .metadata()
-            .context(upstream_context!(&format!(
+            .upstream_with_context(&format!(
                 "Failed to retrieve file size for '{}'",
                 curr_file.display()
-            )))?
+            ))?
             .len() as u64;
     }
 
@@ -98,28 +97,28 @@ fn get_required_space(s2_cfg: &Stage2Config) -> Result<u64, MigError> {
         path_append(&s2_cfg.work_dir, SYSTEM_CONNECTIONS_DIR),
     );
 
-    for dir_entry in read_dir(&nwmgr_path).context(upstream_context!(&format!(
+    for dir_entry in read_dir(&nwmgr_path).upstream_with_context(&format!(
         "Failed to read drectory '{}'",
         nwmgr_path.display()
-    )))? {
+    ))? {
         match dir_entry {
             Ok(dir_entry) => {
                 req_size += dir_entry
                     .path()
                     .metadata()
-                    .context(upstream_context!(&format!(
+                    .upstream_with_context(&format!(
                         "Failed to retrieve file size for: '{}'",
                         dir_entry.path().display()
-                    )))?
+                    ))?
                     .len()
             }
             Err(why) => {
-                return Err(from_upstream!(
-                    why,
+                return Err(Error::from_upstream(
+                    From::from(why),
                     &format!(
                         "Failed to retrieve directory entry for '{}'",
                         nwmgr_path.display()
-                    )
+                    ),
                 ));
             }
         }
@@ -127,7 +126,7 @@ fn get_required_space(s2_cfg: &Stage2Config) -> Result<u64, MigError> {
     Ok(req_size)
 }
 
-fn copy_files(s2_cfg: &Stage2Config) -> Result<(), MigError> {
+fn copy_files(s2_cfg: &Stage2Config) -> Result<()> {
     let (mem_tot, mem_free) = get_mem_info()?;
     info!(
         "Found {} total, {} free memory",
@@ -143,16 +142,16 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<(), MigError> {
             format_size_with_unit(req_space + S2_XTRA_FS_SIZE),
             format_size_with_unit(mem_free)
         );
-        return Err(MigError::displayed());
+        return Err(Error::displayed());
     }
 
     // TODO: check free mem against files to copy
 
     if !dir_exists(TRANSFER_DIR)? {
-        create_dir(TRANSFER_DIR).context(upstream_context!(&format!(
+        create_dir(TRANSFER_DIR).upstream_with_context(&format!(
             "Failed to create transfer directory: '{}'",
             TRANSFER_DIR
-        )))?;
+        ))?;
     }
 
     // *********************************************************
@@ -160,30 +159,30 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<(), MigError> {
 
     let src_path = path_append(OLD_ROOT_MP, &s2_cfg.image_path);
     let to_path = path_append(TRANSFER_DIR, BALENA_IMAGE_NAME);
-    copy(&src_path, &to_path).context(upstream_context!(&format!(
+    copy(&src_path, &to_path).upstream_with_context(&format!(
         "Failed to copy '{}' to {}",
         src_path.display(),
         &to_path.display()
-    )))?;
+    ))?;
     info!("Copied image to '{}'", to_path.display());
 
     let src_path = path_append(OLD_ROOT_MP, &s2_cfg.config_path);
     let to_path = path_append(TRANSFER_DIR, BALENA_CONFIG_PATH);
-    copy(&src_path, &to_path).context(upstream_context!(&format!(
+    copy(&src_path, &to_path).upstream_with_context(&format!(
         "Failed to copy '{}' to {}",
         src_path.display(),
         &to_path.display()
-    )))?;
+    ))?;
     info!("Copied config to '{}'", to_path.display());
 
     if let Some(ref backup_path) = s2_cfg.backup_path {
         let src_path = path_append(OLD_ROOT_MP, backup_path);
         let to_path = path_append(TRANSFER_DIR, BACKUP_ARCH_NAME);
-        copy(&src_path, &to_path).context(upstream_context!(&format!(
+        copy(&src_path, &to_path).upstream_with_context(&format!(
             "Failed to copy '{}' to {}",
             src_path.display(),
             &to_path.display()
-        )))?;
+        ))?;
         info!("Copied backup to '{}'", to_path.display());
     }
 
@@ -194,41 +193,41 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<(), MigError> {
 
     let to_dir = path_append(TRANSFER_DIR, SYSTEM_CONNECTIONS_DIR);
     if !dir_exists(&to_dir)? {
-        create_dir_all(&to_dir).context(upstream_context!(&format!(
+        create_dir_all(&to_dir).upstream_with_context(&format!(
             "Failed to create directory: '{}'",
             to_dir.display()
-        )))?;
+        ))?;
     }
 
-    for dir_entry in read_dir(&nwmgr_path).context(upstream_context!(&format!(
+    for dir_entry in read_dir(&nwmgr_path).upstream_with_context(&format!(
         "Failed to read drectory '{}'",
         nwmgr_path.display()
-    )))? {
+    ))? {
         match dir_entry {
             Ok(dir_entry) => {
                 if let Some(filename) = dir_entry.path().file_name() {
                     let to_path = path_append(&to_dir, filename);
-                    copy(dir_entry.path(), &to_path).context(upstream_context!(&format!(
+                    copy(dir_entry.path(), &to_path).upstream_with_context(&format!(
                         "Failed to copy '{}' to '{}'",
                         dir_entry.path().display(),
                         to_path.display()
-                    )))?;
+                    ))?;
                     info!("Copied network config to '{}'", to_path.display());
                 } else {
                     error!(
                         "Failed to extract filename from path: '{}'",
                         dir_entry.path().display()
                     );
-                    return Err(MigError::displayed());
+                    return Err(Error::displayed());
                 }
             }
             Err(why) => {
-                return Err(from_upstream!(
-                    why,
+                return Err(Error::from_upstream(
+                    From::from(why),
                     &format!(
                         "Failed to retrieve directory entry for '{}'",
                         nwmgr_path.display()
-                    )
+                    ),
                 ));
             }
         }
@@ -237,7 +236,7 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<(), MigError> {
     Ok(())
 }
 
-pub(crate) fn read_stage2_config() -> Result<Stage2Config, MigError> {
+pub(crate) fn read_stage2_config() -> Result<Stage2Config> {
     let s2_cfg_path = PathBuf::from(&format!("/{}", STAGE2_CONFIG_NAME));
     if file_exists(&s2_cfg_path) {
         let s2_cfg_txt = match read_to_string(&s2_cfg_path) {
@@ -248,14 +247,14 @@ pub(crate) fn read_stage2_config() -> Result<Stage2Config, MigError> {
                     s2_cfg_path.display(),
                     why
                 );
-                return Err(MigError::displayed());
+                return Err(Error::displayed());
             }
         };
         match Stage2Config::deserialze(&s2_cfg_txt) {
             Ok(s2_config) => Ok(s2_config),
             Err(why) => {
                 error!("Failed to deserialize stage 2 config: error {}", why);
-                Err(MigError::displayed())
+                Err(Error::displayed())
             }
         }
     } else {
@@ -263,7 +262,7 @@ pub(crate) fn read_stage2_config() -> Result<Stage2Config, MigError> {
             "Stage2 config file could not be found in '{}',",
             s2_cfg_path.display()
         );
-        Err(MigError::displayed())
+        Err(Error::displayed())
     }
 }
 
@@ -297,7 +296,7 @@ fn setup_logging<P: AsRef<Path>>(log_dev: &Option<P>) {
     sync();
 }
 
-fn kill_procs(log_level: Level) -> Result<(), MigError> {
+fn kill_procs(log_level: Level) -> Result<()> {
     trace!("kill_procs: entered");
     let mut killed = false;
     let mut signal: &str = "TERM";
@@ -335,11 +334,11 @@ fn kill_procs(log_level: Level) -> Result<(), MigError> {
         Ok(())
     } else {
         error!("Failed to kill any processes using using '{}'", OLD_ROOT_MP,);
-        Err(MigError::displayed())
+        Err(Error::displayed())
     }
 }
 
-fn unmount_partitions(mountpoints: &[UmountPart]) -> Result<(), MigError> {
+fn unmount_partitions(mountpoints: &[UmountPart]) -> Result<()> {
     for mpoint in mountpoints {
         let mountpoint = path_append(OLD_ROOT_MP, &mpoint.mountpoint);
 
@@ -389,7 +388,7 @@ fn unmount_partitions(mountpoints: &[UmountPart]) -> Result<(), MigError> {
                             mpoint.fs_type,
                             why
                         );
-                        return Err(MigError::displayed());
+                        return Err(Error::displayed());
                     }
                 }
             }
@@ -399,7 +398,7 @@ fn unmount_partitions(mountpoints: &[UmountPart]) -> Result<(), MigError> {
 }
 
 #[allow(dead_code)]
-fn part_reread(device: &Path) -> Result<(), MigError> {
+fn part_reread(device: &Path) -> Result<()> {
     // try ioctrl #define BLKRRPART  _IO(0x12,95)	/* re-read partition table */
     match OpenOptions::new()
         .read(true)
@@ -422,7 +421,7 @@ fn part_reread(device: &Path) -> Result<(), MigError> {
                     device.display(),
                     io::Error::last_os_error()
                 );
-                Err(MigError::displayed())
+                Err(Error::displayed())
             }
         }
         Err(why) => {
@@ -431,27 +430,27 @@ fn part_reread(device: &Path) -> Result<(), MigError> {
                 device.display(),
                 why
             );
-            Err(MigError::displayed())
+            Err(Error::displayed())
         }
     }
 }
 
-fn transfer_boot_files<P: AsRef<Path>>(dev_root: P) -> Result<(), MigError> {
+fn transfer_boot_files<P: AsRef<Path>>(dev_root: P) -> Result<()> {
     let src_path = path_append(TRANSFER_DIR, BALENA_CONFIG_PATH);
     let target_path = path_append(dev_root.as_ref(), BALENA_CONFIG_PATH);
-    copy(&src_path, &target_path).context(upstream_context!(&format!(
+    copy(&src_path, &target_path).upstream_with_context(&format!(
         "Failed to copy {} to {}",
         src_path.display(),
         target_path.display()
-    )))?;
+    ))?;
 
     info!("Successfully copied config.json to boot partition",);
 
     let src_path = path_append(TRANSFER_DIR, SYSTEM_CONNECTIONS_DIR);
-    let dir_list = read_dir(&src_path).context(upstream_context!(&format!(
+    let dir_list = read_dir(&src_path).upstream_with_context(&format!(
         "Failed to read directory '{}'",
         src_path.display()
-    )))?;
+    ))?;
 
     let target_dir = path_append(dev_root.as_ref(), SYSTEM_CONNECTIONS_DIR);
     debug!(
@@ -467,19 +466,19 @@ fn transfer_boot_files<P: AsRef<Path>>(dev_root: P) -> Result<(), MigError> {
                 debug!("Found source file '{}'", curr_file.display());
                 if entry
                     .metadata()
-                    .context(upstream_context!(&format!(
+                    .upstream_with_context(&format!(
                         "Failed to read metadata from file '{}'",
                         curr_file.display()
-                    )))?
+                    ))?
                     .is_file()
                 {
                     if let Some(filename) = curr_file.file_name() {
                         let target_path = path_append(&target_dir, filename);
-                        copy(&curr_file, &target_path).context(upstream_context!(&format!(
+                        copy(&curr_file, &target_path).upstream_with_context(&format!(
                             "Failed to copy '{}' to '{}'",
                             curr_file.display(),
                             target_path.display()
-                        )))?;
+                        ))?;
                         info!(
                             "Successfully copied '{}' to boot partition as '{}",
                             curr_file.display(),
@@ -495,7 +494,7 @@ fn transfer_boot_files<P: AsRef<Path>>(dev_root: P) -> Result<(), MigError> {
             }
             Err(why) => {
                 error!("Failed to read directory entry, error: {:?}", why);
-                return Err(MigError::displayed());
+                return Err(Error::displayed());
             }
         }
     }
@@ -509,7 +508,7 @@ fn raw_mount_partition<P1: AsRef<Path>, P2: AsRef<Path>>(
     device: P2,
     mountpoint: P1,
     fs_type: &str,
-) -> Result<String, MigError> {
+) -> Result<String> {
     let byte_offset = partition.start_lba * DEF_BLOCK_SIZE as u64;
     let size_limit = partition.num_sectors * DEF_BLOCK_SIZE as u64;
 
@@ -530,7 +529,7 @@ fn raw_mount_partition<P1: AsRef<Path>, P2: AsRef<Path>>(
                     size_limit,
                     why
                 );
-                return Err(MigError::displayed());
+                return Err(Error::displayed());
             }
         };
 
@@ -546,7 +545,7 @@ fn raw_mount_partition<P1: AsRef<Path>, P2: AsRef<Path>>(
         MsFlags::empty(),
         NIX_NONE,
     )
-    .context(upstream_context!(&format!(
+    .upstream_with_context(&format!(
         "Failed to mount {} on {}",
         loop_dev,
         mountpoint.as_ref().display()
@@ -554,8 +553,8 @@ fn raw_mount_partition<P1: AsRef<Path>, P2: AsRef<Path>>(
     Ok(loop_dev)
 }
 
-fn raw_umount_partition<P: AsRef<Path>>(device: &str, mountpoint: P) -> Result<(), MigError> {
-    umount(mountpoint.as_ref()).context(upstream_context!(&format!(
+fn raw_umount_partition<P: AsRef<Path>>(device: &str, mountpoint: P) -> Result<()> {
+    umount(mountpoint.as_ref()).upstream_with_context(&format!(
         "Failed to unmount {}",
         mountpoint.as_ref().display()
     )))?;
@@ -571,16 +570,16 @@ fn raw_umount_partition<P: AsRef<Path>>(device: &str, mountpoint: P) -> Result<(
 
  */
 
-fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
+fn raw_mount_balena(device: &Path) -> Result<()> {
     debug!("raw_mount_balena called");
 
     let backup_path = path_append(TRANSFER_DIR, BACKUP_ARCH_NAME);
 
     if !dir_exists(BALENA_PART_MP)? {
-        create_dir(BALENA_PART_MP).context(upstream_context!(&format!(
+        create_dir(BALENA_PART_MP).upstream_with_context(&format!(
             "Failed to create balena partition mountpoint: '{}'",
             BALENA_PART_MP
-        )))?;
+        ))?;
     }
 
     let (boot_part, data_part) = {
@@ -606,7 +605,7 @@ fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
                 }
                 _ => {
                     error!("Invalid partition index encountered: {}", partition.index);
-                    return Err(MigError::displayed());
+                    return Err(Error::displayed());
                 }
             }
         }
@@ -616,11 +615,11 @@ fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
                 (boot_part, data_part)
             } else {
                 error!("Data partition could not be found on '{}", device.display());
-                return Err(MigError::displayed());
+                return Err(Error::displayed());
             }
         } else {
             error!("Boot partition could not be found on '{}", device.display());
-            return Err(MigError::displayed());
+            return Err(Error::displayed());
         }
     };
 
@@ -653,11 +652,11 @@ fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
         MsFlags::empty(),
         NIX_NONE,
     )
-    .context(upstream_context!(&format!(
+    .upstream_with_context(&format!(
         "Failed to mount {} on {}",
         loop_device.get_path().display(),
         BALENA_PART_MP
-    )))?;
+    ))?;
 
     info!(
         "Mounted boot partition as {} on {}",
@@ -670,7 +669,7 @@ fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
 
     sync();
 
-    umount(BALENA_PART_MP).context(upstream_context!("Failed to unmount boot partition"))?;
+    umount(BALENA_PART_MP).upstream_with_context("Failed to unmount boot partition")?;
 
     info!("Unmounted boot partition from {}", BALENA_PART_MP);
 
@@ -695,11 +694,11 @@ fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
             MsFlags::empty(),
             NIX_NONE,
         )
-        .context(upstream_context!(&format!(
+        .upstream_with_context(&format!(
             "Failed to mount {} on {}",
             loop_device.get_path().display(),
             BALENA_PART_MP
-        )))?;
+        ))?;
 
         info!(
             "Mounted data partition as {} on {}",
@@ -710,15 +709,15 @@ fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
         // TODO: copy files
 
         let target_path = path_append(BALENA_PART_MP, BACKUP_ARCH_NAME);
-        copy(&backup_path, &target_path).context(upstream_context!(&format!(
+        copy(&backup_path, &target_path).upstream_with_context(&format!(
             "Failed to copy '{}' to '{}'",
             backup_path.display(),
             target_path.display()
-        )))?;
+        ))?;
 
         sync();
 
-        umount(BALENA_PART_MP).context(upstream_context!("Failed to unmount boot partition"))?;
+        umount(BALENA_PART_MP).upstream_with_context("Failed to unmount boot partition")?;
 
         info!("Unmounted data partition from {}", BALENA_PART_MP);
     }
@@ -729,7 +728,7 @@ fn raw_mount_balena(device: &Path) -> Result<(), MigError> {
 }
 
 #[allow(dead_code)]
-fn sys_mount_balena() -> Result<(), MigError> {
+fn sys_mount_balena() -> Result<()> {
     debug!("sys_mount_balena called");
     sleep(Duration::from_secs(1));
 
@@ -739,12 +738,12 @@ fn sys_mount_balena() -> Result<(), MigError> {
             "Failed to locate path to boot partition in '{}'",
             part_label.display()
         );
-        return Err(MigError::displayed());
+        return Err(Error::displayed());
     }
-    create_dir(BALENA_BOOT_MP).context(upstream_context!(&format!(
+    create_dir(BALENA_BOOT_MP).upstream_with_context(&format!(
         "Failed to create balena-boot mountpoint: '{}'",
         BALENA_BOOT_MP
-    )))?;
+    ))?;
 
     if let Err(why) = mount(
         Some(&part_label),
@@ -759,16 +758,16 @@ fn sys_mount_balena() -> Result<(), MigError> {
             BALENA_BOOT_MP,
             why
         );
-        return Err(MigError::displayed());
+        return Err(Error::displayed());
     }
 
     transfer_boot_files(BALENA_BOOT_MP)?;
 
-    umount(BALENA_BOOT_MP).context(upstream_context!(&format!(
+    umount(BALENA_BOOT_MP).upstream_with_context(&format!(
         "Failed to unmount '{}' from '{}'",
         part_label.display(),
         BALENA_BOOT_MP
-    )))?;
+    ))?;
 
     let backup_path = path_append(TRANSFER_DIR, BACKUP_ARCH_NAME);
     if file_exists(&backup_path) {
@@ -786,29 +785,29 @@ fn sys_mount_balena() -> Result<(), MigError> {
                 BALENA_BOOT_MP,
                 why
             );
-            return Err(MigError::displayed());
+            return Err(Error::displayed());
         }
 
         let target_path = path_append(BALENA_PART_MP, BACKUP_ARCH_NAME);
-        copy(&backup_path, &target_path).context(upstream_context!(&format!(
+        copy(&backup_path, &target_path).upstream_with_context(&format!(
             "Failed to copy '{}' to '{}'",
             backup_path.display(),
             target_path.display()
-        )))?;
+        ))?;
 
         sync();
 
-        umount(BALENA_PART_MP).context(upstream_context!(&format!(
+        umount(BALENA_PART_MP).upstream_with_context(&format!(
             "Failed to unmount '{}' from '{}'",
             part_label.display(),
             BALENA_PART_MP
-        )))?;
+        ))?;
     }
 
     Ok(())
 }
 
-fn transfer_files(device: &Path) -> Result<(), MigError> {
+fn transfer_files(device: &Path) -> Result<()> {
     debug!(
         "file '{}' exists: {}",
         device.display(),
@@ -836,13 +835,13 @@ enum FlashState {
     FailNonRecoverable,
 }
 
-fn fill_buffer<I: Read>(buffer: &mut [u8], input: &mut I) -> Result<usize, MigError> {
+fn fill_buffer<I: Read>(buffer: &mut [u8], input: &mut I) -> Result<usize> {
     // fill buffer
     let mut buff_fill: usize = 0;
     loop {
         let bytes_read = input
             .read(&mut buffer[buff_fill..])
-            .context(upstream_context!("Failed to read from  input stream"))?;
+            .upstream_with_context("Failed to read from  input stream")?;
 
         if bytes_read > 0 {
             buff_fill += bytes_read;
@@ -856,7 +855,7 @@ fn fill_buffer<I: Read>(buffer: &mut [u8], input: &mut I) -> Result<usize, MigEr
     Ok(buff_fill)
 }
 
-fn validate(target_path: &Path, image_path: &Path) -> Result<bool, MigError> {
+fn validate(target_path: &Path, image_path: &Path) -> Result<bool> {
     debug!("Validate: opening: '{}'", image_path.display());
 
     let mut decoder = GzDecoder::new(match File::open(&image_path) {
@@ -867,7 +866,7 @@ fn validate(target_path: &Path, image_path: &Path) -> Result<bool, MigError> {
                 image_path.display(),
                 why
             );
-            return Err(MigError::displayed());
+            return Err(Error::displayed());
         }
     });
 
@@ -885,7 +884,7 @@ fn validate(target_path: &Path, image_path: &Path) -> Result<bool, MigError> {
                 target_path.display(),
                 why
             );
-            return Err(MigError::displayed());
+            return Err(Error::displayed());
         }
     };
 

@@ -1,7 +1,6 @@
 use crate::{
-    common::{defs::NIX_NONE, get_mountpoint, MigErrCtx, MigError, MigErrorKind},
+    common::{defs::NIX_NONE, get_mountpoint, Error, Options, Result, ToError},
     stage2::{busybox_reboot, read_stage2_config},
-    Options,
 };
 use log::{error, info, trace, warn};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
@@ -15,8 +14,6 @@ use std::process::Command;
 use std::thread::sleep;
 use std::time::Duration;
 
-use failure::ResultExt;
-
 use nix::{
     errno::{errno, Errno},
     fcntl::{fcntl, F_GETFD},
@@ -29,7 +26,7 @@ use libc::{
     O_WRONLY, SIG_BLOCK, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO,
 };
 
-fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<(), MigError> {
+fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<()> {
     let log_dev = log_dev.as_ref();
     trace!("setup_log entered with '{}'", log_dev.display());
     if log_dev.exists() {
@@ -46,9 +43,8 @@ fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<(), MigError> {
             }
         }
 
-        create_dir_all("/mnt/log").context(upstream_context!(
-            "Failed to create log mount directory /mnt/log"
-        ))?;
+        create_dir_all("/mnt/log")
+            .upstream_with_context("Failed to create log mount directory /mnt/log")?;
 
         trace!("Created log mountpoint: '/mnt/log'");
         mount(
@@ -58,24 +54,28 @@ fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<(), MigError> {
             MsFlags::empty(),
             NIX_NONE,
         )
-        .context(upstream_context!(&format!(
+        .upstream_with_context(&format!(
             "Failed to mount '{}' on /mnt/log",
             log_dev.display()
-        )))?;
+        ))?;
 
         trace!(
             "Mounted '{}' to log mountpoint: '/mnt/log'",
             log_dev.display()
         );
         // TODO: remove this later
-        Logger::set_log_file(
+        match Logger::set_log_file(
             &LogDestination::Stderr,
             &PathBuf::from("/mnt/log/stage2-init.log"),
             false,
-        )
-        .context(upstream_context!(
-            "Failed set log file to  '/mnt/log/stage2-init.log'"
-        ))?;
+        ) {
+            Ok(_) => (),
+            Err(_why) => {
+                error!("Failed set log file to  '/mnt/log/stage2-init.log'");
+                return Err(Error::displayed());
+            }
+        }
+        // .upstream_with_context("Failed set log file to  '/mnt/log/stage2-init.log'")?;
         info!(
             "Now logging to /mnt/log/stage2-init.log on '{}'",
             log_dev.display()
@@ -83,16 +83,13 @@ fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<(), MigError> {
         Ok(())
     } else {
         warn!("Log device does not exist: '{}'", log_dev.display());
-        Err(MigError::displayed())
+        Err(Error::displayed())
     }
 }
 
-fn redirect_fd(file_name: &str, old_fd: c_int, mode: c_int) -> Result<(), MigError> {
+fn redirect_fd(file_name: &str, old_fd: c_int, mode: c_int) -> Result<()> {
     let filename = CString::new(file_name)
-        .context(upstream_context!(&format!(
-            "Invalid filename: '{}'",
-            file_name
-        )))?
+        .upstream_with_context(&format!("Invalid filename: '{}'", file_name))?
         .into_raw();
 
     let new_fd = unsafe { open(filename, mode) };
@@ -108,7 +105,7 @@ fn redirect_fd(file_name: &str, old_fd: c_int, mode: c_int) -> Result<(), MigErr
                 file_name,
                 io::Error::last_os_error()
             );
-            Err(MigError::displayed())
+            Err(Error::displayed())
         }
     } else {
         error!(
@@ -116,11 +113,11 @@ fn redirect_fd(file_name: &str, old_fd: c_int, mode: c_int) -> Result<(), MigErr
             file_name,
             io::Error::last_os_error()
         );
-        Err(MigError::displayed())
+        Err(Error::displayed())
     }
 }
 
-fn close_fds() -> Result<i32, MigError> {
+fn close_fds() -> Result<i32> {
     let mut pipe_fds: [c_int; 2] = [0; 2];
     let sys_rc = unsafe { pipe(pipe_fds.as_mut_ptr()) };
 
@@ -133,14 +130,14 @@ fn close_fds() -> Result<i32, MigError> {
                 "Failed to dup2 pipe read handle to stdin, error: {}",
                 io::Error::last_os_error()
             );
-            return Err(MigError::displayed());
+            return Err(Error::displayed());
         }
     } else {
         error!(
             "Failed to create pipe for stdin, error: {}",
             io::Error::last_os_error()
         );
-        return Err(MigError::displayed());
+        return Err(Error::displayed());
     }
 
     redirect_fd("/stdout.log", STDOUT_FILENO, O_WRONLY | O_CREAT | O_TRUNC)?;

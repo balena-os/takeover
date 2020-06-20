@@ -1,6 +1,5 @@
-use crate::common::{path_append, MigErrCtx, MigError, MigErrorKind};
+use crate::common::{path_append, Error, Result, ToError};
 
-use failure::ResultExt;
 use lazy_static::lazy_static;
 use log::{debug, error, trace};
 use nix::sys::stat::{major, minor, stat};
@@ -10,6 +9,7 @@ use std::fmt;
 use std::fs::{read_dir, read_to_string};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::result;
 
 mod mount;
 use mount::{Mount, MountTab};
@@ -21,8 +21,8 @@ mod device;
 use device::Device;
 
 mod partition;
-use failure::_core::str::FromStr;
 use partition::Partition;
+use std::str::FromStr;
 
 // TODO: add mountpoints for  partitions
 
@@ -63,31 +63,40 @@ impl fmt::Display for DeviceNum {
 }
 
 impl FromStr for DeviceNum {
-    type Err = MigError;
+    type Err = Error;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
         lazy_static! {
             static ref DEVNUM_RE: Regex = Regex::new(r#"^(\d+):(\d+)$"#).unwrap();
         }
 
         if let Some(captures) = DEVNUM_RE.captures(s.trim()) {
             Ok(Self {
-                major: captures.get(1).unwrap().as_str().parse::<u64>().context(
-                    upstream_context!(&format!("Failed to parse device major number from '{}'", s)),
-                )?,
-                minor: captures.get(2).unwrap().as_str().parse::<u64>().context(
-                    upstream_context!(&format!(
+                major: captures
+                    .get(1)
+                    .unwrap()
+                    .as_str()
+                    .parse::<u64>()
+                    .upstream_with_context(&format!(
+                        "Failed to parse device major number from '{}'",
+                        s
+                    ))?,
+                minor: captures
+                    .get(2)
+                    .unwrap()
+                    .as_str()
+                    .parse::<u64>()
+                    .upstream_with_context(&format!(
                         "Failed to parse major device major number from '{}'",
                         s
-                    )),
-                )?,
+                    ))?,
             })
         } else {
             error!(
                 "Failed to parse block device major:minor numbers from '{}'",
                 s
             );
-            Err(MigError::displayed())
+            Err(Error::displayed())
         }
     }
 }
@@ -100,8 +109,8 @@ pub(crate) struct BlockDeviceInfo {
 }
 
 impl BlockDeviceInfo {
-    pub fn new() -> Result<BlockDeviceInfo, MigError> {
-        let stat_res = stat("/").context(upstream_context!("Failed to stat root"))?;
+    pub fn new() -> Result<BlockDeviceInfo> {
+        let stat_res = stat("/").upstream_with_context("Failed to stat root")?;
         let root_number = DeviceNum::new(stat_res.st_dev);
         let mounts = Mount::from_mtab()?;
 
@@ -112,10 +121,10 @@ impl BlockDeviceInfo {
         );
 
         let sys_path = PathBuf::from("/sys/block/");
-        let read_dir = read_dir(&sys_path).context(upstream_context!(&format!(
+        let read_dir = read_dir(&sys_path).upstream_with_context(&format!(
             "Failed to read directory '{}'",
             sys_path.display()
-        )))?;
+        ))?;
 
         let mut device_map: DeviceMap = DeviceMap::new();
         for entry in read_dir {
@@ -143,7 +152,7 @@ impl BlockDeviceInfo {
                     let dev_path = path_append("/dev", &curr_dev);
                     if !dev_path.exists() {
                         error!("device path does not exist: '{}'", dev_path.display());
-                        return Err(MigError::displayed());
+                        return Err(Error::displayed());
                     }
 
                     // TODO: fill mounted
@@ -183,7 +192,7 @@ impl BlockDeviceInfo {
                         sys_path.display(),
                         why
                     );
-                    return Err(MigError::displayed());
+                    return Err(Error::displayed());
                 }
             }
         }
@@ -216,7 +225,7 @@ impl BlockDeviceInfo {
         }
 
         error!("Failed to find root device");
-        Err(MigError::displayed())
+        Err(Error::displayed())
     }
 
     fn read_partitions<P: AsRef<Path>>(
@@ -225,12 +234,12 @@ impl BlockDeviceInfo {
         dev_path: P,
         root_number: &DeviceNum,
         device_map: &mut DeviceMap,
-    ) -> Result<(), MigError> {
+    ) -> Result<()> {
         let dev_path = dev_path.as_ref();
-        let dir_entries = read_dir(dev_path).context(upstream_context!(&format!(
+        let dir_entries = read_dir(dev_path).upstream_with_context(&format!(
             "Failed to read directory '{}'",
             dev_path.display()
-        )))?;
+        ))?;
 
         for entry in dir_entries {
             match entry {
@@ -238,10 +247,10 @@ impl BlockDeviceInfo {
                     let currdir = entry.path();
                     if entry
                         .metadata()
-                        .context(upstream_context!(&format!(
+                        .upstream_with_context(&format!(
                             "Failed toretrieve metadata for '{}'",
                             currdir.display()
-                        )))?
+                        ))?
                         .is_dir()
                     {
                         let part_name = BlockDeviceInfo::path_filename_as_string(&currdir)?;
@@ -287,7 +296,7 @@ impl BlockDeviceInfo {
                         dev_path.display(),
                         why
                     );
-                    return Err(MigError::displayed());
+                    return Err(Error::displayed());
                 }
             }
         }
@@ -308,18 +317,18 @@ impl BlockDeviceInfo {
         &self.devices
     }
 
-    fn get_maj_minor<P: AsRef<Path>>(dev_path: P) -> Result<DeviceNum, MigError> {
+    fn get_maj_minor<P: AsRef<Path>>(dev_path: P) -> Result<DeviceNum> {
         let dev_info_path = path_append(dev_path.as_ref(), "dev");
-        let dev_info = read_to_string(&dev_info_path).context(upstream_context!(&format!(
+        let dev_info = read_to_string(&dev_info_path).upstream_with_context(&format!(
             "Failed to read file '{}'",
             dev_info_path.display()
-        )))?;
+        ))?;
 
         Ok(DeviceNum::from_str(dev_info.as_str())?)
     }
 
     /// extract last element of path as string
-    fn path_filename_as_string<P: AsRef<Path>>(path: P) -> Result<String, MigError> {
+    fn path_filename_as_string<P: AsRef<Path>>(path: P) -> Result<String> {
         let path = path.as_ref();
         if let Some(dev_name) = path.file_name() {
             if let Some(dev_name) = dev_name.to_str() {
@@ -329,11 +338,11 @@ impl BlockDeviceInfo {
                     "Invalid characters found in device name '{}'",
                     path.display()
                 );
-                Err(MigError::displayed())
+                Err(Error::displayed())
             }
         } else {
             error!("Failed to retrieve filename from path '{}'", path.display());
-            Err(MigError::displayed())
+            Err(Error::displayed())
         }
     }
 }
