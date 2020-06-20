@@ -2,14 +2,13 @@ use std::fs::{write, OpenOptions};
 use std::io::{copy, Read};
 use std::path::{Path, PathBuf};
 
-use failure::ResultExt;
 use log::{error, Level};
 
 use crate::{
     common::{
         call,
         defs::CHMOD_CMD,
-        mig_error::{MigErrCtx, MigError, MigErrorKind},
+        error::{Error, ErrorKind, Result, ToError},
     },
     stage1::defs::OSArch,
 };
@@ -58,17 +57,16 @@ impl Assets {
         }
     }
 
-    pub fn get_build_num() -> Result<u32, MigError> {
-        let build_str = String::from_utf8(BUILD_NUM.to_owned()).context(upstream_context!(
-            &format!("Failed to parse string from build num {:?}", BUILD_NUM)
+    pub fn get_build_num() -> Result<u32> {
+        let build_str = String::from_utf8(BUILD_NUM.to_owned()).upstream_with_context(&format!(
+            "Failed to parse string from build num {:?}",
+            BUILD_NUM
         ))?;
 
-        Ok(build_str
-            .parse::<u32>()
-            .context(upstream_context!(&format!(
-                "Failed to parse buuild num from string '{}'",
-                build_str
-            )))?)
+        Ok(build_str.parse::<u32>().upstream_with_context(&format!(
+            "Failed to parse buuild num from string '{}'",
+            build_str
+        ))?)
     }
 
     pub fn write_stage2_script<P1: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
@@ -76,14 +74,14 @@ impl Assets {
         out_path: P2,
         tty: P3,
         log_level: Level,
-    ) -> Result<(), MigError> {
+    ) -> Result<()> {
         let s2_script = STAGE2_SCRIPT.replace("__TO__", &*to_dir.as_ref().to_string_lossy());
         let s2_script = s2_script.replace("__TTY__", &*tty.as_ref().to_string_lossy());
         let s2_script = s2_script.replace("__LOG_LEVEL__", log_level.to_string().as_str());
-        write(out_path.as_ref(), &s2_script).context(upstream_context!(&format!(
+        write(out_path.as_ref(), &s2_script).upstream_with_context(&format!(
             "Failed to write stage 2 script to: '{}'",
             out_path.as_ref().display()
-        )))?;
+        ))?;
         let cmd_res = call(
             CHMOD_CMD,
             &["+x", &*out_path.as_ref().to_string_lossy()],
@@ -97,11 +95,11 @@ impl Assets {
                 out_path.as_ref().display(),
                 cmd_res.stderr
             );
-            Err(MigError::displayed())
+            Err(Error::displayed())
         }
     }
 
-    pub fn busybox_size(&self) -> Result<u64, MigError> {
+    pub fn busybox_size(&self) -> Result<u64> {
         let mut decoder = GzDecoder::new(self.busybox);
         let mut size: u64 = 0;
         const BUFFER_SIZE: usize = 0x0010_0000;
@@ -109,7 +107,7 @@ impl Assets {
         loop {
             let bytes_read = decoder
                 .read(&mut buffer)
-                .context(upstream_context!("Failed to uncompress busybox executable"))?;
+                .upstream_with_context("Failed to uncompress busybox executable")?;
             if bytes_read > 0 {
                 size += bytes_read as u64
             } else {
@@ -120,7 +118,7 @@ impl Assets {
         Ok(size)
     }
 
-    pub fn write_to<P: AsRef<Path>>(&self, target_path: P) -> Result<PathBuf, MigError> {
+    pub fn write_to<P: AsRef<Path>>(&self, target_path: P) -> Result<PathBuf> {
         let target_path = target_path.as_ref().join("busybox");
 
         {
@@ -130,22 +128,22 @@ impl Assets {
                 .write(true)
                 .read(false)
                 .open(&target_path)
-                .context(upstream_context!(&format!(
+                .upstream_with_context(&format!(
                     "Failed to open file for writing: '{}'",
                     target_path.display()
-                )))?;
+                ))?;
 
-            copy(&mut decoder, &mut target_file).context(upstream_context!(&format!(
+            copy(&mut decoder, &mut target_file).upstream_with_context(&format!(
                 "Failed to decompress busybox executable to '{}'",
                 target_path.display()
-            )))?;
+            ))?;
         }
 
         let cmd_res = call(CHMOD_CMD, &["+x", &*target_path.to_string_lossy()], true)?;
 
         if !cmd_res.status.success() {
-            return Err(MigError::from_remark(
-                MigErrorKind::CmdIO,
+            return Err(Error::with_context(
+                ErrorKind::CmdIo,
                 &format!(
                     "Failed to set executable flags for '{}', stderr: '{}'",
                     target_path.display(),

@@ -1,13 +1,11 @@
 use std::io::Read;
 
-use failure::ResultExt;
 use log::debug;
 
 use reqwest::{blocking::Client, header};
 use serde::{Deserialize, Serialize};
 
-use crate::common::{MigErrCtx, MigErrorKind};
-use crate::MigError;
+use crate::common::{Error, ErrorKind, Result, ToError};
 
 const OS_VERSION_URL_P1: &str = "/device-types/v1/";
 const OS_VERSION_URL_P2: &str = "/images";
@@ -29,18 +27,12 @@ struct ImageRequestData {
     file_type: String,
 }
 
-pub(crate) fn get_os_versions(
-    api_endpoint: &str,
-    api_key: &str,
-    device: &str,
-) -> Result<Versions, MigError> {
+pub(crate) fn get_os_versions(api_endpoint: &str, api_key: &str, device: &str) -> Result<Versions> {
     let mut headers = header::HeaderMap::new();
     headers.insert(
         header::AUTHORIZATION,
-        header::HeaderValue::from_str(api_key).context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            "Failed to create auth header",
-        ))?,
+        header::HeaderValue::from_str(api_key)
+            .upstream_with_context("Failed to create auth header")?,
     );
 
     let request_url = format!(
@@ -53,28 +45,24 @@ pub(crate) fn get_os_versions(
     let res = Client::builder()
         .default_headers(headers)
         .build()
-        .context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            "Failed to create https client",
-        ))?
+        .upstream_with_context("Failed to create https client")?
         .get(&request_url)
         .send()
-        .context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            &format!("Failed to send https request url: '{}'", request_url),
+        .upstream_with_context(&format!(
+            "Failed to send https request url: '{}'",
+            request_url
         ))?;
 
     debug!("Result = {:?}", res);
 
     let status = res.status();
     if status == 200 {
-        Ok(res.json::<Versions>().context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            "Failed to parse request results",
-        ))?)
+        Ok(res
+            .json::<Versions>()
+            .upstream_with_context("Failed to parse request results")?)
     } else {
-        Err(MigError::from_remark(
-            MigErrorKind::InvState,
+        Err(Error::with_context(
+            ErrorKind::InvState,
             &format!("Balena API request failed with status: {}", status),
         ))
     }
@@ -85,14 +73,12 @@ pub(crate) fn get_os_image(
     api_key: &str,
     device: &str,
     version: &str,
-) -> Result<Box<dyn Read>, MigError> {
+) -> Result<Box<dyn Read>> {
     let mut headers = header::HeaderMap::new();
     headers.insert(
         header::AUTHORIZATION,
-        header::HeaderValue::from_str(api_key).context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            "Failed to create auth header",
-        ))?,
+        header::HeaderValue::from_str(api_key)
+            .upstream_with_context("Failed to create auth header")?,
     );
 
     let request_url = format!("{}{}", api_endpoint, OS_IMG_URL);
@@ -109,16 +95,13 @@ pub(crate) fn get_os_image(
     let res = Client::builder()
         .default_headers(headers)
         .build()
-        .context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            "Failed to create https client",
-        ))?
+        .upstream_with_context("Failed to create https client")?
         .post(&request_url)
         .json(&post_data)
         .send()
-        .context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            &format!("Failed to send https request url: '{}'", request_url),
+        .upstream_with_context(&format!(
+            "Failed to send https request url: '{}'",
+            request_url
         ))?;
 
     debug!("Result = {:?}", res);

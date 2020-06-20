@@ -3,7 +3,7 @@ use regex::Regex;
 
 use crate::stage1::device_impl::check_os;
 use crate::{
-    common::{options::Options, MigError, MigErrorKind},
+    common::{options::Options, Error, ErrorKind, Result},
     stage1::{
         defs::{DeviceType, DEV_TYPE_RPI2, DEV_TYPE_RPI3, DEV_TYPE_RPI4_64},
         device::Device,
@@ -15,10 +15,7 @@ const RPI2_SLUGS: [&str; 1] = [DEV_TYPE_RPI2];
 const RPI3_SLUGS: [&str; 1] = [DEV_TYPE_RPI3];
 const RPI4_64_SLUGS: [&str; 1] = [DEV_TYPE_RPI4_64];
 
-pub(crate) fn is_rpi(
-    opts: &Options,
-    model_string: &str,
-) -> Result<Option<Box<dyn Device>>, MigError> {
+pub(crate) fn is_rpi(opts: &Options, model_string: &str) -> Result<Option<Box<dyn Device>>> {
     debug!(
         "raspberrypi::is_rpi: entered with model string: '{}'",
         model_string
@@ -53,7 +50,7 @@ pub(crate) fn is_rpi(
             _ => {
                 let message = format!("The raspberry pi type reported by your device ('{} {}') is not supported by balena-migrate", pitype, model);
                 error!("{}", message);
-                Err(MigError::from_remark(MigErrorKind::InvParam, &message))
+                Err(Error::with_context(ErrorKind::InvParam, &message))
             }
         }
     } else {
@@ -65,11 +62,11 @@ pub(crate) fn is_rpi(
 pub(crate) struct RaspberryPi2;
 
 impl RaspberryPi2 {
-    pub fn from_config(opts: &Options) -> Result<RaspberryPi2, MigError> {
+    pub fn from_config(opts: &Options) -> Result<RaspberryPi2> {
         const SUPPORTED_OSSES: &[&str] = &["Raspbian GNU/Linux 10 (buster)"];
 
         if opts.is_migrate() && !check_os(SUPPORTED_OSSES, opts, "Raspberry PI 2")? {
-            return Err(MigError::displayed());
+            return Err(Error::displayed());
         }
 
         Ok(RaspberryPi2 {})
@@ -89,7 +86,7 @@ impl Device for RaspberryPi2 {
 pub(crate) struct RaspberryPi3;
 
 impl RaspberryPi3 {
-    pub fn from_config(opts: &Options) -> Result<RaspberryPi3, MigError> {
+    pub fn from_config(opts: &Options) -> Result<RaspberryPi3> {
         const SUPPORTED_OSSES: &[&str] = &[
             "Raspbian GNU/Linux 8 (jessie)",
             "Raspbian GNU/Linux 9 (stretch)",
@@ -97,7 +94,7 @@ impl RaspberryPi3 {
         ];
 
         if opts.is_migrate() && !check_os(SUPPORTED_OSSES, opts, "Raspberry PI 3")? {
-            return Err(MigError::displayed());
+            return Err(Error::displayed());
         }
 
         Ok(RaspberryPi3)
@@ -117,7 +114,7 @@ impl Device for RaspberryPi3 {
 pub(crate) struct RaspberryPi4_64;
 
 impl RaspberryPi4_64 {
-    pub fn from_config(opts: &Options) -> Result<RaspberryPi4_64, MigError> {
+    pub fn from_config(opts: &Options) -> Result<RaspberryPi4_64> {
         const SUPPORTED_OSSES: &[&str] = &[
             "Raspbian GNU/Linux 8 (jessie)",
             "Raspbian GNU/Linux 9 (stretch)",
@@ -125,7 +122,7 @@ impl RaspberryPi4_64 {
         ];
 
         if opts.is_migrate() && !check_os(SUPPORTED_OSSES, opts, "Raspberry PI 4")? {
-            return Err(MigError::displayed());
+            return Err(Error::displayed());
         }
 
         Ok(RaspberryPi4_64)

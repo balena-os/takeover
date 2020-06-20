@@ -10,21 +10,22 @@ use crate::{
     common::{
         defs::NIX_NONE,
         disk_util::{Disk, PartitionIterator, PartitionReader},
+        is_admin,
         loop_device::LoopDevice,
         path_append,
         stream_progress::StreamProgress,
-        MigErrCtx, MigError, MigErrorKind,
+        Error, Result, ToError,
     },
-    stage1::api_calls::{get_os_image, get_os_versions, Versions},
-    stage1::defs::{
-        DEV_TYPE_BBB, DEV_TYPE_BBG, DEV_TYPE_GEN_X86_64, DEV_TYPE_INTEL_NUC, DEV_TYPE_RPI3,
-        DEV_TYPE_RPI4_64,
+    stage1::{
+        api_calls::{get_os_image, get_os_versions, Versions},
+        defs::{
+            DEV_TYPE_BBB, DEV_TYPE_BBG, DEV_TYPE_GEN_X86_64, DEV_TYPE_INTEL_NUC, DEV_TYPE_RPI3,
+            DEV_TYPE_RPI4_64,
+        },
+        migrate_info::balena_cfg_json::BalenaCfgJson,
     },
 };
 
-use crate::common::is_admin;
-use crate::stage1::migrate_info::balena_cfg_json::BalenaCfgJson;
-use failure::ResultExt;
 use flate2::{Compression, GzBuilder};
 use nix::mount::{mount, umount, MsFlags};
 
@@ -66,15 +67,15 @@ fn parse_versions(versions: &Versions) -> Vec<Version> {
     sem_vers
 }
 
-fn determine_version(ver_str: &str, versions: &Versions) -> Result<Version, MigError> {
+fn determine_version(ver_str: &str, versions: &Versions) -> Result<Version> {
     match ver_str {
         "latest" => {
             info!("Selected latest version ({}) for download", versions.latest);
             Ok(
-                Version::parse(&versions.latest).context(upstream_context!(&format!(
+                Version::parse(&versions.latest).upstream_with_context(&format!(
                     "Failed to parse version from '{}'",
                     versions.latest
-                )))?,
+                ))?,
             )
         }
         "default" => {
@@ -97,14 +98,14 @@ fn determine_version(ver_str: &str, versions: &Versions) -> Result<Version, MigE
                 Ok(found)
             } else {
                 error!("No version found for '{}'", ver_str);
-                Err(MigError::displayed())
+                Err(Error::displayed())
             }
         }
         _ => {
             if ver_str.starts_with('^') || ver_str.starts_with('~') {
-                let ver_req = VersionReq::parse(ver_str).context(MigErrCtx::from_remark(
-                    MigErrorKind::Upstream,
-                    &format!("Failed to parse version from '{}'", ver_str),
+                let ver_req = VersionReq::parse(ver_str).upstream_with_context(&format!(
+                    "Failed to parse version from '{}'",
+                    ver_str
                 ))?;
                 let mut found: Option<Version> = None;
                 for cmp_ver in parse_versions(&versions) {
@@ -123,12 +124,12 @@ fn determine_version(ver_str: &str, versions: &Versions) -> Result<Version, MigE
                     Ok(found)
                 } else {
                     error!("No version found for '{}'", ver_str);
-                    Err(MigError::displayed())
+                    Err(Error::displayed())
                 }
             } else {
-                let ver_req = Version::parse(ver_str).context(MigErrCtx::from_remark(
-                    MigErrorKind::Upstream,
-                    &format!("Failed to parse version from '{}'", ver_str),
+                let ver_req = Version::parse(ver_str).upstream_with_context(&format!(
+                    "Failed to parse version from '{}'",
+                    ver_str
                 ))?;
 
                 let mut found: Option<Version> = None;
@@ -149,7 +150,7 @@ fn determine_version(ver_str: &str, versions: &Versions) -> Result<Version, MigE
                     Ok(found)
                 } else {
                     error!("No version found for '{}'", ver_str);
-                    Err(MigError::displayed())
+                    Err(Error::displayed())
                 }
             }
         }
@@ -161,7 +162,7 @@ fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
     image_file_name: P1,
     device_type: &str,
     work_dir: P2,
-) -> Result<(), MigError> {
+) -> Result<()> {
     let work_dir = work_dir.as_ref();
     let progress = StreamProgress::new(stream, 10, Level::Info, None);
     let mut disk = Disk::from_gzip_stream(progress)?;
@@ -169,21 +170,15 @@ fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
     if let Some(part_info) = part_iterator.nth(1) {
         let mut reader = PartitionReader::from_part_iterator(&part_info, &mut part_iterator);
         let extract_file_name = path_append(work_dir, "root_a.img");
-        let mut tmp_file = File::create(&extract_file_name).context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            &format!(
-                "Failed to create temporary file '{}'",
-                extract_file_name.display()
-            ),
+        let mut tmp_file = File::create(&extract_file_name).upstream_with_context(&format!(
+            "Failed to create temporary file '{}'",
+            extract_file_name.display()
         ))?;
 
         // TODO: show progress
-        copy(&mut reader, &mut tmp_file).context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            &format!(
-                "Failed to extract root_a partition to temporary file '{}'",
-                extract_file_name.display()
-            ),
+        copy(&mut reader, &mut tmp_file).upstream_with_context(&format!(
+            "Failed to extract root_a partition to temporary file '{}'",
+            extract_file_name.display()
         ))?;
 
         info!("Finished root_a partition extraction, now mounting to extract balena OS image");
@@ -194,9 +189,9 @@ fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
 
         let mount_path = path_append(work_dir, "mnt_root_a");
         if !mount_path.exists() {
-            create_dir(&mount_path).context(MigErrCtx::from_remark(
-                MigErrorKind::Upstream,
-                &format!("Failed to create directory '{}'", mount_path.display()),
+            create_dir(&mount_path).upstream_with_context(&format!(
+                "Failed to create directory '{}'",
+                mount_path.display()
             ))?;
         }
 
@@ -208,13 +203,10 @@ fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
             MsFlags::empty(),
             NIX_NONE,
         )
-        .context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            &format!(
-                "Failed to mount '{}' on '{}",
-                loop_device.get_path().display(),
-                mount_path.display()
-            ),
+        .upstream_with_context(&format!(
+            "Failed to mount '{}' on '{}",
+            loop_device.get_path().display(),
+            mount_path.display()
         ))?;
 
         debug!("retrieving path for device type '{}'", device_type);
@@ -230,7 +222,7 @@ fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
                     "Encountered undefined image name for device type {}",
                     device_type
                 );
-                return Err(MigError::displayed());
+                return Err(Error::displayed());
             }
         };
 
@@ -239,27 +231,20 @@ fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
 
         {
             let mut gz_writer = GzBuilder::new().write(
-                File::create(img_file_name).context(MigErrCtx::from_remark(
-                    MigErrorKind::Upstream,
-                    &format!(
-                        "Failed to open image file for writing: '{}'",
-                        img_file_name.display()
-                    ),
+                File::create(img_file_name).upstream_with_context(&format!(
+                    "Failed to open image file for writing: '{}'",
+                    img_file_name.display()
                 ))?,
                 Compression::best(),
             );
 
-            let img_reader =
-                OpenOptions::new()
-                    .read(true)
-                    .open(&img_path)
-                    .context(MigErrCtx::from_remark(
-                        MigErrorKind::Upstream,
-                        &format!(
-                            "Failed to open image file for reading: '{}'",
-                            img_path.display()
-                        ),
-                    ))?;
+            let img_reader = OpenOptions::new()
+                .read(true)
+                .open(&img_path)
+                .upstream_with_context(&format!(
+                    "Failed to open image file for reading: '{}'",
+                    img_path.display()
+                ))?;
 
             info!("Recompressing OS image to {}", img_file_name.display());
 
@@ -271,13 +256,10 @@ fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
 
             let mut stream_progress = StreamProgress::new(img_reader, 10, Level::Info, size);
 
-            copy(&mut stream_progress, &mut gz_writer).context(MigErrCtx::from_remark(
-                MigErrorKind::Upstream,
-                &format!(
-                    "Failed to compress image '{}' to '{}'",
-                    img_path.display(),
-                    img_file_name.display()
-                ),
+            copy(&mut stream_progress, &mut gz_writer).upstream_with_context(&format!(
+                "Failed to compress image '{}' to '{}'",
+                img_path.display(),
+                img_file_name.display()
             ))?;
         }
 
@@ -317,7 +299,7 @@ fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
         Ok(())
     } else {
         error!("Failed to find root_a partition in downloaded image");
-        Err(MigError::displayed())
+        Err(Error::displayed())
     }
 }
 
@@ -326,22 +308,22 @@ pub(crate) fn download_image(
     work_dir: &Path,
     device_type: &str,
     version: &str,
-) -> Result<PathBuf, MigError> {
+) -> Result<PathBuf> {
     if !SUPPORTED_DEVICES.contains(&device_type) {
         error!(
             "OS download is not supported for device type {}",
             device_type
         );
-        return Err(MigError::displayed());
+        return Err(Error::displayed());
     }
 
-    let api_key = balena_cfg.get_api_key().context(upstream_context!(
-        "Failed to retrieve api-key from config.json - unable to retrieve os-image"
-    ))?;
+    let api_key = balena_cfg.get_api_key().upstream_with_context(
+        "Failed to retrieve api-key from config.json - unable to retrieve os-image",
+    )?;
 
-    let api_endpoint = balena_cfg.get_api_endpoint().context(upstream_context!(
-        "Failed to retrieve api-endpoint from config.json - unable to retrieve os-image"
-    ))?;
+    let api_endpoint = balena_cfg.get_api_endpoint().upstream_with_context(
+        "Failed to retrieve api-endpoint from config.json - unable to retrieve os-image",
+    )?;
 
     let versions = get_os_versions(&api_endpoint, &api_key, device_type)?;
 
@@ -368,24 +350,21 @@ pub(crate) fn download_image(
     if FLASHER_DEVICES.contains(&device_type) {
         if !is_admin()? {
             error!("please run this program as root");
-            return Err(MigError::from(MigErrorKind::Displayed));
+            return Err(Error::displayed());
         }
         extract_image(stream, &img_file_name, device_type, work_dir)?;
     } else {
         debug!("Downloading file '{}'", img_file_name.display());
-        let mut file = File::create(&img_file_name).context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            &format!("Failed to create file: '{}'", img_file_name.display()),
+        let mut file = File::create(&img_file_name).upstream_with_context(&format!(
+            "Failed to create file: '{}'",
+            img_file_name.display()
         ))?;
 
         // TODO: show progress
         let mut progress = StreamProgress::new(stream, 10, Level::Info, None);
-        copy(&mut progress, &mut file).context(MigErrCtx::from_remark(
-            MigErrorKind::Upstream,
-            &format!(
-                "Failed to write downloaded data to '{}'",
-                img_file_name.display()
-            ),
+        copy(&mut progress, &mut file).upstream_with_context(&format!(
+            "Failed to write downloaded data to '{}'",
+            img_file_name.display()
         ))?;
         info!(
             "The balena OS image was successfully written to '{}'",

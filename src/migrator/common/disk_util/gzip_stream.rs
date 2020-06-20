@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use flate2::read::GzDecoder;
 use log::{debug, trace};
 
-use crate::common::{disk_util::image_file::ImageFile, MigError, MigErrorKind};
+use crate::common::{disk_util::image_file::ImageFile, Error, ErrorKind, Result};
 
 const DEF_READ_BUFFER: usize = 1024 * 1024;
 
@@ -14,7 +14,7 @@ pub(crate) struct GZipStream<R> {
 }
 
 impl<R: Read> GZipStream<R> {
-    pub fn new(stream: R) -> Result<GZipStream<R>, MigError> {
+    pub fn new(stream: R) -> Result<GZipStream<R>> {
         trace!("new: entered ");
 
         Ok(GZipStream {
@@ -23,7 +23,7 @@ impl<R: Read> GZipStream<R> {
         })
     }
 
-    fn seek(&mut self, offset: u64) -> Result<(), MigError> {
+    fn seek(&mut self, offset: u64) -> Result<()> {
         trace!(
             "seek: entered with offset {}, bytes_read: {}",
             offset,
@@ -31,8 +31,8 @@ impl<R: Read> GZipStream<R> {
         );
 
         let mut to_read = if offset < self.bytes_read {
-            return Err(MigError::from_remark(
-                MigErrorKind::InvState,
+            return Err(Error::with_context(
+                ErrorKind::InvState,
                 "cannot seek backwards on stream",
             ));
         } else {
@@ -61,8 +61,8 @@ impl<R: Read> GZipStream<R> {
                             }
                         }
                         Err(why) => {
-                            return Err(MigError::from_remark(
-                                MigErrorKind::Upstream,
+                            return Err(Error::with_context(
+                                ErrorKind::Upstream,
                                 &format!("seek: read from stream, error {:?}", why),
                             ));
                         }
@@ -78,8 +78,8 @@ impl<R: Read> GZipStream<R> {
                         self.bytes_read = offset;
                         Ok(())
                     }
-                    Err(why) => Err(MigError::from_remark(
-                        MigErrorKind::Upstream,
+                    Err(why) => Err(Error::with_context(
+                        ErrorKind::Upstream,
                         &format!("seek: failed to read from stream, error {:?}", why),
                     )),
                 }
@@ -93,7 +93,7 @@ impl<R: Read> GZipStream<R> {
 }
 
 impl<R: Read> ImageFile for GZipStream<R> {
-    fn fill(&mut self, offset: u64, buffer: &mut [u8]) -> Result<(), MigError> {
+    fn fill(&mut self, offset: u64, buffer: &mut [u8]) -> Result<()> {
         trace!(
             "fill: entered with offset {}, size {}",
             offset,
@@ -108,8 +108,8 @@ impl<R: Read> ImageFile for GZipStream<R> {
                 self.bytes_read = offset + buffer.len() as u64;
                 Ok(())
             }
-            Err(why) => Err(MigError::from_remark(
-                MigErrorKind::Upstream,
+            Err(why) => Err(Error::with_context(
+                ErrorKind::Upstream,
                 &format!("failed to read from stream, error {:?}", why),
             )),
         }

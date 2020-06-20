@@ -7,7 +7,7 @@ use crate::{
     common::{
         call,
         defs::{MKTEMP_CMD, MOKUTIL_CMD, NIX_NONE, UNAME_CMD, WHEREIS_CMD},
-        dir_exists, file_exists, MigErrCtx, MigError, MigErrorKind,
+        dir_exists, file_exists, Error, ErrorKind, Result, ToError,
     },
     stage1::defs::{OSArch, SYS_UEFI_DIR},
 };
@@ -16,15 +16,13 @@ use log::{error, trace, warn};
 use regex::Regex;
 
 use crate::stage1::migrate_info::MigrateInfo;
-use failure::ResultExt;
 use std::fs::create_dir_all;
 
-pub(crate) fn get_os_arch() -> Result<OSArch, MigError> {
+pub(crate) fn get_os_arch() -> Result<OSArch> {
     const UNAME_ARGS_OS_ARCH: [&str; 1] = ["-m"];
     trace!("get_os_arch: entered");
-    let cmd_res = call(UNAME_CMD, &UNAME_ARGS_OS_ARCH, true).context(upstream_context!(
-        &format!("get_os_arch: call {}", UNAME_CMD)
-    ))?;
+    let cmd_res = call(UNAME_CMD, &UNAME_ARGS_OS_ARCH, true)
+        .upstream_with_context(&format!("get_os_arch: call {}", UNAME_CMD))?;
 
     if cmd_res.status.success() {
         if cmd_res.stdout.to_lowercase() == "x86_64" {
@@ -35,14 +33,14 @@ pub(crate) fn get_os_arch() -> Result<OSArch, MigError> {
             // TODO: try to determine the CPU Architecture
             Ok(OSArch::ARMHF)
         } else {
-            Err(MigError::from_remark(
-                MigErrorKind::InvParam,
+            Err(Error::with_context(
+                ErrorKind::InvParam,
                 &format!("get_os_arch: unsupported architectute '{}'", cmd_res.stdout),
             ))
         }
     } else {
-        Err(MigError::from_remark(
-            MigErrorKind::ExecProcess,
+        Err(Error::with_context(
+            ErrorKind::ExecProcess,
             &format!("get_os_arch: command failed: {} {:?}", UNAME_CMD, cmd_res),
         ))
     }
@@ -53,7 +51,7 @@ pub(crate) fn get_os_arch() -> Result<OSArch, MigError> {
  * assuming secure boot is not enabled if mokutil is absent
  ******************************************************************/
 
-pub(crate) fn is_secure_boot() -> Result<bool, MigError> {
+pub(crate) fn is_secure_boot() -> Result<bool> {
     trace!("is_secure_boot: entered");
 
     // TODO: check for efi vars
@@ -84,8 +82,8 @@ pub(crate) fn is_secure_boot() -> Result<bool, MigError> {
             "is_secure_boot: failed to parse command output: '{}'",
             cmd_res.stdout
         );
-        Err(MigError::from_remark(
-            MigErrorKind::InvParam,
+        Err(Error::with_context(
+            ErrorKind::InvParam,
             &"is_secure_boot: failed to parse command output".to_string(),
         ))
     } else {
@@ -93,7 +91,7 @@ pub(crate) fn is_secure_boot() -> Result<bool, MigError> {
     }
 }
 
-pub(crate) fn whereis(cmd: &str) -> Result<String, MigError> {
+pub(crate) fn whereis(cmd: &str) -> Result<String> {
     const BIN_DIRS: &[&str] = &["/bin", "/usr/bin", "/sbin", "/usr/sbin"];
     // try manually first
     for path in BIN_DIRS {
@@ -109,8 +107,8 @@ pub(crate) fn whereis(cmd: &str) -> Result<String, MigError> {
         Ok(cmd_res) => cmd_res,
         Err(why) => {
             // manually try the usual suspects
-            return Err(MigError::from_remark(
-                MigErrorKind::NotFound,
+            return Err(Error::with_context(
+                ErrorKind::NotFound,
                 &format!(
                     "whereis failed to execute for: {:?}, error: {:?}",
                     args, why
@@ -121,8 +119,8 @@ pub(crate) fn whereis(cmd: &str) -> Result<String, MigError> {
 
     if cmd_res.status.success() {
         if cmd_res.stdout.is_empty() {
-            Err(MigError::from_remark(
-                MigErrorKind::InvParam,
+            Err(Error::with_context(
+                ErrorKind::InvParam,
                 &format!("whereis: no command output for {}", cmd),
             ))
         } else {
@@ -130,15 +128,15 @@ pub(crate) fn whereis(cmd: &str) -> Result<String, MigError> {
             if let Some(s) = words.nth(1) {
                 Ok(String::from(s))
             } else {
-                Err(MigError::from_remark(
-                    MigErrorKind::NotFound,
+                Err(Error::with_context(
+                    ErrorKind::NotFound,
                     &format!("whereis: command not found: '{}'", cmd),
                 ))
             }
         }
     } else {
-        Err(MigError::from_remark(
-            MigErrorKind::ExecProcess,
+        Err(Error::with_context(
+            ErrorKind::ExecProcess,
             &format!(
                 "whereis: command failed for {}: {}",
                 cmd,
@@ -152,7 +150,7 @@ pub(crate) fn mktemp<P: AsRef<Path>>(
     dir: bool,
     pattern: Option<&str>,
     path: Option<P>,
-) -> Result<PathBuf, MigError> {
+) -> Result<PathBuf> {
     let mut cmd_args: Vec<&str> = Vec::new();
 
     let mut _dir_path = String::new();
@@ -175,8 +173,8 @@ pub(crate) fn mktemp<P: AsRef<Path>>(
     if cmd_res.status.success() {
         Ok(PathBuf::from(cmd_res.stdout))
     } else {
-        Err(MigError::from_remark(
-            MigErrorKind::ExecProcess,
+        Err(Error::with_context(
+            ErrorKind::ExecProcess,
             &format!(
                 "Failed to create temporary file for image extraction, error: {}",
                 cmd_res.stderr
@@ -185,33 +183,27 @@ pub(crate) fn mktemp<P: AsRef<Path>>(
     }
 }
 
-pub(crate) fn check_tcp_connect(host: &str, port: u16, timeout: u64) -> Result<(), MigError> {
+pub(crate) fn check_tcp_connect(host: &str, port: u16, timeout: u64) -> Result<()> {
     use std::net::{Shutdown, TcpStream, ToSocketAddrs};
     use std::time::Duration;
     let url = format!("{}:{}", host, port);
-    let mut addrs_iter = url.to_socket_addrs().context(MigErrCtx::from_remark(
-        MigErrorKind::Upstream,
-        &format!(
-            "check_tcp_connect: failed to resolve host address: '{}'",
-            url
-        ),
+    let mut addrs_iter = url.to_socket_addrs().upstream_with_context(&format!(
+        "check_tcp_connect: failed to resolve host address: '{}'",
+        url
     ))?;
 
     if let Some(ref sock_addr) = addrs_iter.next() {
         let tcp_stream = TcpStream::connect_timeout(sock_addr, Duration::from_secs(timeout))
-            .context(MigErrCtx::from_remark(
-                MigErrorKind::Upstream,
-                &format!(
-                    "check_tcp_connect: failed to connect to: '{}' with timeout: {}",
-                    url, timeout
-                ),
+            .upstream_with_context(&format!(
+                "check_tcp_connect: failed to connect to: '{}' with timeout: {}",
+                url, timeout
             ))?;
 
         let _res = tcp_stream.shutdown(Shutdown::Both);
         Ok(())
     } else {
-        Err(MigError::from_remark(
-            MigErrorKind::InvState,
+        Err(Error::with_context(
+            ErrorKind::InvState,
             &format!(
                 "check_tcp_connect: no results from name resolution for: '{}",
                 url
@@ -225,13 +217,13 @@ pub(crate) fn mount_fs<P: AsRef<Path>>(
     fs: &str,
     fs_type: &str,
     mig_info: &mut MigrateInfo,
-) -> Result<(), MigError> {
+) -> Result<()> {
     let mount_dir = mount_dir.as_ref();
     if !dir_exists(mount_dir)? {
-        create_dir_all(mount_dir).context(upstream_context!(&format!(
+        create_dir_all(mount_dir).upstream_with_context(&format!(
             "Failed to create mount directory '{}'",
             mount_dir.display()
-        )))?;
+        ))?;
     }
 
     mount(
@@ -241,12 +233,12 @@ pub(crate) fn mount_fs<P: AsRef<Path>>(
         MsFlags::empty(),
         NIX_NONE,
     )
-    .context(upstream_context!(&format!(
+    .upstream_with_context(&format!(
         "Failed to mount {} on {} with fstype {}",
         fs,
         mount_dir.display(),
         fs_type
-    )))?;
+    ))?;
 
     mig_info.add_mount(mount_dir);
 

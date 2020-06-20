@@ -1,5 +1,3 @@
-use failure::{Fail, ResultExt};
-
 use std::fmt::{self, Debug, Formatter};
 use std::mem::MaybeUninit;
 use std::path::{Path, PathBuf};
@@ -16,7 +14,7 @@ use std::os::raw::c_int;
 
 use crate::common::{
     defs::IoctlReq,
-    mig_error::{MigErrCtx, MigError, MigErrorKind},
+    error::{Error, ErrorKind, Result, ToError},
 };
 use log::{debug, trace};
 
@@ -109,7 +107,7 @@ pub struct LoopDevice {
 impl LoopDevice {
     /// create or open loop device for index
 
-    pub fn from_index(loop_index: u32, auto_unset: bool) -> Result<LoopDevice, MigError> {
+    pub fn from_index(loop_index: u32, auto_unset: bool) -> Result<LoopDevice> {
         trace!(
             "from_index: entered with index {}, autounset: {}",
             loop_index,
@@ -134,13 +132,13 @@ impl LoopDevice {
                         loop_dev.file = Some(cbuffer_to_pathbuf(&loop_info.lo_file_name))
                     }
                     Err(why) => {
-                        if why.kind() != MigErrorKind::DeviceNotFound {
-                            return Err(from_upstream!(
-                                why,
+                        if why.kind() != ErrorKind::DeviceNotFound {
+                            return Err(Error::from_upstream(
+                                From::from(why),
                                 &format!(
                                     "from_index: failed to retrieve loop info from device'{}'",
                                     loop_dev.path.display()
-                                )
+                                ),
                             ));
                         }
                     }
@@ -149,7 +147,7 @@ impl LoopDevice {
             }
             Err(why) => {
                 // failed to open device
-                if why.kind() == MigErrorKind::FileNotFound {
+                if why.kind() == ErrorKind::FileNotFound {
                     // file does not exist - try to create device node
                     let c_path = path_to_cstring(&path)?.into_raw();
                     let res = unsafe { mknod(c_path, S_IFBLK | 0o0644, makedev(7, loop_index)) };
@@ -163,8 +161,8 @@ impl LoopDevice {
                             unset: auto_unset,
                         })
                     } else {
-                        Err(MigError::from_remark(
-                            MigErrorKind::Upstream,
+                        Err(Error::with_context(
+                            ErrorKind::Upstream,
                             &format!(
                                 "from_index: Failed to create device node '{}', error {}",
                                 path.display(),
@@ -174,9 +172,9 @@ impl LoopDevice {
                     }
                 } else {
                     // some other error opening device
-                    Err(from_upstream!(
-                        why,
-                        &format!("from_index: Failed to open device '{}'", path.display())
+                    Err(Error::from_upstream(
+                        From::from(why),
+                        &format!("from_index: Failed to open device '{}'", path.display()),
                     ))
                 }
             }
@@ -190,7 +188,7 @@ impl LoopDevice {
         size_limit: Option<u64>,
         loop_index: Option<u32>,
         auto_unset: bool,
-    ) -> Result<LoopDevice, MigError> {
+    ) -> Result<LoopDevice> {
         let mut loop_device = if let Some(loop_index) = loop_index {
             LoopDevice::from_index(loop_index, auto_unset)?
         } else {
@@ -200,14 +198,14 @@ impl LoopDevice {
         Ok(loop_device)
     }
 
-    pub fn get_free(auto_unset: bool) -> Result<LoopDevice, MigError> {
+    pub fn get_free(auto_unset: bool) -> Result<LoopDevice> {
         // Find a free loop device, try use /dev/loop-control first
         match Fd::open("/dev/loop-control", O_RDWR | O_CLOEXEC) {
             Ok(file_fd) => {
                 let ioctl_res = unsafe { ioctl(file_fd.get_fd(), IOCTL_LOOP_CTL_GET_FREE) };
                 if ioctl_res < 0 {
-                    Err(MigError::from_remark(
-                        MigErrorKind::Upstream,
+                    Err(Error::with_context(
+                        ErrorKind::Upstream,
                         &format!(
                             "get_free: ioctl IOCTL_LOOP_CTL_GET_FREE failed with error: {}",
                             io::Error::last_os_error().to_string()
@@ -223,7 +221,7 @@ impl LoopDevice {
                     "get_free: open /dev/loop-control returned error {:?}",
                     why.kind()
                 );
-                if why.kind() == MigErrorKind::FileNotFound {
+                if why.kind() == ErrorKind::FileNotFound {
                     // if /dev/loop-control does not exist scan for free devices manually
                     debug!("get_free: /dev/loop-control does not exist scanning for free devices manually");
                     for loop_idx in 0..MAX_LOOP {
@@ -240,13 +238,13 @@ impl LoopDevice {
                             return Ok(LoopDevice::from_index(loop_idx, auto_unset)?);
                         }
                     }
-                    Err(MigError::from_remark(
-                        MigErrorKind::NotFound,
+                    Err(Error::with_context(
+                        ErrorKind::NotFound,
                         "get_free: No free loop device was found",
                     ))
                 } else {
-                    Err(MigError::from_remark(
-                        MigErrorKind::NotFound,
+                    Err(Error::with_context(
+                        ErrorKind::NotFound,
                         "get_free: Unable to open /dev/loop-control",
                     ))
                 }
@@ -264,12 +262,7 @@ impl LoopDevice {
         self.unset = auto_unset;
     }
 
-    fn set_info<P: AsRef<Path>>(
-        &self,
-        file: P,
-        offset: u64,
-        sizelimit: u64,
-    ) -> Result<(), MigError> {
+    fn set_info<P: AsRef<Path>>(&self, file: P, offset: u64, sizelimit: u64) -> Result<()> {
         trace!(
             "set_info: entered on '{}' with file: '{}', offset: 0x{:x}, size limit: 0x{:x}",
             self.path.display(),
@@ -309,8 +302,8 @@ impl LoopDevice {
                         sleep(Duration::from_millis(100));
                     }
                 } else {
-                    return Err(MigError::from_remark(
-                        MigErrorKind::Upstream,
+                    return Err(Error::with_context(
+                        ErrorKind::Upstream,
                         &format!(
                             "set_info: ioctl IOCTL_LOOP_SET_STATUS_64 failed on device '{}', error {}",
                             self.path.display(),
@@ -327,7 +320,7 @@ impl LoopDevice {
         file: P,
         offset: Option<u64>,
         sizelimit: Option<u64>,
-    ) -> Result<(), MigError> {
+    ) -> Result<()> {
         trace!(
             "setup: on '{}' entered with '{}', offset: {}, size limit: {}",
             self.path.display(),
@@ -337,8 +330,8 @@ impl LoopDevice {
         );
 
         if self.file.is_some() {
-            return Err(MigError::from_remark(
-                MigErrorKind::InvState,
+            return Err(Error::with_context(
+                ErrorKind::InvState,
                 &format!("setup: device for is in use: '{}'", self.path.display()),
             ));
         }
@@ -346,10 +339,10 @@ impl LoopDevice {
         let abs_file = file
             .as_ref()
             .canonicalize()
-            .context(upstream_context!(&format!(
+            .upstream_with_context(&format!(
                 "setup: Failed to canonicalize path '{}'",
                 file.as_ref().display()
-            )))?;
+            ))?;
 
         let file_fd = Fd::open(&abs_file, O_RDWR)?;
 
@@ -378,8 +371,8 @@ impl LoopDevice {
             // TODO: cleanup (unset file)
             Ok(())
         } else {
-            Err(MigError::from_remark(
-                MigErrorKind::Upstream,
+            Err(Error::with_context(
+                ErrorKind::Upstream,
                 &format!(
                     "setup: ioctrl IOCTL_LOOP_SET_FD failed on device '{}' with error {}",
                     self.path.display(),
@@ -389,12 +382,12 @@ impl LoopDevice {
         }
     }
 
-    pub fn modify_offset(&mut self, offset: u64, sizelimit: u64) -> Result<(), MigError> {
+    pub fn modify_offset(&mut self, offset: u64, sizelimit: u64) -> Result<()> {
         if let Some(file) = &self.file {
             Ok(self.set_info(file, offset, sizelimit)?)
         } else {
-            Err(MigError::from_remark(
-                MigErrorKind::InvState,
+            Err(Error::with_context(
+                ErrorKind::InvState,
                 &format!(
                     "modify_offset: Device has no associated file: '{}'",
                     self.path.display()
@@ -403,14 +396,14 @@ impl LoopDevice {
         }
     }
 
-    pub fn unset(&mut self) -> Result<(), MigError> {
+    pub fn unset(&mut self) -> Result<()> {
         let ioctl_res = unsafe { ioctl(self.fd.get_fd(), IOCTL_LOOP_CLR_FD) };
         if ioctl_res == 0 {
             self.file = None;
             Ok(())
         } else {
-            Err(MigError::from_remark(
-                MigErrorKind::Upstream,
+            Err(Error::with_context(
+                ErrorKind::Upstream,
                 &format!(
                     "unset: Failed to reset loop device '{}', error: {}",
                     self.path.display(),
@@ -420,22 +413,22 @@ impl LoopDevice {
         }
     }
 
-    pub fn get_loop_info(&self) -> Result<LoopInfo64, MigError> {
+    pub fn get_loop_info(&self) -> Result<LoopInfo64> {
         let loop_info: LoopInfo64 = unsafe { MaybeUninit::zeroed().assume_init() };
         let ioctl_res = unsafe { ioctl(self.fd.get_fd(), IOCTL_LOOP_GET_STATUS_64, &loop_info) };
         if ioctl_res == 0 {
             Ok(loop_info)
         } else if errno() == ENXIO {
-            Err(MigError::from_remark(
-                MigErrorKind::DeviceNotFound,
+            Err(Error::with_context(
+                ErrorKind::DeviceNotFound,
                 &format!(
                     "get_loop_info: Not a valid loop device: '{}'",
                     self.path.display()
                 ),
             ))
         } else {
-            Err(MigError::from_remark(
-                MigErrorKind::Upstream,
+            Err(Error::with_context(
+                ErrorKind::Upstream,
                 &format!(
                     "get_loop_info: ioctl IOCTL_LOOP_GET_STATUS_64 on '{}' failed with error {}",
                     self.path.display(),
@@ -446,7 +439,7 @@ impl LoopDevice {
     }
 
     #[allow(dead_code)]
-    pub fn get_loop_infos() -> Result<Vec<LoopInfo64>, MigError> {
+    pub fn get_loop_infos() -> Result<Vec<LoopInfo64>> {
         let mut loop_infos: Vec<LoopInfo64> = Vec::new();
         for loop_idx in 0..MAX_LOOP {
             if PathBuf::from(&format!("/dev/loop{}", loop_idx)).exists() {
@@ -457,15 +450,15 @@ impl LoopDevice {
                         }
                     }
                     Err(why) => {
-                        if why.kind() == MigErrorKind::FileNotFound {
+                        if why.kind() == ErrorKind::FileNotFound {
                             continue;
                         } else {
-                            return Err(from_upstream!(
-                                why,
+                            return Err(Error::from_upstream(
+                                From::from(why),
                                 &format!(
                                     "get_loop_infos: Failed to open loop device for index {}",
                                     loop_idx
-                                )
+                                ),
                             ));
                         }
                     }
@@ -493,7 +486,7 @@ impl Fd {
         self.fd
     }
 
-    fn open<P: AsRef<Path>>(file: P, mode: c_int) -> Result<Fd, MigError> {
+    fn open<P: AsRef<Path>>(file: P, mode: c_int) -> Result<Fd> {
         let file_name = path_to_cstring(&file)?;
         let fname_ptr = file_name.into_raw();
         let fd = unsafe { open(fname_ptr, mode) };
@@ -514,8 +507,8 @@ impl Fd {
             );
 
             if (err_no == ENOENT) || (err_no == ENODEV) {
-                Err(MigError::from_remark(
-                    MigErrorKind::FileNotFound,
+                Err(Error::with_context(
+                    ErrorKind::FileNotFound,
                     &format!(
                         "Fd::open: Failed to open file '{}', error {}",
                         file.as_ref().display(),
@@ -523,8 +516,8 @@ impl Fd {
                     ),
                 ))
             } else {
-                Err(MigError::from_remark(
-                    MigErrorKind::Upstream,
+                Err(Error::with_context(
+                    ErrorKind::Upstream,
                     &format!(
                         "Fd::open: Failed to open file '{}', error {}",
                         file.as_ref().display(),
@@ -542,22 +535,22 @@ impl Drop for Fd {
     }
 }
 
-fn path_to_cstring<P: AsRef<Path>>(path: P) -> Result<CString, MigError> {
+fn path_to_cstring<P: AsRef<Path>>(path: P) -> Result<CString> {
     let temp: OsString = path.as_ref().into();
     Ok(
-        CString::new(temp.as_bytes()).context(upstream_context!(&format!(
+        CString::new(temp.as_bytes()).upstream_with_context(&format!(
             "Failed to convert path to CString: '{}'",
             path.as_ref().display()
-        )))?,
+        ))?,
     )
 }
 
-fn path_to_cbuffer<P: AsRef<Path>>(path: P, buffer: &mut [u8]) -> Result<(), MigError> {
+fn path_to_cbuffer<P: AsRef<Path>>(path: P, buffer: &mut [u8]) -> Result<()> {
     let c_string = path_to_cstring(path)?;
     let src = c_string.to_bytes_with_nul();
     if src.len() > buffer.len() {
-        return Err(MigError::from_remark(
-            MigErrorKind::InvParam,
+        return Err(Error::with_context(
+            ErrorKind::InvParam,
             "path_to_cbuffer: insufficient target buffer size",
         ));
     }

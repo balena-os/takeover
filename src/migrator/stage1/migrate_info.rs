@@ -4,13 +4,9 @@ use std::path::{Path, PathBuf};
 use log::{debug, error, info, warn};
 use nix::mount::umount;
 
-use failure::ResultExt;
-
 use crate::stage1::utils::mktemp;
 use crate::{
-    common::{
-        file_exists, get_os_name, mig_error::MigError, options::Options, MigErrCtx, MigErrorKind,
-    },
+    common::{file_exists, get_os_name, options::Options, Error, ErrorKind, Result, ToError},
     stage1::{
         assets::Assets, device::Device, device_impl::get_device, image_retrieval::download_image,
         migrate_info::balena_cfg_json::BalenaCfgJson, wifi_config::WifiConfig,
@@ -35,7 +31,7 @@ pub(crate) struct MigrateInfo {
 
 #[allow(dead_code)]
 impl MigrateInfo {
-    pub fn new(opts: &Options) -> Result<MigrateInfo, MigError> {
+    pub fn new(opts: &Options) -> Result<MigrateInfo> {
         let device = get_device(opts)?;
         info!("Detected device type: {}", device.get_device_type());
 
@@ -43,7 +39,7 @@ impl MigrateInfo {
             BalenaCfgJson::new(balena_cfg)?
         } else {
             error!("The required parameter --config/-c was not provided");
-            return Err(MigError::displayed());
+            return Err(Error::displayed());
         };
 
         if opts.is_migrate() {
@@ -59,18 +55,16 @@ impl MigrateInfo {
 
         let image_path = if let Some(image_path) = opts.get_image() {
             if file_exists(&image_path) {
-                image_path
-                    .canonicalize()
-                    .context(upstream_context!(&format!(
-                        "Failed to canonicalize path '{}'",
-                        image_path.display()
-                    )))?
+                image_path.canonicalize().upstream_with_context(&format!(
+                    "Failed to canonicalize path '{}'",
+                    image_path.display()
+                ))?
             } else {
                 error!(
                     "The balena-os image configured as '{}' could not be found",
                     image_path.display()
                 );
-                return Err(MigError::displayed());
+                return Err(Error::displayed());
             }
         } else {
             let image_path = download_image(
@@ -79,17 +73,15 @@ impl MigrateInfo {
                 config.get_device_type()?.as_str(),
                 opts.get_version(),
             )?;
-            image_path
-                .canonicalize()
-                .context(upstream_context!(&format!(
-                    "Failed to canonicalize path '{}'",
-                    image_path.display()
-                )))?
+            image_path.canonicalize().upstream_with_context(&format!(
+                "Failed to canonicalize path '{}'",
+                image_path.display()
+            ))?
         };
 
         if !opts.is_migrate() {
-            return Err(MigError::from_remark(
-                MigErrorKind::ImageDownloaded,
+            return Err(Error::with_context(
+                ErrorKind::ImageDownloaded,
                 "Image downloaded successfully",
             ));
         }
@@ -115,15 +107,13 @@ impl MigrateInfo {
                 error!(
                     "No Network manager files were found, the device might not be able to come online"
                 );
-                return Err(MigError::displayed());
+                return Err(Error::displayed());
             }
         }
 
         if opts.is_migrate_name() {
             let hostname = read_to_string("/proc/sys/kernel/hostname")
-                .context(upstream_context!(
-                    "Failed to read file '/proc/sys/kernel/hostname'"
-                ))?
+                .upstream_with_context("Failed to read file '/proc/sys/kernel/hostname'")?
                 .trim()
                 .to_string();
 
@@ -145,7 +135,7 @@ impl MigrateInfo {
         })
     }
 
-    pub fn update_config(&mut self) -> Result<(), MigError> {
+    pub fn update_config(&mut self) -> Result<()> {
         if self.config.is_modified() {
             let target_path = mktemp(false, Some("config.json.XXXX"), Some(&self.work_dir))?;
             self.config.write(&target_path)?;

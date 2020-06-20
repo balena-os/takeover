@@ -1,10 +1,9 @@
 use std::path::PathBuf;
 
-use failure::ResultExt;
 use serde::{Deserialize, Serialize};
 use serde_yaml;
 
-use crate::common::mig_error::{MigErrCtx, MigError, MigErrorKind};
+use crate::common::error::{Result, ToError};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub(crate) struct UmountPart {
@@ -31,14 +30,14 @@ impl Stage2Config {
         &self.log_dev
     }
 
-    pub fn serialize(&self) -> Result<String, MigError> {
+    pub fn serialize(&self) -> Result<String> {
         Ok(serde_yaml::to_string(self)
-            .context(upstream_context!("Failed to deserialize stage2 config"))?)
+            .upstream_with_context("Failed to deserialize stage2 config")?)
     }
 
-    pub fn deserialze(config_str: &str) -> Result<Stage2Config, MigError> {
+    pub fn deserialze(config_str: &str) -> Result<Stage2Config> {
         Ok(serde_yaml::from_str(&config_str)
-            .context(upstream_context!("Failed to parse stage2 config"))?)
+            .upstream_with_context("Failed to parse stage2 config")?)
     }
 
     pub fn get_flash_dev(&self) -> &PathBuf {

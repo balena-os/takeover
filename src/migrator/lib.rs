@@ -2,8 +2,7 @@
 pub(crate) mod macros;
 
 pub(crate) mod common;
-pub use common::{options::Options, MigError, MigErrorKind};
-
+pub use common::{ErrorKind, Options};
 pub mod stage1;
 pub use stage1::stage1;
 
