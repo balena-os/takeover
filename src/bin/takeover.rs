@@ -21,7 +21,7 @@ fn main(opts: Options) {
         exit_code = 1;
         match why.kind() {
             ErrorKind::Displayed => (),
-            _ => error!("Migrate stage 1 returned error: {:?}", why),
+            _ => error!("Migrate stage 1 returned an error: {}", why),
         };
     };
 

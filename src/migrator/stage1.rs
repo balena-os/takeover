@@ -436,10 +436,7 @@ pub fn stage1(opts: &Options) -> Result<()> {
             if why.kind() == ErrorKind::ImageDownloaded {
                 return Ok(());
             } else {
-                return Err(Error::from_upstream(
-                    From::from(why),
-                    "Failed to create migrate info",
-                ));
+                return Err(Error::from_upstream(why, "Failed to create migrate info"));
             }
         }
     };
