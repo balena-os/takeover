@@ -54,7 +54,7 @@ OPTIONS:
 ```   
 
 
-To download a config.json, please direct your browser to  the [balena dashboard](balena.io, https://balena.io), logging in to to your user 
+To download a config.json, please direct your browser to  the [balena dashboard](https://balena.io), logging in to to your user 
 account and selecting the application you want to migrate the device to. From there you can press the 'add device' button 
 in the top left, in the 'Add new device' dialog select 'Advanced' and  'Download configuration file only'. 
 
@@ -79,7 +79,7 @@ By default *takeover* will download the latest production image for the platform
 If you need a development image or a version different from the latest you can use the ```--version``` option to specify 
 a version. 
 The ```--version``` option accepts either a full image name (eg. ```--version 2.50.1+rev1.dev```) or parsing 
-of ~x.y.z and ^x.y.z requirements as defined at [https://www.npmjs.com/package/semver](https://www.npmjs.com/package/semver)
+of ~x.y.z and ^x.y.z requirements as defined at [semver](https://www.npmjs.com/package/semver)
  (eg. ```--version ~2.48```).
  Example: 
  ```shell script
@@ -93,7 +93,7 @@ disk space (eg. a memory stick) to unpack if your current directory does not. Ot
 on a computer with sufficient diskspace to download the image, copy it to the target device and use the 
 ```-i / --image``` as described below.
 
-The ```-d / --download-only``` option allows you to--version 2.50.1+rev1.dev download an image without trying to install it. This option also 
+The ```-d / --download-only``` option allows you to download an image without installing it. This option also 
 disables most checks, so that you can download an image e.g. for your RaspberryPI 3 using your X86 PC. 
 All you need to do is use a config.json for a raspberry PI and the ```-d``` option.
 
@@ -105,7 +105,7 @@ sudo ./takeover -d --version --version 2.50.1+rev1.dev -c config.json
 
 #### Specifying an existing image
 
-You can use the ```--image``` option to specify any valid balena-os image. 
+You can use the ```-i / --image``` option to specify any valid balena-os image. 
 
 **Warning:** Please be aware that specifying an invalid 
 image might lead to your target device being flashed with something invalid which will very likely lead to it not booting. 
@@ -141,10 +141,10 @@ are *error*, *warn*, *info*, *debug*, and *trace*.
 Stage1 is the first part of migration - mainly the preparation of the migration process. Everything happening in stage1 
 can be logged to the console.
  
-After stage1 *takeover* switches the file system root to a RAMFS file system and replaces the init process. 
+At the end of stage1 *takeover* switches the file system root to a RAMFS file system and replaces the init process. 
 This part of migration is called stage2. In stage2 the console does not receive output from *takeover* any more and 
 ssh-sessions will usually be disconnected. 
-Logging to the harddisk does not make sense, as that device will be overwritten with balean-os during the migration process. 
+Logging to the harddisk does not make sense, as that device will be overwritten with balena-os during the migration process. 
 For this reason you can specify a log device using the ```-l / --log-to``` option. 
 You should use a device that is independant from the disk that balena will be installed on. Usually a secondary disk 
 or a USB stick works well. The log device should be formatted with a *FAT32* or *ext4* file system.
