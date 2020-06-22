@@ -15,6 +15,12 @@ const RPI2_SLUGS: [&str; 1] = [DEV_TYPE_RPI2];
 const RPI3_SLUGS: [&str; 1] = [DEV_TYPE_RPI3];
 const RPI4_64_SLUGS: [&str; 1] = [DEV_TYPE_RPI4_64];
 
+const SUPPORTED_OSSES: [&str; 3] = [
+    "Raspbian GNU/Linux 8 (jessie)",
+    "Raspbian GNU/Linux 9 (stretch)",
+    "Raspbian GNU/Linux 10 (buster)",
+];
+
 pub(crate) fn is_rpi(opts: &Options, model_string: &str) -> Result<Option<Box<dyn Device>>> {
     debug!(
         "raspberrypi::is_rpi: entered with model string: '{}'",
@@ -63,9 +69,7 @@ pub(crate) struct RaspberryPi2;
 
 impl RaspberryPi2 {
     pub fn from_config(opts: &Options) -> Result<RaspberryPi2> {
-        const SUPPORTED_OSSES: &[&str] = &["Raspbian GNU/Linux 10 (buster)"];
-
-        if opts.is_migrate() && !check_os(SUPPORTED_OSSES, opts, "Raspberry PI 2")? {
+        if opts.is_migrate() && !check_os(&SUPPORTED_OSSES, opts, "Raspberry PI 2")? {
             return Err(Error::displayed());
         }
 
@@ -87,13 +91,7 @@ pub(crate) struct RaspberryPi3;
 
 impl RaspberryPi3 {
     pub fn from_config(opts: &Options) -> Result<RaspberryPi3> {
-        const SUPPORTED_OSSES: &[&str] = &[
-            "Raspbian GNU/Linux 8 (jessie)",
-            "Raspbian GNU/Linux 9 (stretch)",
-            "Raspbian GNU/Linux 10 (buster)",
-        ];
-
-        if opts.is_migrate() && !check_os(SUPPORTED_OSSES, opts, "Raspberry PI 3")? {
+        if opts.is_migrate() && !check_os(&SUPPORTED_OSSES, opts, "Raspberry PI 3")? {
             return Err(Error::displayed());
         }
 
@@ -115,13 +113,7 @@ pub(crate) struct RaspberryPi4_64;
 
 impl RaspberryPi4_64 {
     pub fn from_config(opts: &Options) -> Result<RaspberryPi4_64> {
-        const SUPPORTED_OSSES: &[&str] = &[
-            "Raspbian GNU/Linux 8 (jessie)",
-            "Raspbian GNU/Linux 9 (stretch)",
-            "Raspbian GNU/Linux 10 (buster)",
-        ];
-
-        if opts.is_migrate() && !check_os(SUPPORTED_OSSES, opts, "Raspberry PI 4")? {
+        if opts.is_migrate() && !check_os(&SUPPORTED_OSSES, opts, "Raspberry PI 4")? {
             return Err(Error::displayed());
         }
 
