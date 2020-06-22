@@ -64,18 +64,12 @@ fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<()> {
             log_dev.display()
         );
         // TODO: remove this later
-        match Logger::set_log_file(
+        Logger::set_log_file(
             &LogDestination::Stderr,
             &PathBuf::from("/mnt/log/stage2-init.log"),
             false,
-        ) {
-            Ok(_) => (),
-            Err(_why) => {
-                error!("Failed set log file to  '/mnt/log/stage2-init.log'");
-                return Err(Error::displayed());
-            }
-        }
-        // .upstream_with_context("Failed set log file to  '/mnt/log/stage2-init.log'")?;
+        )
+        .upstream_with_context("Failed set log file to  '/mnt/log/stage2-init.log'")?;
         info!(
             "Now logging to /mnt/log/stage2-init.log on '{}'",
             log_dev.display()

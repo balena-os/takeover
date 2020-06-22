@@ -134,7 +134,7 @@ impl LoopDevice {
                     Err(why) => {
                         if why.kind() != ErrorKind::DeviceNotFound {
                             return Err(Error::from_upstream(
-                                From::from(why),
+                                why,
                                 &format!(
                                     "from_index: failed to retrieve loop info from device'{}'",
                                     loop_dev.path.display()
@@ -173,7 +173,7 @@ impl LoopDevice {
                 } else {
                     // some other error opening device
                     Err(Error::from_upstream(
-                        From::from(why),
+                        why,
                         &format!("from_index: Failed to open device '{}'", path.display()),
                     ))
                 }
@@ -454,7 +454,7 @@ impl LoopDevice {
                             continue;
                         } else {
                             return Err(Error::from_upstream(
-                                From::from(why),
+                                why,
                                 &format!(
                                     "get_loop_infos: Failed to open loop device for index {}",
                                     loop_idx

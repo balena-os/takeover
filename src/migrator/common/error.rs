@@ -31,7 +31,7 @@ impl Display for ErrorKind {
             Self::ImageDownloaded => "The image was downloaded successfully",
             Self::ExecProcess => "A spawned process returned an error code",
             Self::CmdIo => "A command IO stream operation failed",
-            Self::Displayed => "The error was displayed",
+            Self::Displayed => "The error was displayed upstream",
         };
         write!(f, "{}", output)
     }
@@ -88,6 +88,7 @@ impl Error {
         }
     }
 
+    #[allow(clippy::wrong_self_convention)]
     pub fn from_upstream(cause: Error, context: &str) -> Error {
         Error {
             kind: ErrorKind::Upstream,
