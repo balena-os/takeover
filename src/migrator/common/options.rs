@@ -48,6 +48,13 @@ pub struct Options {
     log_level: Level,
     #[structopt(
         long,
+        value_name = "LOG_FILE",
+        parse(from_os_str),
+        help = "Set stage1 log file name"
+    )]
+    log_file: Option<PathBuf>,
+    #[structopt(
+        long,
         short,
         help = "Set stage2 log level, one of [error,warn,info,debug,trace]"
     )]
@@ -71,6 +78,8 @@ pub struct Options {
     no_api_check: bool,
     #[structopt(long, help = "Do not check if balena VPN is available")]
     no_vpn_check: bool,
+    #[structopt(long, help = "Do not fail if EFI setup fails")]
+    no_fail_on_efi: bool,
     #[structopt(long, help = "Do not check network manager files exist")]
     no_nwmgr_check: bool,
     #[structopt(long, help = "Do not migrate host-name")]
@@ -174,6 +183,11 @@ impl Options {
     pub fn is_build_num(&self) -> bool {
         self.build_num
     }
+
+    pub fn get_log_file(&self) -> &Option<PathBuf> {
+        &self.log_file
+    }
+
     pub fn get_log_level(&self) -> Level {
         self.log_level
     }
@@ -188,6 +202,10 @@ impl Options {
 
     pub fn is_os_check(&self) -> bool {
         !self.no_os_check
+    }
+
+    pub fn is_no_fail_on_efi(&self) -> bool {
+        self.no_fail_on_efi
     }
 
     pub fn is_api_check(&self) -> bool {

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use log::{debug, error, info, warn};
 use nix::mount::umount;
 
+use crate::stage1::defs::DEV_TYPE_GEN_X86_64;
 use crate::stage1::utils::mktemp;
 use crate::{
     common::{file_exists, get_os_name, options::Options, Error, ErrorKind, Result, ToError},
@@ -142,6 +143,10 @@ impl MigrateInfo {
             info!("Copied config.json to '{}'", target_path.display());
         }
         Ok(())
+    }
+
+    pub fn is_x86(&self) -> bool {
+        self.device.supports_device_type(DEV_TYPE_GEN_X86_64)
     }
 
     pub fn get_assets(&self) -> &Assets {
