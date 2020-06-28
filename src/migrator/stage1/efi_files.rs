@@ -22,15 +22,13 @@ impl EfiFiles {
                 ErrorKind::FileNotFound,
                 &format!("efibootmgr could not be located"),
             )?);
-            let ldd_path =
-                whereis("ldd").upstream_with_context("Failed to locate ldd executable")?;
 
             let mut efi_files = EfiFiles {
                 req_space: 0,
                 files: HashSet::new(),
             };
 
-            efi_files.get_libs_for(efi_boot_mgr, ldd_path.as_str())?;
+            efi_files.get_libs_for(efi_boot_mgr)?;
 
             Ok(efi_files)
         } else {
@@ -45,51 +43,94 @@ impl EfiFiles {
         self.req_space
     }
 
-    fn get_libs_for(&mut self, file: PathBuf, ldd_path: &str) -> Result<()> {
-        if file.exists() {
-            if self.files.insert(file.clone()) {
-                self.req_space += file
+    fn get_libs_for(&mut self, file: PathBuf) -> Result<()> {
+        trace!("get_libs_for: entered with '{}'", file.display());
+        if self.add_lib(&file)? {
+            let ldd_path =
+                whereis("ldd").upstream_with_context("Failed to locate ldd executable")?;
+            let mut check_libs = self.get_libs(file.as_path(), ldd_path.as_str())?;
+            while !check_libs.is_empty() {
+                let mut unchecked_libs: Vec<PathBuf> = Vec::new();
+                for curr in &check_libs {
+                    self.add_lib(curr.as_path())?;
+                }
+                for curr in &check_libs {
+                    unchecked_libs.append(&mut self.get_libs(curr.as_path(), ldd_path.as_str())?)
+                }
+                check_libs = unchecked_libs;
+            }
+        }
+        Ok(())
+    }
+
+    fn add_lib(&mut self, lib_path: &Path) -> Result<bool> {
+        trace!("add_lib: entered with '{}'", lib_path.display());
+        if lib_path.exists() {
+            if self.files.insert(lib_path.to_path_buf()) {
+                self.req_space += lib_path
                     .metadata()
                     .upstream_with_context(&format!(
                         "Failed to get metadata for file: '{}'",
-                        file.display()
+                        lib_path.display()
                     ))?
                     .len();
-                let ldd_res = call_command!(
-                    ldd_path,
-                    &[&*file.to_string_lossy()],
-                    &format!("failed to retrieve dynamic libs for '{}'", file.display())
-                )?;
 
-                lazy_static! {
-                    static ref LIB_REGEX: Regex =
-                        Regex::new(r#"^\s*(\S+)\s+(=>\s+(\S+)\s+)?(\(0x[0-9,a-f,A-F]+\))$"#)
-                            .unwrap();
-                }
-
-                for lib_str in ldd_res.lines() {
-                    if let Some(captures) = LIB_REGEX.captures(lib_str) {
-                        let lib_name = captures.get(1).unwrap().as_str();
-                        if let Some(lib_path) = captures.get(3) {
-                            self.get_libs_for(PathBuf::from(lib_path.as_str()), ldd_path)?;
-                        } else {
-                            debug!("setup_efi: no path for {}", lib_name);
-                        }
-                    } else {
-                        warn!("setup_efi: no match for {}", lib_str);
-                    }
-                }
-                Ok(())
+                Ok(true)
             } else {
-                // already processed
-                Ok(())
+                Ok(false)
             }
         } else {
             Err(Error::with_context(
                 ErrorKind::FileNotFound,
-                &format!("File could not be found: '{}'", file.display()),
+                &format!("The file could not be found: '{}'", lib_path.display()),
             ))
         }
+    }
+
+    fn get_libs(&self, file: &Path, ldd_path: &str) -> Result<Vec<PathBuf>> {
+        trace!("get_libs: entered with '{}'", file.display());
+        let ldd_res = call_command!(
+            ldd_path,
+            &[&*file.to_string_lossy()],
+            &format!("failed to retrieve dynamic libs for '{}'", file.display())
+        )?;
+
+        lazy_static! {
+            static ref LIB_REGEX: Regex = Regex::new(
+                r#"^\s*(\S+)\s+(=>\s+(\S+)\s+)?(\(0x[0-9,a-f,A-F]+\))|statically linked$"#
+            )
+            .unwrap();
+        }
+
+        let mut result: Vec<PathBuf> = Vec::new();
+
+        for lib_str in ldd_res.lines() {
+            if let Some(captures) = LIB_REGEX.captures(lib_str) {
+                if let Some(lib_name) = captures.get(1) {
+                    let lib_name = lib_name.as_str();
+                    if let Some(lib_path) = captures.get(3) {
+                        let lib_path = PathBuf::from(lib_path.as_str());
+                        if !self.files.contains(lib_path.as_path()) {
+                            result.push(lib_path);
+                        }
+                    } else {
+                        let lib_path = PathBuf::from(lib_name);
+                        if !self.files.contains(lib_path.as_path()) {
+                            if lib_path.is_absolute() && lib_path.exists() {
+                                result.push(lib_path);
+                            } else {
+                                debug!("get_libs: no path for {}", lib_name);
+                            }
+                        }
+                    }
+                } else {
+                    debug!("get_libs: lib is statically linked: '{}'", file.display());
+                }
+            } else {
+                warn!("get_libs: no match for {}", lib_str);
+            }
+        }
+        Ok(result)
     }
 
     pub fn copy_files<P: AsRef<Path>>(&self, takeover_dir: P) -> Result<()> {

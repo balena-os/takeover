@@ -55,7 +55,6 @@ pub struct Options {
     log_file: Option<PathBuf>,
     #[structopt(
         long,
-        short,
         help = "Set stage2 log level, one of [error,warn,info,debug,trace]"
     )]
     s2_log_level: Option<Level>,

@@ -458,7 +458,7 @@ pub fn stage1(opts: &Options) -> Result<()> {
                 s1_log_path.display(),
             ))?;
     } else {
-        Logger::set_log_dest(&LogDestination::StreamStderr, NO_STREAM)
+        Logger::set_log_dest(&LogDestination::Stderr, NO_STREAM)
             .upstream_with_context("Failed to set up logging")?;
     }
 

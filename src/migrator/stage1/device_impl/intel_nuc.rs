@@ -18,6 +18,7 @@ pub(crate) struct IntelNuc;
 impl IntelNuc {
     pub fn from_config(opts: &Options) -> Result<IntelNuc> {
         const SUPPORTED_OSSES: &[&str] = &[
+            "Ubuntu 20.04 LTS",
             "Ubuntu 18.04.4 LTS",
             "Ubuntu 18.04.3 LTS",
             "Ubuntu 18.04.2 LTS",
