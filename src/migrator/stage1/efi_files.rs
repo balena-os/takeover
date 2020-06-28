@@ -7,58 +7,54 @@ use std::collections::HashSet;
 use std::fs::{copy, create_dir_all};
 use std::path::{Path, PathBuf};
 
-const EFI_DIR: &str = "/sys/firmware/efi";
-
 pub(crate) struct EfiFiles {
     req_space: u64,
     files: HashSet<PathBuf>,
+    exec_path: String,
 }
 
 impl EfiFiles {
     pub fn new() -> Result<EfiFiles> {
         trace!("new: entered",);
-        if dir_exists(EFI_DIR)? {
-            let efi_boot_mgr = PathBuf::from(whereis("efibootmgr").error_with_all(
-                ErrorKind::FileNotFound,
-                &format!("efibootmgr could not be located"),
-            )?);
 
-            let mut efi_files = EfiFiles {
-                req_space: 0,
-                files: HashSet::new(),
-            };
+        let efi_boot_mgr = whereis("efibootmgr").error_with_all(
+            ErrorKind::FileNotFound,
+            &format!("efibootmgr could not be located"),
+        )?;
 
-            efi_files.get_libs_for(efi_boot_mgr)?;
+        call_command!(
+            efi_boot_mgr.as_str(),
+            &[],
+            &format!("Failed to execute '{}'", efi_boot_mgr)
+        )?;
 
-            Ok(efi_files)
-        } else {
-            // Nothing to do
-            Ok(EfiFiles {
-                req_space: 0,
-                files: HashSet::new(),
-            })
-        }
+        let mut efi_files = EfiFiles {
+            req_space: 0,
+            files: HashSet::new(),
+            exec_path: efi_boot_mgr,
+        };
+
+        efi_files.get_libs_for()?;
+
+        Ok(efi_files)
     }
     pub fn get_req_space(&self) -> u64 {
         self.req_space
     }
 
-    fn get_libs_for(&mut self, file: PathBuf) -> Result<()> {
-        trace!("get_libs_for: entered with '{}'", file.display());
-        if self.add_lib(&file)? {
-            let ldd_path =
-                whereis("ldd").upstream_with_context("Failed to locate ldd executable")?;
-            let mut check_libs = self.get_libs(file.as_path(), ldd_path.as_str())?;
-            while !check_libs.is_empty() {
-                let mut unchecked_libs: Vec<PathBuf> = Vec::new();
-                for curr in &check_libs {
-                    self.add_lib(curr.as_path())?;
-                }
-                for curr in &check_libs {
-                    unchecked_libs.append(&mut self.get_libs(curr.as_path(), ldd_path.as_str())?)
-                }
-                check_libs = unchecked_libs;
+    fn get_libs_for(&mut self) -> Result<()> {
+        trace!("get_libs_for: entered with '{}'", self.exec_path);
+        let ldd_path = whereis("ldd").upstream_with_context("Failed to locate ldd executable")?;
+        let mut check_libs = self.get_libs(self.exec_path.as_str(), ldd_path.as_str())?;
+        while !check_libs.is_empty() {
+            let mut unchecked_libs: Vec<PathBuf> = Vec::new();
+            for curr in &check_libs {
+                self.add_lib(curr.as_path())?;
             }
+            for curr in &check_libs {
+                unchecked_libs.append(&mut self.get_libs(curr.as_path(), ldd_path.as_str())?)
+            }
+            check_libs = unchecked_libs;
         }
         Ok(())
     }
@@ -87,7 +83,8 @@ impl EfiFiles {
         }
     }
 
-    fn get_libs(&self, file: &Path, ldd_path: &str) -> Result<Vec<PathBuf>> {
+    fn get_libs<P: AsRef<Path>>(&self, file: P, ldd_path: &str) -> Result<Vec<PathBuf>> {
+        let file = file.as_ref();
         trace!("get_libs: entered with '{}'", file.display());
         let ldd_res = call_command!(
             ldd_path,
@@ -133,44 +130,59 @@ impl EfiFiles {
         Ok(result)
     }
 
+    pub fn get_exec_path(&self) -> &str {
+        self.exec_path.as_str()
+    }
+
+    fn copy_file<P1: AsRef<Path>, P2: AsRef<Path>>(src_path: P1, takeover_dir: P2) -> Result<()> {
+        let src_path = src_path.as_ref();
+
+        let dest_dir = if let Some(parent) = src_path.parent() {
+            path_append(takeover_dir, parent)
+        } else {
+            takeover_dir.as_ref().to_path_buf()
+        };
+
+        if !dir_exists(&dest_dir)? {
+            create_dir_all(&dest_dir).upstream_with_context(&format!(
+                "Failed to create target directory '{}'",
+                dest_dir.display()
+            ))?;
+        }
+
+        let dest_path = if let Some(name) = src_path.file_name() {
+            path_append(dest_dir, name)
+        } else {
+            return Err(Error::with_context(
+                ErrorKind::InvState,
+                &format!(
+                    "Failed to extract file name from path: {}",
+                    src_path.display()
+                ),
+            ));
+        };
+
+        debug!(
+            "copy_file: copying '{}' to '{}'",
+            src_path.display(),
+            dest_path.display()
+        );
+        copy(&src_path, &dest_path).upstream_with_context(&format!(
+            "Failed toop copy '{}' to '{}'",
+            src_path.display(),
+            dest_path.display()
+        ))?;
+
+        Ok(())
+    }
+
     pub fn copy_files<P: AsRef<Path>>(&self, takeover_dir: P) -> Result<()> {
         let takeover_dir = takeover_dir.as_ref();
+
+        EfiFiles::copy_file(&self.exec_path, takeover_dir)?;
+
         for src_path in &self.files {
-            let dest_dir = if let Some(parent) = src_path.parent() {
-                path_append(takeover_dir, parent)
-            } else {
-                takeover_dir.to_path_buf()
-            };
-
-            if !dir_exists(&dest_dir)? {
-                create_dir_all(&dest_dir).upstream_with_context(&format!(
-                    "Failed to create target directory '{}'",
-                    dest_dir.display()
-                ))?;
-            }
-
-            let dest_path = if let Some(name) = src_path.file_name() {
-                path_append(dest_dir, name)
-            } else {
-                return Err(Error::with_context(
-                    ErrorKind::InvState,
-                    &format!(
-                        "Failed to extract file name from path: {}",
-                        src_path.display()
-                    ),
-                ));
-            };
-
-            debug!(
-                "copy_file: copying '{}' to '{}' to ",
-                src_path.display(),
-                dest_path.display()
-            );
-            copy(&src_path, &dest_path).upstream_with_context(&format!(
-                "Failed toop copy '{}' to '{}'",
-                src_path.display(),
-                dest_path.display()
-            ))?;
+            EfiFiles::copy_file(src_path, takeover_dir)?;
         }
         Ok(())
     }

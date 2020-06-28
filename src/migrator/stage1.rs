@@ -37,7 +37,7 @@ use crate::{
         call,
         defs::{
             CP_CMD, NIX_NONE, OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD, SYSTEM_CONNECTIONS_DIR,
-            TELINIT_CMD,
+            SYS_EFIVARS_DIR, SYS_EFI_DIR, TELINIT_CMD,
         },
         error::{Error, ErrorKind, Result, ToError},
         file_exists, format_size_with_unit, get_mem_info, is_admin,
@@ -54,6 +54,7 @@ use crate::{
     },
 };
 
+use crate::common::dir_exists;
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
 const S1_XTRA_FS_SIZE: u64 = 10 * 1024 * 1024; // const XTRA_MEM_FREE: u64 = 10 * 1024 * 1024; // 10 MB
@@ -204,7 +205,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     let mut req_space = get_required_space(mig_info)?;
 
-    let efi_files = if mig_info.is_x86() {
+    let efi_files = if mig_info.is_x86() && dir_exists(SYS_EFI_DIR)? {
         match EfiFiles::new() {
             Ok(efi_files) => {
                 req_space += efi_files.get_req_space();
@@ -264,10 +265,6 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         curr_path.display()
     ))?;
 
-    if let Some(efi_files) = efi_files {
-        efi_files.copy_files(&takeover_dir)?;
-    }
-
     info!("Created mtab in  '{}'", curr_path.display());
 
     let curr_path = takeover_dir.join("proc");
@@ -278,6 +275,13 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     let curr_path = takeover_dir.join("sys");
     mount_fs(&curr_path, "sys", "sysfs", mig_info)?;
+
+    if dir_exists(SYS_EFIVARS_DIR)? {
+        let curr_path = path_append(&takeover_dir, SYS_EFIVARS_DIR);
+        create_dir_all(&curr_path)?;
+        mount_fs(&curr_path, "efivarfs", "efivarfs", mig_info)?;
+        // TODO: copy stuff ?
+    }
 
     let curr_path = takeover_dir.join("dev");
     if mount_fs(&curr_path, "dev", "devtmpfs", mig_info).is_err() {
@@ -328,6 +332,10 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     ))?;
 
     info!("Created directory '{}'", curr_path.display());
+
+    if let Some(efi_files) = &efi_files {
+        efi_files.copy_files(&takeover_dir)?;
+    }
 
     copy_files(opts.get_work_dir(), mig_info, &takeover_dir)?;
 
@@ -385,6 +393,11 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         image_path: mig_info.get_image_path().to_path_buf(),
         config_path: mig_info.get_balena_cfg().get_path().to_path_buf(),
         backup_path: None,
+        efi_boot_mgr_path: if let Some(efi_files) = &efi_files {
+            Some(efi_files.get_exec_path().to_owned())
+        } else {
+            None
+        },
     };
 
     let s2_cfg_path = takeover_dir.join(STAGE2_CONFIG_NAME);

@@ -6,10 +6,10 @@ use log::info;
 use crate::{
     common::{
         call,
-        defs::{MKTEMP_CMD, MOKUTIL_CMD, NIX_NONE, UNAME_CMD, WHEREIS_CMD},
+        defs::{MKTEMP_CMD, MOKUTIL_CMD, NIX_NONE, SYS_EFI_DIR, UNAME_CMD, WHEREIS_CMD},
         dir_exists, file_exists, Error, ErrorKind, Result, ToError,
     },
-    stage1::defs::{OSArch, SYS_UEFI_DIR},
+    stage1::defs::OSArch,
 };
 
 use log::{error, trace, warn};
@@ -56,7 +56,7 @@ pub(crate) fn is_secure_boot() -> Result<bool> {
 
     // TODO: check for efi vars
 
-    if dir_exists(SYS_UEFI_DIR)? {
+    if dir_exists(SYS_EFI_DIR)? {
         let mokutil_path = match whereis(MOKUTIL_CMD) {
             Ok(path) => path,
             Err(_why) => {
