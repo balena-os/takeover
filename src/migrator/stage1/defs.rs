@@ -8,7 +8,6 @@ pub const DEV_TYPE_RPI4_64: &str = "raspberrypi4-64";
 pub const DEV_TYPE_BBG: &str = "beaglebone-green";
 pub const DEV_TYPE_BBB: &str = "beaglebone-black";
 pub const DEV_TYPE_BBXM: &str = "beagleboard-xm";
-pub const SYS_UEFI_DIR: &str = "/sys/firmware/efi";
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum DeviceType {

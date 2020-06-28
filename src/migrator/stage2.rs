@@ -1,4 +1,6 @@
-use std::fs::{copy, create_dir, create_dir_all, read_dir, read_to_string, File, OpenOptions};
+use std::fs::{
+    copy, create_dir, create_dir_all, read_dir, read_to_string, remove_dir, File, OpenOptions,
+};
 use std::io::{self, Read, Write};
 
 use std::os::unix::io::AsRawFd;
@@ -18,7 +20,7 @@ use libc::{ioctl, MS_RDONLY, MS_REMOUNT};
 use log::{debug, error, info, trace, warn, Level};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
-use crate::common::defs::IoctlReq;
+use crate::common::defs::{IoctlReq, SYS_EFI_DIR};
 use crate::common::{
     call,
     defs::{
@@ -36,6 +38,7 @@ use crate::common::{
     path_append,
     stage2_config::{Stage2Config, UmountPart},
 };
+use regex::Regex;
 
 const DD_BLOCK_SIZE: usize = 128 * 1024; // 4_194_304;
 
@@ -570,7 +573,7 @@ fn raw_umount_partition<P: AsRef<Path>>(device: &str, mountpoint: P) -> Result<(
 
  */
 
-fn raw_mount_balena(device: &Path) -> Result<()> {
+fn raw_mount_balena(device: &Path, efi_boot_mgr: &Option<String>) -> Result<()> {
     debug!("raw_mount_balena called");
 
     let backup_path = path_append(TRANSFER_DIR, BACKUP_ARCH_NAME);
@@ -666,6 +669,64 @@ fn raw_mount_balena(device: &Path) -> Result<()> {
     // TODO: copy files
 
     transfer_boot_files(BALENA_PART_MP)?;
+
+    if dir_exists(SYS_EFI_DIR)? {
+        if let Some(efi_boot_mgr) = efi_boot_mgr {
+            match call_command!(efi_boot_mgr.as_ref(), &[], "Failed to execute efibootmgr") {
+                Ok(cmd_stdout) => {
+                    // TODO: setup efi boot
+                    let efivar_regex =
+                        Regex::new(r#"\s*Boot([0-9,a-f,A-F]{4})\*?\s+resinOS.*"#).unwrap();
+                    for line in cmd_stdout.lines() {
+                        if let Some(captures) = efivar_regex.captures(line) {
+                            let boot_num = captures.get(1).unwrap().as_str();
+                            match call_command!(efi_boot_mgr, &["-B", "-b", boot_num]) {
+                                Ok(_) => (),
+                                Err(why) => {
+                                    error!(
+                                        "Failed to delete boot manager '{}' as {}, error: {}",
+                                        line, boot_num, why
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    match call_command!(
+                        efi_boot_mgr.as_ref(),
+                        &[
+                            "-c",
+                            "-d",
+                            &*device.to_string_lossy(),
+                            "-p",
+                            "1",
+                            "-L",
+                            "resinOS",
+                            "-l",
+                            r"\EFI\BOOT\bootx64.efi"
+                        ]
+                    ) {
+                        Ok(_) => (),
+                        Err(why) => error!("Failed to setup EFI boot, error {}", why),
+                    }
+                }
+                Err(why) => {
+                    error!("Failed to execute '{}', error: {}", efi_boot_mgr, why);
+                }
+            }
+        }
+    } else {
+        match remove_dir(path_append(BALENA_BOOT_MP, "EFI")) {
+            Ok(_) => {
+                debug!("Removed EFI directory from '{}'", BALENA_BOOT_MP);
+            }
+            Err(why) => {
+                warn!(
+                    "Failed to remove EFI directory from '{}', error: {}",
+                    BALENA_BOOT_MP, why
+                );
+            }
+        }
+    }
 
     sync();
 
@@ -805,28 +866,6 @@ fn sys_mount_balena() -> Result<()> {
     }
 
     Ok(())
-}
-
-fn transfer_files(device: &Path) -> Result<()> {
-    debug!(
-        "file '{}' exists: {}",
-        device.display(),
-        file_exists(device)
-    );
-
-    raw_mount_balena(device)
-    /*
-    match part_reread(device) {
-        Ok(_) => {
-            if file_exists(path_append(DISK_BY_LABEL_PATH, BALENA_BOOT_PART)) {
-                sys_mount_balena()
-            } else {
-                raw_mount_balena(device)
-            }
-        }
-        Err(_) => raw_mount_balena(device),
-    }
-    */
 }
 
 enum FlashState {
@@ -1145,7 +1184,7 @@ pub fn stage2(opts: &Options) {
         check_loop_control("Stage2 after flash", "/dev");
     }
 
-    if let Err(why) = transfer_files(&s2_config.flash_dev) {
+    if let Err(why) = raw_mount_balena(&s2_config.flash_dev, &s2_config.efi_boot_mgr_path) {
         error!("Failed to transfer files to balena OS, error: {:?}", why);
     } else {
         info!("Migration succeded successfully");

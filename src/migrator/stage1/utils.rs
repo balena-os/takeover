@@ -6,10 +6,10 @@ use log::info;
 use crate::{
     common::{
         call,
-        defs::{MKTEMP_CMD, MOKUTIL_CMD, NIX_NONE, UNAME_CMD, WHEREIS_CMD},
+        defs::{MKTEMP_CMD, MOKUTIL_CMD, NIX_NONE, SYS_EFI_DIR, UNAME_CMD, WHEREIS_CMD},
         dir_exists, file_exists, Error, ErrorKind, Result, ToError,
     },
-    stage1::defs::{OSArch, SYS_UEFI_DIR},
+    stage1::defs::OSArch,
 };
 
 use log::{error, trace, warn};
@@ -56,7 +56,7 @@ pub(crate) fn is_secure_boot() -> Result<bool> {
 
     // TODO: check for efi vars
 
-    if dir_exists(SYS_UEFI_DIR)? {
+    if dir_exists(SYS_EFI_DIR)? {
         let mokutil_path = match whereis(MOKUTIL_CMD) {
             Ok(path) => path,
             Err(_why) => {
@@ -66,26 +66,40 @@ pub(crate) fn is_secure_boot() -> Result<bool> {
         };
 
         let cmd_res = call(&mokutil_path, &["--sb-state"], true)?;
-
-        let regex = Regex::new(r"^SecureBoot\s+(disabled|enabled)$").unwrap();
-        let lines = cmd_res.stdout.lines();
-        for line in lines {
-            if let Some(cap) = regex.captures(line) {
-                if cap.get(1).unwrap().as_str() == "enabled" {
-                    return Ok(true);
-                } else {
-                    return Ok(false);
+        if cmd_res.stderr.is_empty() {
+            let regex = Regex::new(r"^SecureBoot\s+(disabled|enabled)$").unwrap();
+            let lines = cmd_res.stdout.lines();
+            for line in lines {
+                if let Some(cap) = regex.captures(line) {
+                    if cap.get(1).unwrap().as_str() == "enabled" {
+                        return Ok(true);
+                    } else {
+                        return Ok(false);
+                    }
                 }
             }
+
+            error!(
+                "is_secure_boot: failed to parse command output: '{}'",
+                cmd_res.stdout
+            );
+            Err(Error::with_context(
+                ErrorKind::InvParam,
+                &"is_secure_boot: failed to parse command output".to_string(),
+            ))
+        } else {
+            if cmd_res
+                .stderr
+                .starts_with("This system doesn't support Secure Boot")
+            {
+                Ok(false)
+            } else {
+                Err(Error::with_context(
+                    ErrorKind::ExecProcess,
+                    &format!("mokutil returned an error message: '{}'", cmd_res.stderr),
+                ))
+            }
         }
-        error!(
-            "is_secure_boot: failed to parse command output: '{}'",
-            cmd_res.stdout
-        );
-        Err(Error::with_context(
-            ErrorKind::InvParam,
-            &"is_secure_boot: failed to parse command output".to_string(),
-        ))
     } else {
         Ok(false)
     }

@@ -35,6 +35,9 @@ pub const BALENA_PART_MP: &str = "/mnt/balena-part";
 
 pub const SYSTEM_CONNECTIONS_DIR: &str = "system-connections";
 
+pub const SYS_EFI_DIR: &str = "/sys/firmware/efi";
+pub const SYS_EFIVARS_DIR: &str = "/sys/firmware/efi/efivars";
+
 pub const BACKUP_ARCH_NAME: &str = "backup.tgz";
 
 pub const NIX_NONE: Option<&'static [u8]> = None;

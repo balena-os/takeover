@@ -16,7 +16,6 @@ use libc::MS_BIND;
 use log::{debug, error, info, warn, Level};
 
 pub(crate) mod migrate_info;
-use migrate_info::MigrateInfo;
 
 pub(crate) mod assets;
 use assets::Assets;
@@ -26,29 +25,37 @@ mod block_device_info;
 mod defs;
 mod device;
 mod device_impl;
+
+mod efi_files;
+
 mod image_retrieval;
 mod utils;
 mod wifi_config;
 
-use crate::common::{
-    call,
-    defs::{
-        CP_CMD, OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD, SYSTEM_CONNECTIONS_DIR, TELINIT_CMD,
+use crate::{
+    common::{
+        call,
+        defs::{
+            CP_CMD, NIX_NONE, OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD, SYSTEM_CONNECTIONS_DIR,
+            SYS_EFIVARS_DIR, SYS_EFI_DIR, TELINIT_CMD,
+        },
+        error::{Error, ErrorKind, Result, ToError},
+        file_exists, format_size_with_unit, get_mem_info, is_admin,
+        options::Options,
+        path_append,
+        stage2_config::{Stage2Config, UmountPart},
     },
-    error::{Error, ErrorKind, Result, ToError},
-    file_exists, format_size_with_unit, get_mem_info, is_admin,
-    options::Options,
-    path_append,
-    stage2_config::Stage2Config,
+    stage1::{
+        block_device_info::BlockDevice,
+        block_device_info::BlockDeviceInfo,
+        efi_files::EfiFiles,
+        migrate_info::MigrateInfo,
+        utils::{mktemp, mount_fs},
+    },
 };
 
-use block_device_info::BlockDeviceInfo;
-use mod_logger::{LogDestination, Logger};
-use utils::{mktemp, mount_fs};
-
-use crate::common::defs::NIX_NONE;
-use crate::common::stage2_config::UmountPart;
-use crate::stage1::block_device_info::BlockDevice;
+use crate::common::dir_exists;
+use mod_logger::{LogDestination, Logger, NO_STREAM};
 
 const S1_XTRA_FS_SIZE: u64 = 10 * 1024 * 1024; // const XTRA_MEM_FREE: u64 = 10 * 1024 * 1024; // 10 MB
 
@@ -196,7 +203,30 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         format_size_with_unit(mem_free)
     );
 
-    let req_space = get_required_space(mig_info)?;
+    let mut req_space = get_required_space(mig_info)?;
+
+    let efi_files = if mig_info.is_x86() && dir_exists(SYS_EFI_DIR)? {
+        match EfiFiles::new() {
+            Ok(efi_files) => {
+                req_space += efi_files.get_req_space();
+                Some(efi_files)
+            }
+            Err(why) => {
+                if opts.is_no_fail_on_efi() {
+                    warn!("Efi setup failed with error: {}", why);
+                    warn!("The device will not be able to boot in EFI mode");
+                    None
+                } else {
+                    return Err(Error::from_upstream_error(
+                        Box::new(why),
+                        "Failed to setup efi",
+                    ));
+                }
+            }
+        }
+    } else {
+        None
+    };
 
     // TODO: maybe kill some procs first
     if mem_free < req_space + S1_XTRA_FS_SIZE {
@@ -210,9 +240,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     // *********************************************************
     // make mountpoint for tmpfs
-
     let takeover_dir = mktemp(true, Some("TO.XXXXXXXX"), Some("/"))?;
-
     mig_info.set_to_dir(&takeover_dir);
 
     info!("Created takeover directory in '{}'", takeover_dir.display());
@@ -247,6 +275,13 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     let curr_path = takeover_dir.join("sys");
     mount_fs(&curr_path, "sys", "sysfs", mig_info)?;
+
+    if dir_exists(SYS_EFIVARS_DIR)? {
+        let curr_path = path_append(&takeover_dir, SYS_EFIVARS_DIR);
+        create_dir_all(&curr_path)?;
+        mount_fs(&curr_path, "efivarfs", "efivarfs", mig_info)?;
+        // TODO: copy stuff ?
+    }
 
     let curr_path = takeover_dir.join("dev");
     if mount_fs(&curr_path, "dev", "devtmpfs", mig_info).is_err() {
@@ -297,6 +332,10 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     ))?;
 
     info!("Created directory '{}'", curr_path.display());
+
+    if let Some(efi_files) = &efi_files {
+        efi_files.copy_files(&takeover_dir)?;
+    }
 
     copy_files(opts.get_work_dir(), mig_info, &takeover_dir)?;
 
@@ -354,6 +393,11 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         image_path: mig_info.get_image_path().to_path_buf(),
         config_path: mig_info.get_balena_cfg().get_path().to_path_buf(),
         backup_path: None,
+        efi_boot_mgr_path: if let Some(efi_files) = &efi_files {
+            Some(efi_files.get_exec_path().to_owned())
+        } else {
+            None
+        },
     };
 
     let s2_cfg_path = takeover_dir.join(STAGE2_CONFIG_NAME);
@@ -420,14 +464,15 @@ pub fn stage1(opts: &Options) -> Result<()> {
         return Ok(());
     }
 
-    let log_file = PathBuf::from("./stage1.log");
-    if let Err(why) = Logger::set_log_file(&LogDestination::StreamStderr, &log_file, true) {
-        error!(
-            "Failed to set logging to '{}', error: {:?}",
-            log_file.display(),
-            why
-        );
-        return Err(Error::displayed());
+    if let Some(s1_log_path) = opts.get_log_file() {
+        Logger::set_log_file(&LogDestination::StreamStderr, &s1_log_path, true)
+            .upstream_with_context(&format!(
+                "Failed to set logging to '{}'",
+                s1_log_path.display(),
+            ))?;
+    } else {
+        Logger::set_log_dest(&LogDestination::Stderr, NO_STREAM)
+            .upstream_with_context("Failed to set up logging")?;
     }
 
     let mut mig_info = match MigrateInfo::new(&opts) {

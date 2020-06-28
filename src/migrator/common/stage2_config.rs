@@ -22,6 +22,7 @@ pub(crate) struct Stage2Config {
     pub image_path: PathBuf,
     pub config_path: PathBuf,
     pub backup_path: Option<PathBuf>,
+    pub efi_boot_mgr_path: Option<String>,
 }
 
 #[allow(dead_code)]
