@@ -17,20 +17,22 @@ balena application.
 
 ```shell script
 > takeover --help
-takeover 0.1.0
+takeover 0.1.1
 Thomas Runte <thomasr@balena.io>
 
+
 USAGE:
-    *takeover* [FLAGS] [OPTIONS]
+    takeover [FLAGS] [OPTIONS]
 
 FLAGS:
         --build-num         Debug - print build num and exit
     -d, --download-only     Download image only, do not check device and migrate
     -h, --help              Prints help information
         --init              Internal - init process invocation
-        --no-ack            Scripted mode - no interactive acknoledgement of *takeover*
+        --no-ack            Scripted mode - no interactive acknoledgement of takeover
         --no-api-check      Do not check if balena API is available
         --no-cleanup        Debug - do not cleanup after stage1 failure
+        --no-fail-on-efi    Do not fail if EFI setup fails
         --no-keep-name      Do not migrate host-name
         --no-nwmgr-check    Do not check network manager files exist
         --no-os-check       Do not check if OS is supported
@@ -44,10 +46,11 @@ OPTIONS:
     -c, --config <CONFIG_JSON>           Path to balena config.json
     -f, --flash-to <INSTALL_DEVICE>      Use INSTALL_DEVICE to flash balena to
     -i, --image <IMAGE>                  Path to balena-os image
+        --log-file <LOG_FILE>            Set stage1 log file name
         --log-level <log-level>          Set log level, one of [error,warn,info,debug,trace] [default: info]
     -l, --log-to <LOG_DEVICE>            Write stage2 log to LOG_DEVICE
         --nwmgr-cfg <NWMGR_FILE>...      Supply a network manager file to inject into balena-os
-    -s, --s2-log-level <s2-log-level>    Set stage2 log level, one of [error,warn,info,debug,trace]
+        --s2-log-level <s2-log-level>    Set stage2 log level, one of [error,warn,info,debug,trace]
     -v, --version <VERSION>              Version of balena-os image to download
         --wifi <SSID>...                 Create a network manager configuation for configured wifi with SSID
     -w, --work-dir <DIRECTORY>           Path to working directory
