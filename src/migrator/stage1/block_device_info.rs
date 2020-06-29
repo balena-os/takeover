@@ -1,7 +1,7 @@
 use crate::common::{path_append, Error, Result, ToError};
 
 use lazy_static::lazy_static;
-use log::{debug, error, trace};
+use log::{debug, trace};
 use nix::sys::stat::{major, minor, stat};
 use regex::Regex;
 use std::collections::HashMap;
@@ -21,6 +21,7 @@ mod device;
 use device::Device;
 
 mod partition;
+use crate::ErrorKind;
 use partition::Partition;
 use std::str::FromStr;
 
@@ -92,11 +93,13 @@ impl FromStr for DeviceNum {
                     ))?,
             })
         } else {
-            error!(
-                "Failed to parse block device major:minor numbers from '{}'",
-                s
-            );
-            Err(Error::displayed())
+            Err(Error::with_context(
+                ErrorKind::InvState,
+                &format!(
+                    "Failed to parse block device major:minor numbers from '{}'",
+                    s
+                ),
+            ))
         }
     }
 }
@@ -151,8 +154,10 @@ impl BlockDeviceInfo {
 
                     let dev_path = path_append("/dev", &curr_dev);
                     if !dev_path.exists() {
-                        error!("device path does not exist: '{}'", dev_path.display());
-                        return Err(Error::displayed());
+                        return Err(Error::with_context(
+                            ErrorKind::DeviceNotFound,
+                            &format!("device path does not exist: '{}'", dev_path.display()),
+                        ));
                     }
 
                     // TODO: fill mounted
@@ -187,12 +192,14 @@ impl BlockDeviceInfo {
                     debug!("new: got device: {:?}", device);
                 }
                 Err(why) => {
-                    error!(
-                        "Failed to read directory entry from '{}', error: {:?}",
-                        sys_path.display(),
-                        why
-                    );
-                    return Err(Error::displayed());
+                    return Err(Error::with_all(
+                        ErrorKind::Upstream,
+                        &format!(
+                            "Failed to read directory entry from '{}'",
+                            sys_path.display(),
+                        ),
+                        Box::new(why),
+                    ));
                 }
             }
         }
@@ -224,8 +231,10 @@ impl BlockDeviceInfo {
             }
         }
 
-        error!("Failed to find root device");
-        Err(Error::displayed())
+        Err(Error::with_context(
+            ErrorKind::InvState,
+            "Failed to find root device",
+        ))
     }
 
     fn read_partitions<P: AsRef<Path>>(
@@ -291,12 +300,14 @@ impl BlockDeviceInfo {
                     }
                 }
                 Err(why) => {
-                    error!(
-                        "Failed to read directory entry from '{}', error {:?}",
-                        dev_path.display(),
-                        why
-                    );
-                    return Err(Error::displayed());
+                    return Err(Error::with_all(
+                        ErrorKind::Upstream,
+                        &format!(
+                            "Failed to read directory entry from '{}'",
+                            dev_path.display(),
+                        ),
+                        Box::new(why),
+                    ));
                 }
             }
         }
@@ -334,15 +345,19 @@ impl BlockDeviceInfo {
             if let Some(dev_name) = dev_name.to_str() {
                 Ok(String::from(dev_name))
             } else {
-                error!(
-                    "Invalid characters found in device name '{}'",
-                    path.display()
-                );
-                Err(Error::displayed())
+                Err(Error::with_context(
+                    ErrorKind::InvParam,
+                    &format!(
+                        "Invalid characters found in device name '{}'",
+                        path.display()
+                    ),
+                ))
             }
         } else {
-            error!("Failed to retrieve filename from path '{}'", path.display());
-            Err(Error::displayed())
+            Err(Error::with_context(
+                ErrorKind::InvParam,
+                &format!("Failed to retrieve filename from path '{}'", path.display()),
+            ))
         }
     }
 }

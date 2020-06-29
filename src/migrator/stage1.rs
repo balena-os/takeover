@@ -179,72 +179,11 @@ fn get_umount_parts(
     Ok(umount_parts)
 }
 
-fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
-    info!("Preparing for takeover..");
-
-    // *********************************************************
-    // turn off swap
-    if let Ok(cmd_res) = call(SWAPOFF_CMD, &["-a"], true) {
-        if cmd_res.status.success() {
-            info!("SWAP was disabled successfully");
-        } else {
-            error!("Failed to disable SWAP, stderr: '{}'", cmd_res.stderr);
-            return Err(Error::displayed());
-        }
-    }
-
-    // *********************************************************
-    // calculate required memory
-
-    let (mem_tot, mem_free) = get_mem_info()?;
-    info!(
-        "Found {} total, {} free memory",
-        format_size_with_unit(mem_tot),
-        format_size_with_unit(mem_free)
-    );
-
-    let mut req_space = get_required_space(mig_info)?;
-
-    let efi_files = if mig_info.is_x86() && dir_exists(SYS_EFI_DIR)? {
-        match EfiFiles::new() {
-            Ok(efi_files) => {
-                req_space += efi_files.get_req_space();
-                Some(efi_files)
-            }
-            Err(why) => {
-                if opts.is_no_fail_on_efi() {
-                    warn!("Efi setup failed with error: {}", why);
-                    warn!("The device will not be able to boot in EFI mode");
-                    None
-                } else {
-                    return Err(Error::from_upstream_error(
-                        Box::new(why),
-                        "Failed to setup efi",
-                    ));
-                }
-            }
-        }
-    } else {
-        None
-    };
-
-    // TODO: maybe kill some procs first
-    if mem_free < req_space + S1_XTRA_FS_SIZE {
-        error!(
-            "Not enough memory space found to copy files to RAMFS, required size is {} free memory is {}",
-            format_size_with_unit(req_space + S1_XTRA_FS_SIZE),
-            format_size_with_unit(mem_free)
-        );
-        return Err(Error::displayed());
-    }
-
-    // *********************************************************
-    // make mountpoint for tmpfs
-    let takeover_dir = mktemp(true, Some("TO.XXXXXXXX"), Some("/"))?;
-    mig_info.set_to_dir(&takeover_dir);
-
-    info!("Created takeover directory in '{}'", takeover_dir.display());
-
+fn mount_sys_filesystems(
+    takeover_dir: &Path,
+    mig_info: &mut MigrateInfo,
+    opts: &Options,
+) -> Result<()> {
     // *********************************************************
     // mount tmpfs
 
@@ -321,6 +260,69 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     let curr_path = takeover_dir.join("dev/pts");
     mount_fs(&curr_path, "devpts", "devpts", mig_info)?;
 
+    Ok(())
+}
+
+fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
+    info!("Preparing for takeover..");
+
+    // *********************************************************
+    // turn off swap
+    call_command!(SWAPOFF_CMD, &["-a"], "Failed to disable SWAP")?;
+
+    // *********************************************************
+    // calculate required memory
+
+    let (mem_tot, mem_free) = get_mem_info()?;
+    info!(
+        "Found {} total, {} free memory",
+        format_size_with_unit(mem_tot),
+        format_size_with_unit(mem_free)
+    );
+
+    let mut req_space = get_required_space(mig_info)?;
+
+    let efi_files = if mig_info.is_x86() && dir_exists(SYS_EFI_DIR)? {
+        match EfiFiles::new() {
+            Ok(efi_files) => {
+                req_space += efi_files.get_req_space();
+                Some(efi_files)
+            }
+            Err(why) => {
+                if opts.is_no_fail_on_efi() {
+                    warn!("Efi setup failed with error: {}", why);
+                    warn!("The device will not be able to boot in EFI mode");
+                    None
+                } else {
+                    return Err(Error::from_upstream_error(
+                        Box::new(why),
+                        "Failed to setup efi",
+                    ));
+                }
+            }
+        }
+    } else {
+        None
+    };
+
+    // TODO: maybe kill some procs first
+    if mem_free < req_space + S1_XTRA_FS_SIZE {
+        return Err(Error::with_context(ErrorKind::InvState, &format!(
+            "Not enough memory space found to copy files to RAMFS, required size is {} free memory is {}",
+            format_size_with_unit(req_space + S1_XTRA_FS_SIZE),
+            format_size_with_unit(mem_free)
+        )));
+    }
+
+    // *********************************************************
+    // make mountpoint for tmpfs
+    let takeover_dir = mktemp(true, Some("TO.XXXXXXXX"), Some("/"))?;
+    mig_info.set_to_dir(&takeover_dir);
+
+    info!("Created takeover directory in '{}'", takeover_dir.display());
+
+    mount_sys_filesystems(&takeover_dir, mig_info, opts)?;
+
     // *********************************************************
     // create mountpoint for old root
 
@@ -358,22 +360,26 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         if let Some(flash_dev) = block_dev_info.get_devices().get(flash_dev) {
             flash_dev
         } else {
-            error!(
-                "Could not find configured flash device '{}'",
-                flash_dev.display()
-            );
-            return Err(Error::displayed());
+            return Err(Error::with_context(
+                ErrorKind::InvState,
+                &format!(
+                    "Could not find configured flash device '{}'",
+                    flash_dev.display()
+                ),
+            ));
         }
     } else {
         block_dev_info.get_root_device()
     };
 
     if !file_exists(&flash_dev.as_ref().get_dev_path()) {
-        error!(
-            "The device could not be found: '{}'",
-            flash_dev.get_dev_path().display()
-        );
-        return Err(Error::displayed());
+        return Err(Error::with_context(
+            ErrorKind::DeviceNotFound,
+            &format!(
+                "The device could not be found: '{}'",
+                flash_dev.get_dev_path().display()
+            ),
+        ));
     }
 
     // collect partitions that need to be unmounted
@@ -442,12 +448,12 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     info!("Bind-mounted new init as '{}'", new_init_path.display());
 
-    debug!("calling '{} u'", TELINIT_CMD);
-    let cmd_res = call(TELINIT_CMD, &["u"], true)?;
-    if !cmd_res.status.success() {
-        error!("Call to telinit failed, stderr: '{}'", cmd_res.stderr);
-        return Err(Error::displayed());
-    }
+    debug!("calling '{} u'", TELINIT_CMD,);
+    call_command!(
+        TELINIT_CMD,
+        &["u"],
+        &format!("Call to {} failed", TELINIT_CMD)
+    )?;
 
     info!("Restarted init");
 

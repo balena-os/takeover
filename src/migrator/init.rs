@@ -1,6 +1,7 @@
 use crate::{
     common::{defs::NIX_NONE, get_mountpoint, Error, Options, Result, ToError},
     stage2::{busybox_reboot, read_stage2_config},
+    ErrorKind,
 };
 use log::{error, info, trace, warn};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
@@ -76,8 +77,10 @@ fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<()> {
         );
         Ok(())
     } else {
-        warn!("Log device does not exist: '{}'", log_dev.display());
-        Err(Error::displayed())
+        Err(Error::with_context(
+            ErrorKind::InvParam,
+            &format!("The log device does not exist: '{}'", log_dev.display()),
+        ))
     }
 }
 
@@ -94,20 +97,24 @@ fn redirect_fd(file_name: &str, old_fd: c_int, mode: c_int) -> Result<()> {
             unsafe { close(new_fd) };
             Ok(())
         } else {
-            error!(
-                "Failed to redirect STDOUT to '{}', error: {}",
-                file_name,
-                io::Error::last_os_error()
-            );
-            Err(Error::displayed())
+            Err(Error::with_context(
+                ErrorKind::ExecProcess,
+                &format!(
+                    "Failed to redirect STDOUT to '{}', error: {}",
+                    file_name,
+                    io::Error::last_os_error()
+                ),
+            ))
         }
     } else {
-        error!(
-            "Failed to open '{}', error: {}",
-            file_name,
-            io::Error::last_os_error()
-        );
-        Err(Error::displayed())
+        Err(Error::with_context(
+            ErrorKind::Upstream,
+            &format!(
+                "Failed to open '{}', error: {}",
+                file_name,
+                io::Error::last_os_error()
+            ),
+        ))
     }
 }
 
@@ -120,18 +127,22 @@ fn close_fds() -> Result<i32> {
         if sys_rc >= 0 {
             let _sys_rc = unsafe { close(pipe_fds[0]) };
         } else {
-            error!(
-                "Failed to dup2 pipe read handle to stdin, error: {}",
-                io::Error::last_os_error()
-            );
-            return Err(Error::displayed());
+            return Err(Error::with_context(
+                ErrorKind::Upstream,
+                &format!(
+                    "Failed to dup2 pipe read handle to stdin, error: {}",
+                    io::Error::last_os_error()
+                ),
+            ));
         }
     } else {
-        error!(
-            "Failed to create pipe for stdin, error: {}",
-            io::Error::last_os_error()
-        );
-        return Err(Error::displayed());
+        return Err(Error::with_context(
+            ErrorKind::Upstream,
+            &format!(
+                "Failed to create pipe for stdin, error: {}",
+                io::Error::last_os_error()
+            ),
+        ));
     }
 
     redirect_fd("/stdout.log", STDOUT_FILENO, O_WRONLY | O_CREAT | O_TRUNC)?;

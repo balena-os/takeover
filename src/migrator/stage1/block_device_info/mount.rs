@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::fs::read_to_string;
 use std::path::{Path, PathBuf};
 
-use log::{debug, error, trace};
+use log::{debug, trace};
 
 use crate::common::{Error, Result, ToError};
+use crate::ErrorKind;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Mount {
@@ -35,8 +36,10 @@ impl Mount {
         for (line_no, line) in mtab_str.lines().enumerate() {
             let columns: Vec<&str> = line.split_whitespace().collect();
             if columns.len() < 3 {
-                error!("Failed to parse /etc/mtab line {} : '{}'", line_no, line);
-                return Err(Error::displayed());
+                return Err(Error::with_context(
+                    ErrorKind::InvParam,
+                    &format!("Failed to parse /etc/mtab line {} : '{}'", line_no, line),
+                ));
             }
 
             let device_name = columns[0];

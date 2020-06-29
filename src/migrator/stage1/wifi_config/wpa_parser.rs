@@ -1,6 +1,7 @@
 use crate::{
     common::{Error, Result, ToError},
     stage1::wifi_config::{Params, WifiConfig},
+    ErrorKind,
 };
 
 use regex::Regex;
@@ -43,8 +44,10 @@ impl<'a> WpaParser<'a> {
             let mut parser = WpaParser::new(ssid_filter);
             parser.parse_file(WPA_CONFIG_FILE)
         } else {
-            debug!("parse_config: file not found: '{}'", WPA_CONFIG_FILE);
-            Err(Error::displayed())
+            Err(Error::with_context(
+                ErrorKind::FileNotFound,
+                &format!("parse_config: file not found: '{}'", WPA_CONFIG_FILE),
+            ))
         }
     }
 

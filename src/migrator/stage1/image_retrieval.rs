@@ -24,6 +24,7 @@ use crate::{
         },
         migrate_info::balena_cfg_json::BalenaCfgJson,
     },
+    ErrorKind,
 };
 
 use flate2::{Compression, GzBuilder};
@@ -98,8 +99,10 @@ fn determine_version(ver_str: &str, versions: &Versions) -> Result<Version> {
                 info!("Selected default version ({}) for download", found);
                 Ok(found)
             } else {
-                error!("No version found for '{}'", ver_str);
-                Err(Error::displayed())
+                Err(Error::with_context(
+                    ErrorKind::InvParam,
+                    &format!("No version found for '{}'", ver_str),
+                ))
             }
         }
         _ => {
@@ -124,8 +127,10 @@ fn determine_version(ver_str: &str, versions: &Versions) -> Result<Version> {
                     info!("Selected version {} for download", found);
                     Ok(found)
                 } else {
-                    error!("No version found for '{}'", ver_str);
-                    Err(Error::displayed())
+                    Err(Error::with_context(
+                        ErrorKind::InvParam,
+                        &format!("No version found for '{}'", ver_str),
+                    ))
                 }
             } else {
                 let ver_req = Version::parse(ver_str).upstream_with_context(&format!(
@@ -150,8 +155,10 @@ fn determine_version(ver_str: &str, versions: &Versions) -> Result<Version> {
                     info!("Selected version {} for download", found);
                     Ok(found)
                 } else {
-                    error!("No version found for '{}'", ver_str);
-                    Err(Error::displayed())
+                    Err(Error::with_context(
+                        ErrorKind::InvParam,
+                        &format!("No version found for '{}'", ver_str),
+                    ))
                 }
             }
         }
@@ -219,11 +226,13 @@ fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
             DEV_TYPE_BBB => path_append(path_append(&mount_path, "opt"), IMG_NAME_BBB),
             DEV_TYPE_BBG => path_append(path_append(&mount_path, "opt"), IMG_NAME_BBG),
             _ => {
-                error!(
-                    "Encountered undefined image name for device type {}",
-                    device_type
-                );
-                return Err(Error::displayed());
+                return Err(Error::with_context(
+                    ErrorKind::InvParam,
+                    &format!(
+                        "Encountered undefined image name for device type {}",
+                        device_type
+                    ),
+                ));
             }
         };
 
@@ -299,8 +308,10 @@ fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
         }
         Ok(())
     } else {
-        error!("Failed to find root_a partition in downloaded image");
-        Err(Error::displayed())
+        Err(Error::with_context(
+            ErrorKind::InvState,
+            "Failed to find root_a partition in downloaded image",
+        ))
     }
 }
 
@@ -311,11 +322,13 @@ pub(crate) fn download_image(
     version: &str,
 ) -> Result<PathBuf> {
     if !SUPPORTED_DEVICES.contains(&device_type) {
-        error!(
-            "OS download is not supported for device type {}",
-            device_type
-        );
-        return Err(Error::displayed());
+        return Err(Error::with_context(
+            ErrorKind::InvParam,
+            &format!(
+                "OS download is not supported for device type {}",
+                device_type
+            ),
+        ));
     }
 
     let api_key = balena_cfg.get_api_key().upstream_with_context(

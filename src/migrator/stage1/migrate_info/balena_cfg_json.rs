@@ -100,18 +100,22 @@ impl BalenaCfgJson {
                 if let Ok(_v) = check_tcp_connect(&api_host, api_port, opts.get_check_timeout()) {
                     info!("connection to api: {}:{} is ok", api_host, api_port);
                 } else {
-                    error!(
+                    return Err(Error::with_context(
+                        ErrorKind::InvState,
+                        &format!(
                         "failed to connect to api server @ {}:{} your device might not come online",
                         api_endpoint, api_port
-                    );
-                    return Err(Error::displayed());
+                    ),
+                    ));
                 }
             } else {
-                error!(
-                    "failed to parse api server url from config.json: {}",
-                    api_endpoint
-                );
-                return Err(Error::displayed());
+                return Err(Error::with_context(
+                    ErrorKind::InvParam,
+                    &format!(
+                        "failed to parse api server url from config.json: {}",
+                        api_endpoint
+                    ),
+                ));
             }
         }
 
@@ -122,11 +126,13 @@ impl BalenaCfgJson {
                 // TODO: call a command on API instead of just connecting
                 info!("connection to vpn: {}:{} is ok", vpn_endpoint, vpn_port);
             } else {
-                error!(
-                    "failed to connect to vpn server @ {}:{} your device might not come online",
-                    vpn_endpoint, vpn_port
-                );
-                return Err(Error::displayed());
+                return Err(Error::with_context(
+                    ErrorKind::InvState,
+                    &format!(
+                        "failed to connect to vpn server @ {}:{} your device might not come online",
+                        vpn_endpoint, vpn_port
+                    ),
+                ));
             }
         }
 

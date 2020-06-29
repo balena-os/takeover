@@ -43,7 +43,7 @@ use regex::Regex;
 const DD_BLOCK_SIZE: usize = 128 * 1024; // 4_194_304;
 
 const VALIDATE_MAX_ERR: usize = 20;
-const DO_VALIDATE: bool = true;
+const DO_VALIDATE: bool = false;
 const VALIDATE_BLOCK_SIZE: usize = 64 * 1024; // 4_194_304;
 
 const IOCTL_BLK_RRPART: IoctlReq = 0x1295;
@@ -217,11 +217,13 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<()> {
                     ))?;
                     info!("Copied network config to '{}'", to_path.display());
                 } else {
-                    error!(
-                        "Failed to extract filename from path: '{}'",
-                        dir_entry.path().display()
-                    );
-                    return Err(Error::displayed());
+                    return Err(Error::with_context(
+                        ErrorKind::InvParam,
+                        &format!(
+                            "Failed to extract filename from path: '{}'",
+                            dir_entry.path().display()
+                        ),
+                    ));
                 }
             }
             Err(why) => {
@@ -242,30 +244,21 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<()> {
 pub(crate) fn read_stage2_config() -> Result<Stage2Config> {
     let s2_cfg_path = PathBuf::from(&format!("/{}", STAGE2_CONFIG_NAME));
     if file_exists(&s2_cfg_path) {
-        let s2_cfg_txt = match read_to_string(&s2_cfg_path) {
-            Ok(s2_config_txt) => s2_config_txt,
-            Err(why) => {
-                error!(
-                    "Failed to read stage 2 config from '{}', error: {}",
-                    s2_cfg_path.display(),
-                    why
-                );
-                return Err(Error::displayed());
-            }
-        };
-        match Stage2Config::deserialze(&s2_cfg_txt) {
-            Ok(s2_config) => Ok(s2_config),
-            Err(why) => {
-                error!("Failed to deserialize stage 2 config: error {}", why);
-                Err(Error::displayed())
-            }
-        }
+        let s2_cfg_txt = read_to_string(&s2_cfg_path).upstream_with_context(&format!(
+            "Failed to read stage 2 config from '{}'",
+            s2_cfg_path.display(),
+        ))?;
+
+        Ok(Stage2Config::deserialze(&s2_cfg_txt)
+            .upstream_with_context("Failed to deserialize stage 2 config")?)
     } else {
-        error!(
-            "Stage2 config file could not be found in '{}',",
-            s2_cfg_path.display()
-        );
-        Err(Error::displayed())
+        Err(Error::with_context(
+            ErrorKind::FileNotFound,
+            &format!(
+                "Stage2 config file could not be found in '{}',",
+                s2_cfg_path.display()
+            ),
+        ))
     }
 }
 
@@ -336,8 +329,10 @@ fn kill_procs(log_level: Level) -> Result<()> {
     if !killed {
         Ok(())
     } else {
-        error!("Failed to kill any processes using using '{}'", OLD_ROOT_MP,);
-        Err(Error::displayed())
+        Err(Error::with_context(
+            ErrorKind::InvState,
+            &format!("Failed to kill any processes using using '{}'", OLD_ROOT_MP,),
+        ))
     }
 }
 
@@ -369,31 +364,25 @@ fn unmount_partitions(mountpoints: &[UmountPart]) -> Result<()> {
                     mountpoint.display()
                 );
 
-                match mount(
+                mount(
                     Some(mpoint.dev_name.as_path()),
                     &mountpoint,
                     Some(mpoint.fs_type.as_bytes()),
                     MsFlags::from_bits(MS_REMOUNT | MS_RDONLY).unwrap(),
                     NIX_NONE,
-                ) {
-                    Ok(_) => {
-                        info!(
-                            "Successfully remounted '{}' on '{}' as readonly ",
-                            mpoint.dev_name.display(),
-                            mountpoint.display()
-                        );
-                    }
-                    Err(why) => {
-                        error!(
-                            "Failed to remount '{}' on '{}' with fs type: {} as readonly, error: {:?}",
-                            mpoint.dev_name.display(),
-                            mountpoint.display(),
-                            mpoint.fs_type,
-                            why
-                        );
-                        return Err(Error::displayed());
-                    }
-                }
+                )
+                .upstream_with_context(&format!(
+                    "Failed to remount '{}' on '{}' with fs type: {} as readonly",
+                    mpoint.dev_name.display(),
+                    mountpoint.display(),
+                    mpoint.fs_type,
+                ))?;
+
+                info!(
+                    "Successfully remounted '{}' on '{}' as readonly ",
+                    mpoint.dev_name.display(),
+                    mountpoint.display()
+                );
             }
         }
     }
@@ -403,38 +392,30 @@ fn unmount_partitions(mountpoints: &[UmountPart]) -> Result<()> {
 #[allow(dead_code)]
 fn part_reread(device: &Path) -> Result<()> {
     // try ioctrl #define BLKRRPART  _IO(0x12,95)	/* re-read partition table */
-    match OpenOptions::new()
+    let device_file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(false)
         .open(device)
-    {
-        Ok(file) => {
-            let ioctl_res = unsafe { ioctl(file.as_raw_fd(), IOCTL_BLK_RRPART) };
-            if ioctl_res == 0 {
-                debug!(
-                    "Device BLKRRPART IOCTRL to '{}' returned {}",
-                    device.display(),
-                    ioctl_res
-                );
-                Ok(())
-            } else {
-                error!(
-                    "Device BLKRRPART IOCTRL to '{}' failed with error: {}",
-                    device.display(),
-                    io::Error::last_os_error()
-                );
-                Err(Error::displayed())
-            }
-        }
-        Err(why) => {
-            error!(
-                "Failed to open device '{}', error: {:?}",
+        .upstream_with_context(&format!("Failed to open device '{}'", device.display(),))?;
+
+    let ioctl_res = unsafe { ioctl(device_file.as_raw_fd(), IOCTL_BLK_RRPART) };
+    if ioctl_res == 0 {
+        debug!(
+            "Device BLKRRPART IOCTRL to '{}' returned {}",
+            device.display(),
+            ioctl_res
+        );
+        Ok(())
+    } else {
+        Err(Error::with_context(
+            ErrorKind::Upstream,
+            &format!(
+                "Device BLKRRPART IOCTRL to '{}' failed with error: {}",
                 device.display(),
-                why
-            );
-            Err(Error::displayed())
-        }
+                io::Error::last_os_error()
+            ),
+        ))
     }
 }
 
@@ -496,8 +477,11 @@ fn transfer_boot_files<P: AsRef<Path>>(dev_root: P) -> Result<()> {
                 }
             }
             Err(why) => {
-                error!("Failed to read directory entry, error: {:?}", why);
-                return Err(Error::displayed());
+                return Err(Error::with_all(
+                    ErrorKind::Upstream,
+                    "Failed to read directory entry",
+                    Box::new(why),
+                ));
             }
         }
     }
@@ -573,103 +557,54 @@ fn raw_umount_partition<P: AsRef<Path>>(device: &str, mountpoint: P) -> Result<(
 
  */
 
-fn raw_mount_balena(device: &Path, efi_boot_mgr: &Option<String>) -> Result<()> {
-    debug!("raw_mount_balena called");
+fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo)> {
+    let mut disk = Disk::from_drive_file(device, None)?;
+    let part_iterator = PartitionIterator::new(&mut disk)?;
+    let mut boot_part: Option<PartInfo> = None;
+    let mut data_part: Option<PartInfo> = None;
 
-    let backup_path = path_append(TRANSFER_DIR, BACKUP_ARCH_NAME);
+    for partition in part_iterator {
+        debug!(
+            "partition: {}, start: {}, sectors: {}",
+            partition.index, partition.start_lba, partition.num_sectors
+        );
 
-    if !dir_exists(BALENA_PART_MP)? {
-        create_dir(BALENA_PART_MP).upstream_with_context(&format!(
-            "Failed to create balena partition mountpoint: '{}'",
-            BALENA_PART_MP
-        ))?;
+        match partition.index {
+            1 => {
+                boot_part = Some(partition);
+            }
+            2..=4 => debug!("Skipping partition {}", partition.index),
+            5 => {
+                data_part = Some(partition);
+                break;
+            }
+            _ => {
+                return Err(Error::with_context(
+                    ErrorKind::InvParam,
+                    &format!("Invalid partition index encountered: {}", partition.index),
+                ));
+            }
+        }
     }
 
-    let (boot_part, data_part) = {
-        let mut disk = Disk::from_drive_file(device, None)?;
-        let part_iterator = PartitionIterator::new(&mut disk)?;
-        let mut boot_part: Option<PartInfo> = None;
-        let mut data_part: Option<PartInfo> = None;
-
-        for partition in part_iterator {
-            debug!(
-                "partition: {}, start: {}, sectors: {}",
-                partition.index, partition.start_lba, partition.num_sectors
-            );
-
-            match partition.index {
-                1 => {
-                    boot_part = Some(partition);
-                }
-                2..=4 => debug!("Skipping partition {}", partition.index),
-                5 => {
-                    data_part = Some(partition);
-                    break;
-                }
-                _ => {
-                    error!("Invalid partition index encountered: {}", partition.index);
-                    return Err(Error::displayed());
-                }
-            }
-        }
-
-        if let Some(boot_part) = boot_part {
-            if let Some(data_part) = data_part {
-                (boot_part, data_part)
-            } else {
-                error!("Data partition could not be found on '{}", device.display());
-                return Err(Error::displayed());
-            }
+    if let Some(boot_part) = boot_part {
+        if let Some(data_part) = data_part {
+            Ok((boot_part, data_part))
         } else {
-            error!("Boot partition could not be found on '{}", device.display());
-            return Err(Error::displayed());
+            Err(Error::with_context(
+                ErrorKind::NotFound,
+                &format!("Data partition could not be found on '{}", device.display()),
+            ))
         }
-    };
+    } else {
+        Err(Error::with_context(
+            ErrorKind::NotFound,
+            &format!("Boot partition could not be found on '{}", device.display()),
+        ))
+    }
+}
 
-    let mut loop_device = LoopDevice::get_free(true)?;
-    info!("Create loop device: '{}'", loop_device.get_path().display());
-    let byte_offset = boot_part.start_lba * DEF_BLOCK_SIZE as u64;
-    let size_limit = boot_part.num_sectors * DEF_BLOCK_SIZE as u64;
-
-    debug!(
-        "Setting up device '{}' with offset {}, sizelimit {} on '{}'",
-        device.display(),
-        byte_offset,
-        size_limit,
-        loop_device.get_path().display()
-    );
-
-    loop_device.setup(&device, Some(byte_offset), Some(size_limit))?;
-    info!(
-        "Setup device '{}' with offset {}, sizelimit {} on '{}'",
-        device.display(),
-        byte_offset,
-        size_limit,
-        loop_device.get_path().display()
-    );
-
-    mount(
-        Some(loop_device.get_path()),
-        BALENA_PART_MP,
-        Some(BALENA_BOOT_FSTYPE.as_bytes()),
-        MsFlags::empty(),
-        NIX_NONE,
-    )
-    .upstream_with_context(&format!(
-        "Failed to mount {} on {}",
-        loop_device.get_path().display(),
-        BALENA_PART_MP
-    ))?;
-
-    info!(
-        "Mounted boot partition as {} on {}",
-        loop_device.get_path().display(),
-        BALENA_PART_MP
-    );
-    // TODO: copy files
-
-    transfer_boot_files(BALENA_PART_MP)?;
-
+fn efi_setup(device: &Path, efi_boot_mgr: &Option<String>) -> Result<()> {
     if dir_exists(SYS_EFI_DIR)? {
         if let Some(efi_boot_mgr) = efi_boot_mgr {
             match call_command!(efi_boot_mgr.as_ref(), &[], "Failed to execute efibootmgr") {
@@ -715,18 +650,84 @@ fn raw_mount_balena(device: &Path, efi_boot_mgr: &Option<String>) -> Result<()> 
             }
         }
     } else {
-        match remove_dir(path_append(BALENA_BOOT_MP, "EFI")) {
-            Ok(_) => {
-                debug!("Removed EFI directory from '{}'", BALENA_BOOT_MP);
-            }
-            Err(why) => {
-                warn!(
-                    "Failed to remove EFI directory from '{}', error: {}",
-                    BALENA_BOOT_MP, why
-                );
+        let efi_dir = path_append(BALENA_BOOT_MP, "EFI");
+        if dir_exists(&efi_dir)? {
+            match remove_dir(&efi_dir) {
+                Ok(_) => {
+                    debug!("Removed EFI directory from '{}'", BALENA_BOOT_MP);
+                }
+                Err(why) => {
+                    warn!(
+                        "Failed to remove EFI directory from '{}', error: {}",
+                        BALENA_BOOT_MP, why
+                    );
+                }
             }
         }
     }
+
+    Ok(())
+}
+
+fn raw_mount_balena(device: &Path, efi_boot_mgr: &Option<String>) -> Result<()> {
+    debug!("raw_mount_balena called");
+
+    let backup_path = path_append(TRANSFER_DIR, BACKUP_ARCH_NAME);
+
+    if !dir_exists(BALENA_PART_MP)? {
+        create_dir(BALENA_PART_MP).upstream_with_context(&format!(
+            "Failed to create balena partition mountpoint: '{}'",
+            BALENA_PART_MP
+        ))?;
+    }
+
+    let (boot_part, data_part) = get_partition_infos(device)?;
+
+    let mut loop_device = LoopDevice::get_free(true)?;
+    info!("Create loop device: '{}'", loop_device.get_path().display());
+    let byte_offset = boot_part.start_lba * DEF_BLOCK_SIZE as u64;
+    let size_limit = boot_part.num_sectors * DEF_BLOCK_SIZE as u64;
+
+    debug!(
+        "Setting up device '{}' with offset {}, sizelimit {} on '{}'",
+        device.display(),
+        byte_offset,
+        size_limit,
+        loop_device.get_path().display()
+    );
+
+    loop_device.setup(&device, Some(byte_offset), Some(size_limit))?;
+    info!(
+        "Setup device '{}' with offset {}, sizelimit {} on '{}'",
+        device.display(),
+        byte_offset,
+        size_limit,
+        loop_device.get_path().display()
+    );
+
+    mount(
+        Some(loop_device.get_path()),
+        BALENA_PART_MP,
+        Some(BALENA_BOOT_FSTYPE.as_bytes()),
+        MsFlags::empty(),
+        NIX_NONE,
+    )
+    .upstream_with_context(&format!(
+        "Failed to mount {} on {}",
+        loop_device.get_path().display(),
+        BALENA_PART_MP
+    ))?;
+
+    info!(
+        "Mounted boot partition as {} on {}",
+        loop_device.get_path().display(),
+        BALENA_PART_MP
+    );
+    // TODO: copy files
+
+    transfer_boot_files(BALENA_PART_MP)?;
+
+    efi_setup(device, efi_boot_mgr)?;
 
     sync();
 
@@ -795,32 +796,31 @@ fn sys_mount_balena() -> Result<()> {
 
     let part_label = path_append(DISK_BY_LABEL_PATH, BALENA_BOOT_PART);
     if !file_exists(&part_label) {
-        error!(
-            "Failed to locate path to boot partition in '{}'",
-            part_label.display()
-        );
-        return Err(Error::displayed());
+        return Err(Error::with_context(
+            ErrorKind::NotFound,
+            &format!(
+                "Failed to locate path to boot partition in '{}'",
+                part_label.display()
+            ),
+        ));
     }
     create_dir(BALENA_BOOT_MP).upstream_with_context(&format!(
         "Failed to create balena-boot mountpoint: '{}'",
         BALENA_BOOT_MP
     ))?;
 
-    if let Err(why) = mount(
+    mount(
         Some(&part_label),
         BALENA_BOOT_MP,
         Some(BALENA_BOOT_FSTYPE.as_bytes()),
         MsFlags::empty(),
         NIX_NONE,
-    ) {
-        error!(
-            "Failed to mount '{}' to '{}', errr: {:?}",
-            part_label.display(),
-            BALENA_BOOT_MP,
-            why
-        );
-        return Err(Error::displayed());
-    }
+    )
+    .upstream_with_context(&format!(
+        "Failed to mount '{}' to '{}'",
+        part_label.display(),
+        BALENA_BOOT_MP,
+    ))?;
 
     transfer_boot_files(BALENA_BOOT_MP)?;
 
@@ -833,21 +833,18 @@ fn sys_mount_balena() -> Result<()> {
     let backup_path = path_append(TRANSFER_DIR, BACKUP_ARCH_NAME);
     if file_exists(&backup_path) {
         let part_label = path_append(DISK_BY_LABEL_PATH, BALENA_DATA_PART);
-        if let Err(why) = mount(
+        mount(
             Some(&part_label),
             BALENA_BOOT_MP,
             Some(BALENA_DATA_FSTYPE.as_bytes()),
             MsFlags::empty(),
             NIX_NONE,
-        ) {
-            error!(
-                "Failed to mount '{}' to '{}', error: {:?}",
-                part_label.display(),
-                BALENA_BOOT_MP,
-                why
-            );
-            return Err(Error::displayed());
-        }
+        )
+        .upstream_with_context(&format!(
+            "Failed to mount '{}' to '{}'",
+            part_label.display(),
+            BALENA_BOOT_MP,
+        ))?;
 
         let target_path = path_append(BALENA_PART_MP, BACKUP_ARCH_NAME);
         copy(&backup_path, &target_path).upstream_with_context(&format!(
@@ -897,35 +894,21 @@ fn fill_buffer<I: Read>(buffer: &mut [u8], input: &mut I) -> Result<usize> {
 fn validate(target_path: &Path, image_path: &Path) -> Result<bool> {
     debug!("Validate: opening: '{}'", image_path.display());
 
-    let mut decoder = GzDecoder::new(match File::open(&image_path) {
-        Ok(file) => file,
-        Err(why) => {
-            error!(
-                "Validate: Failed to open image file '{}', error: {:?}",
-                image_path.display(),
-                why
-            );
-            return Err(Error::displayed());
-        }
-    });
+    let mut decoder = GzDecoder::new(File::open(&image_path).upstream_with_context(&format!(
+        "Validate: Failed to open image file '{}'",
+        image_path.display(),
+    ))?);
 
     debug!("Validate: opening output file '{}'", target_path.display());
-    let mut target = match OpenOptions::new()
+    let mut target = OpenOptions::new()
         .write(false)
         .read(true)
         .create(false)
         .open(&target_path)
-    {
-        Ok(file) => file,
-        Err(why) => {
-            error!(
-                "Validate: Failed to open output file '{}', error: {:?}",
-                target_path.display(),
-                why
-            );
-            return Err(Error::displayed());
-        }
-    };
+        .upstream_with_context(&format!(
+            "Validate: Failed to open output file '{}'",
+            target_path.display(),
+        ))?;
 
     let mut gz_buffer: [u8; VALIDATE_BLOCK_SIZE] = [0; VALIDATE_BLOCK_SIZE];
     let mut tgt_buffer: [u8; VALIDATE_BLOCK_SIZE] = [0; VALIDATE_BLOCK_SIZE];
@@ -1110,11 +1093,11 @@ pub fn stage2(opts: &Options) {
 
     setup_logging(&s2_config.log_dev);
 
-    if (opts.get_s2_log_level() == Level::Debug) || (opts.get_s2_log_level() == Level::Trace) {
-        use crate::common::debug::check_loop_control;
-        check_loop_control("Stage2 init", "/dev");
-    }
-
+    /*    if (opts.get_s2_log_level() == Level::Debug) || (opts.get_s2_log_level() == Level::Trace) {
+            use crate::common::debug::check_loop_control;
+            check_loop_control("Stage2 init", "/dev");
+        }
+    */
     //match kill_procs1(&["takeover"], 15) {
 
     let _res = kill_procs(opts.get_s2_log_level());
@@ -1136,10 +1119,11 @@ pub fn stage2(opts: &Options) {
         }
     }
 
-    if (opts.get_s2_log_level() == Level::Debug) || (opts.get_s2_log_level() == Level::Trace) {
-        use crate::common::debug::check_loop_control;
-        check_loop_control("Stage2 before flash", "/dev");
-    }
+    /*    if (opts.get_s2_log_level() == Level::Debug) || (opts.get_s2_log_level() == Level::Trace) {
+            use crate::common::debug::check_loop_control;
+            check_loop_control("Stage2 before flash", "/dev");
+        }
+    */
 
     if s2_config.pretend {
         info!("Not flashing due to pretend mode");

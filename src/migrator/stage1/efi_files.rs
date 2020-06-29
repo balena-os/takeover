@@ -17,10 +17,8 @@ impl EfiFiles {
     pub fn new() -> Result<EfiFiles> {
         trace!("new: entered",);
 
-        let efi_boot_mgr = whereis("efibootmgr").error_with_all(
-            ErrorKind::FileNotFound,
-            &format!("efibootmgr could not be located"),
-        )?;
+        let efi_boot_mgr = whereis("efibootmgr")
+            .error_with_all(ErrorKind::FileNotFound, "efibootmgr could not be located")?;
 
         call_command!(
             efi_boot_mgr.as_str(),
