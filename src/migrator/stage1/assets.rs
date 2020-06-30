@@ -2,7 +2,7 @@ use std::fs::{write, OpenOptions};
 use std::io::{copy, Read};
 use std::path::{Path, PathBuf};
 
-use log::{error, Level};
+use log::Level;
 
 use crate::{
     common::{
@@ -82,21 +82,15 @@ impl Assets {
             "Failed to write stage 2 script to: '{}'",
             out_path.as_ref().display()
         ))?;
-        let cmd_res = call(
+        call_command!(
             CHMOD_CMD,
             &["+x", &*out_path.as_ref().to_string_lossy()],
-            true,
-        )?;
-        if cmd_res.status.success() {
-            Ok(())
-        } else {
-            error!(
-                "Failed to set executable flags on stage 2 script: '{}', stderr: '{}'",
+            &format!(
+                "Failed to set executable flags on stage 2 script: '{}'",
                 out_path.as_ref().display(),
-                cmd_res.stderr
-            );
-            Err(Error::displayed())
-        }
+            )
+        )?;
+        Ok(())
     }
 
     pub fn busybox_size(&self) -> Result<u64> {

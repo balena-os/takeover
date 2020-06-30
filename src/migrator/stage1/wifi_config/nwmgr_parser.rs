@@ -1,4 +1,4 @@
-use log::{debug, error, warn};
+use log::{debug, warn};
 use regex::Regex;
 use std::fs::{read_dir, read_to_string};
 use std::path::Path;
@@ -207,20 +207,22 @@ pub(crate) fn parse_nwmgr_config(ssid_filter: &[String]) -> Result<Vec<WifiConfi
                     parser.reset();
                 }
                 Err(why) => {
-                    error!(
-                        "Failed to read directory entry of '{}', error: {:?}",
-                        NWMGR_CONFIG_DIR, why
-                    );
-                    return Err(Error::displayed());
+                    return Err(Error::with_all(
+                        ErrorKind::InvParam,
+                        &format!("Failed to read directory entry of '{}',", NWMGR_CONFIG_DIR,),
+                        Box::new(why),
+                    ));
                 }
             }
         }
         Ok(wifis)
     } else {
-        error!(
-            "Network manager configuration directory could not be found: '{}'",
-            NWMGR_CONFIG_DIR
-        );
-        Err(Error::displayed())
+        Err(Error::with_context(
+            ErrorKind::FileNotFound,
+            &format!(
+                "Network manager configuration directory could not be found: '{}'",
+                NWMGR_CONFIG_DIR
+            ),
+        ))
     }
 }

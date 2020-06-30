@@ -87,18 +87,16 @@ pub(crate) fn is_secure_boot() -> Result<bool> {
                 ErrorKind::InvParam,
                 &"is_secure_boot: failed to parse command output".to_string(),
             ))
+        } else if cmd_res
+            .stderr
+            .starts_with("This system doesn't support Secure Boot")
+        {
+            Ok(false)
         } else {
-            if cmd_res
-                .stderr
-                .starts_with("This system doesn't support Secure Boot")
-            {
-                Ok(false)
-            } else {
-                Err(Error::with_context(
-                    ErrorKind::ExecProcess,
-                    &format!("mokutil returned an error message: '{}'", cmd_res.stderr),
-                ))
-            }
+            Err(Error::with_context(
+                ErrorKind::ExecProcess,
+                &format!("mokutil returned an error message: '{}'", cmd_res.stderr),
+            ))
         }
     } else {
         Ok(false)
