@@ -1,13 +1,18 @@
 use nix::mount::{mount, MsFlags};
+use rand::distributions::Alphanumeric;
+use rand::{thread_rng, Rng};
 use std::path::{Path, PathBuf};
 
+use libc::S_IFREG;
 use log::info;
 
 use crate::{
     common::{
         call,
-        defs::{MKTEMP_CMD, MOKUTIL_CMD, NIX_NONE, SYS_EFI_DIR, UNAME_CMD, WHEREIS_CMD},
-        dir_exists, file_exists, Error, ErrorKind, Result, ToError,
+        defs::{MOKUTIL_CMD, NIX_NONE, SYS_EFI_DIR, WHEREIS_CMD},
+        dir_exists, file_exists,
+        system::{mkdir, mknod, uname},
+        Error, ErrorKind, Result, ToError,
     },
     stage1::defs::OSArch,
 };
@@ -15,34 +20,24 @@ use crate::{
 use log::{error, trace, warn};
 use regex::Regex;
 
+use crate::common::path_append;
 use crate::stage1::migrate_info::MigrateInfo;
+
 use std::fs::create_dir_all;
 
 pub(crate) fn get_os_arch() -> Result<OSArch> {
-    const UNAME_ARGS_OS_ARCH: [&str; 1] = ["-m"];
     trace!("get_os_arch: entered");
-    let cmd_res = call(UNAME_CMD, &UNAME_ARGS_OS_ARCH, true)
-        .upstream_with_context(&format!("get_os_arch: call {}", UNAME_CMD))?;
 
-    if cmd_res.status.success() {
-        if cmd_res.stdout.to_lowercase() == "x86_64" {
-            Ok(OSArch::AMD64)
-        } else if cmd_res.stdout.to_lowercase() == "i386" {
-            Ok(OSArch::I386)
-        } else if cmd_res.stdout.to_lowercase() == "armv7l" {
-            // TODO: try to determine the CPU Architecture
-            Ok(OSArch::ARMHF)
-        } else {
-            Err(Error::with_context(
-                ErrorKind::InvParam,
-                &format!("get_os_arch: unsupported architectute '{}'", cmd_res.stdout),
-            ))
-        }
-    } else {
-        Err(Error::with_context(
-            ErrorKind::ExecProcess,
-            &format!("get_os_arch: command failed: {} {:?}", UNAME_CMD, cmd_res),
-        ))
+    let uname_res = uname()?;
+    let machine = uname_res.get_machine();
+    match machine {
+        "x86_64" => Ok(OSArch::AMD64),
+        "i386" => Ok(OSArch::I386),
+        "armv7l" => Ok(OSArch::ARMHF),
+        _ => Err(Error::with_context(
+            ErrorKind::InvParam,
+            &format!("get_os_arch: unsupported architectute '{}'", machine),
+        )),
     }
 }
 
@@ -160,38 +155,44 @@ pub(crate) fn whereis(cmd: &str) -> Result<String> {
 
 pub(crate) fn mktemp<P: AsRef<Path>>(
     dir: bool,
-    pattern: Option<&str>,
+    prefix: Option<&str>,
+    suffix: Option<&str>,
     path: Option<P>,
 ) -> Result<PathBuf> {
-    let mut cmd_args: Vec<&str> = Vec::new();
+    loop {
+        let mut file_name = String::new();
+        if let Some(prefix) = prefix {
+            file_name.push_str(prefix);
+        }
+        file_name.push_str(
+            thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(10)
+                .collect::<String>()
+                .as_str(),
+        );
+        if let Some(suffix) = suffix {
+            file_name.push_str(suffix);
+        }
 
-    let mut _dir_path = String::new();
-    if let Some(path) = path {
-        _dir_path = path.as_ref().to_string_lossy().to_string();
-        cmd_args.push("-p");
-        cmd_args.push(_dir_path.as_str());
-    }
+        let new_path = if let Some(path) = &path {
+            path_append(path.as_ref(), file_name.as_str())
+        } else {
+            path_append("/tmp", file_name.as_str())
+        };
 
-    if dir {
-        cmd_args.push("-d");
-    }
-
-    if let Some(pattern) = pattern {
-        cmd_args.push(pattern);
-    }
-
-    let cmd_res = call(MKTEMP_CMD, cmd_args.as_slice(), true)?;
-
-    if cmd_res.status.success() {
-        Ok(PathBuf::from(cmd_res.stdout))
-    } else {
-        Err(Error::with_context(
-            ErrorKind::ExecProcess,
-            &format!(
-                "Failed to create temporary file for image extraction, error: {}",
-                cmd_res.stderr
-            ),
-        ))
+        match if dir {
+            mkdir(new_path.as_path(), 0o755)
+        } else {
+            mknod(new_path.as_path(), S_IFREG | 0o755, 0)
+        } {
+            Ok(_) => return Ok(new_path),
+            Err(why) => {
+                if why.kind() != ErrorKind::FileExists {
+                    return Err(Error::with_cause(ErrorKind::Upstream, Box::new(why)));
+                }
+            }
+        }
     }
 }
 

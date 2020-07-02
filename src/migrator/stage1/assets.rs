@@ -6,9 +6,8 @@ use log::Level;
 
 use crate::{
     common::{
-        call,
-        defs::CHMOD_CMD,
-        error::{Error, ErrorKind, Result, ToError},
+        error::{Result, ToError},
+        system::chmod,
     },
     stage1::defs::OSArch,
 };
@@ -82,14 +81,8 @@ impl Assets {
             "Failed to write stage 2 script to: '{}'",
             out_path.as_ref().display()
         ))?;
-        call_command!(
-            CHMOD_CMD,
-            &["+x", &*out_path.as_ref().to_string_lossy()],
-            &format!(
-                "Failed to set executable flags on stage 2 script: '{}'",
-                out_path.as_ref().display(),
-            )
-        )?;
+
+        chmod(out_path, 0o755)?;
         Ok(())
     }
 
@@ -133,18 +126,7 @@ impl Assets {
             ))?;
         }
 
-        let cmd_res = call(CHMOD_CMD, &["+x", &*target_path.to_string_lossy()], true)?;
-
-        if !cmd_res.status.success() {
-            return Err(Error::with_context(
-                ErrorKind::CmdIo,
-                &format!(
-                    "Failed to set executable flags for '{}', stderr: '{}'",
-                    target_path.display(),
-                    cmd_res.stderr
-                ),
-            ));
-        }
+        chmod(&target_path, 0o755)?;
 
         Ok(target_path)
     }

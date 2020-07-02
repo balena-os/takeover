@@ -1,24 +1,27 @@
+use std::cmp::min;
+use std::ffi::{CStr, CString, OsString};
 use std::fs::read_to_string;
 use std::mem::MaybeUninit;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 
-use libc::getuid;
-use regex::Regex;
-
+use libc;
 use log::{debug, error, trace, warn};
+
+use regex::Regex;
 
 pub(crate) mod stage2_config;
 
 pub(crate) mod defs;
 
+pub(crate) mod system;
+use system::{is_dir, stat};
+
 pub(crate) mod loop_device;
 
 pub mod error;
 pub use error::{Error, ErrorKind, Result, ToError};
-
-// pub mod mig_error;
-// pub use error::{MigErrCtx, Error, ErrorKind};
 
 pub mod options;
 use crate::common::defs::PIDOF_CMD;
@@ -128,7 +131,7 @@ pub(crate) fn get_os_name() -> Result<String> {
 
 pub(crate) fn is_admin() -> Result<bool> {
     trace!("is_admin: entered");
-    let admin = Some(unsafe { getuid() } == 0);
+    let admin = Some(unsafe { libc::getuid() } == 0);
     Ok(admin.unwrap())
 }
 
@@ -137,19 +140,15 @@ pub fn file_exists<P: AsRef<Path>>(file: P) -> bool {
 }
 
 pub fn dir_exists<P: AsRef<Path>>(name: P) -> Result<bool> {
-    let path = name.as_ref();
-    if path.exists() {
-        Ok(name
-            .as_ref()
-            .metadata()
-            .upstream_with_context(&format!(
-                "dir_exists: failed to retrieve metadata for path: '{}'",
-                path.display()
-            ))?
-            .file_type()
-            .is_dir())
-    } else {
-        Ok(false)
+    match stat(name) {
+        Ok(stat_info) => Ok(is_dir(&stat_info)),
+        Err(why) => {
+            if why.kind() == ErrorKind::FileNotFound {
+                Ok(false)
+            } else {
+                Err(Error::with_cause(ErrorKind::Upstream, Box::new(why)))
+            }
+        }
     }
 }
 
@@ -230,5 +229,62 @@ pub(crate) fn path_append<P1: AsRef<Path>, P2: AsRef<Path>>(base: P1, append: P2
         curr
     } else {
         base.join(append)
+    }
+}
+
+pub(crate) fn path_to_cstring<P: AsRef<Path>>(path: P) -> Result<CString> {
+    let temp: OsString = path.as_ref().into();
+    Ok(
+        CString::new(temp.as_bytes()).upstream_with_context(&format!(
+            "Failed to convert path to CString: '{}'",
+            path.as_ref().display()
+        ))?,
+    )
+}
+
+pub(crate) unsafe fn hex_dump_ptr(buffer: *const u8, length: isize) -> String {
+    let mut idx = 0;
+    let mut output = String::new();
+    while idx < length {
+        output.push_str(&format!("0x{:08x}: ", idx));
+        for _ in 0..min(length - idx, 16) {
+            let byte: u8 = *buffer.offset(idx);
+            let char: char = if (byte as u8).is_ascii_alphanumeric()
+                || (byte as u8).is_ascii_punctuation()
+                || (byte as u8) == 32
+            {
+                char::from(byte as u8)
+            } else {
+                '.'
+            };
+            output.push_str(&format!("{:02x} {}  ", byte, char));
+            idx += 1;
+        }
+        output.push('\n');
+    }
+    output
+}
+
+pub(crate) fn hex_dump(buffer: &[u8]) -> String {
+    unsafe { hex_dump_ptr(buffer as *const [u8] as *const u8, buffer.len() as isize) }
+}
+
+pub(crate) fn string_from_c_string(c_string: &[i8]) -> Result<String> {
+    // There must be a better way
+    let mut len: Option<usize> = None;
+    for (idx, curr) in c_string.iter().enumerate() {
+        if *curr == 0 {
+            len = Some(idx);
+            break;
+        }
+    }
+    if let Some(len) = len {
+        let u8_str = &c_string[0..=len] as *const [i8] as *const [u8] as *const CStr;
+        unsafe { Ok(String::from(&*(*u8_str).to_string_lossy())) }
+    } else {
+        Err(Error::with_context(
+            ErrorKind::InvParam,
+            "Not a nul terminated C string",
+        ))
     }
 }

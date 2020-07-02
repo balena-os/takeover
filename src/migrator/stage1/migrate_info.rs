@@ -138,7 +138,7 @@ impl MigrateInfo {
 
     pub fn update_config(&mut self) -> Result<()> {
         if self.config.is_modified() {
-            let target_path = mktemp(false, Some("config.json.XXXX"), Some(&self.work_dir))?;
+            let target_path = mktemp(false, Some("config."), Some(".json"), Some(&self.work_dir))?;
             self.config.write(&target_path)?;
             info!("Copied config.json to '{}'", target_path.display());
         }

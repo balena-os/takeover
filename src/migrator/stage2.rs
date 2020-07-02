@@ -16,18 +16,19 @@ use nix::{
 use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
-use libc::{ioctl, MS_RDONLY, MS_REMOUNT};
+use libc::{ioctl, MS_RDONLY, MS_REMOUNT, SIGKILL, SIGTERM};
 use log::{debug, error, info, trace, warn, Level};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
 use crate::common::defs::{IoctlReq, SYS_EFI_DIR};
+use crate::common::system::fuser;
 use crate::common::{
     call,
     defs::{
         BACKUP_ARCH_NAME, BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART, BALENA_CONFIG_PATH,
         BALENA_DATA_FSTYPE, BALENA_DATA_PART, BALENA_IMAGE_NAME, BALENA_IMAGE_PATH, BALENA_PART_MP,
-        DD_CMD, DISK_BY_LABEL_PATH, FUSER_CMD, NIX_NONE, OLD_ROOT_MP, PS_CMD, REBOOT_CMD,
-        STAGE2_CONFIG_NAME, SYSTEM_CONNECTIONS_DIR,
+        DD_CMD, DISK_BY_LABEL_PATH, NIX_NONE, OLD_ROOT_MP, PS_CMD, REBOOT_CMD, STAGE2_CONFIG_NAME,
+        SYSTEM_CONNECTIONS_DIR,
     },
     dir_exists,
     disk_util::{Disk, PartInfo, PartitionIterator, DEF_BLOCK_SIZE},
@@ -295,27 +296,21 @@ fn setup_logging<P: AsRef<Path>>(log_dev: &Option<P>) {
 fn kill_procs(log_level: Level) -> Result<()> {
     trace!("kill_procs: entered");
     let mut killed = false;
-    let mut signal: &str = "TERM";
+    let mut signal = SIGTERM;
     loop {
-        let cmd_res = call(
-            BUSYBOX_CMD,
-            &[FUSER_CMD, "-k", &format!("-{}", signal), "-m", OLD_ROOT_MP],
-            true,
-        )?;
-
-        if cmd_res.status.success() {
-            killed = true;
+        if fuser(OLD_ROOT_MP, signal)? > 0 {
+            killed = true
         } else {
             warn!(
-                "Failed to kill processes using '{}', signal: {}, stderr: {}",
-                OLD_ROOT_MP, signal, cmd_res.stderr
+                "Failed to kill processes using '{}', signal: {}",
+                OLD_ROOT_MP, signal
             );
         }
 
-        if signal == "KILL" {
+        if signal == SIGKILL {
             break;
         } else {
-            signal = "KILL";
+            signal = SIGKILL;
             sleep(Duration::from_secs(5));
         }
     }
@@ -1098,9 +1093,15 @@ pub fn stage2(opts: &Options) {
             check_loop_control("Stage2 init", "/dev");
         }
     */
-    //match kill_procs1(&["takeover"], 15) {
 
-    let _res = kill_procs(opts.get_s2_log_level());
+    match kill_procs(opts.get_s2_log_level()) {
+        Ok(_) => (),
+        Err(why) => {
+            error!("kill_procs failed, error {}", why);
+            busybox_reboot();
+            return;
+        }
+    };
 
     match copy_files(&s2_config) {
         Ok(_) => (),

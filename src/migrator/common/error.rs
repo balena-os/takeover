@@ -15,6 +15,9 @@ pub enum ErrorKind {
     ImageDownloaded,
     ExecProcess,
     CmdIo,
+    Permission,
+    FileExists,
+    NotPermitted,
     Displayed,
 }
 
@@ -31,6 +34,9 @@ impl Display for ErrorKind {
             Self::ImageDownloaded => "The image was downloaded successfully",
             Self::ExecProcess => "A spawned process returned an error code",
             Self::CmdIo => "A command IO stream operation failed",
+            Self::Permission => "Permission was denied",
+            Self::NotPermitted => "Operation is not permitted",
+            Self::FileExists => "The file exists",
             Self::Displayed => "The error was displayed upstream",
         };
         write!(f, "{}", output)

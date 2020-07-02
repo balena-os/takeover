@@ -13,6 +13,7 @@ use nix::{
 };
 
 use libc::MS_BIND;
+
 use log::{debug, error, info, warn, Level};
 
 pub(crate) mod migrate_info;
@@ -36,7 +37,7 @@ use crate::{
     common::{
         call,
         defs::{
-            CP_CMD, NIX_NONE, OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD, SYSTEM_CONNECTIONS_DIR,
+            NIX_NONE, OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD, SYSTEM_CONNECTIONS_DIR,
             SYS_EFIVARS_DIR, SYS_EFI_DIR, TELINIT_CMD,
         },
         error::{Error, ErrorKind, Result, ToError},
@@ -44,6 +45,7 @@ use crate::{
         options::Options,
         path_append,
         stage2_config::{Stage2Config, UmountPart},
+        system::copy_dir,
     },
     stage1::{
         block_device_info::BlockDevice,
@@ -227,19 +229,7 @@ fn mount_sys_filesystems(
         warn!("Failed to mount devtmpfs on /dev, trying to copy device nodes");
         mount_fs(&curr_path, "tmpfs", "tmpfs", mig_info)?;
 
-        let cmd_res = call(
-            CP_CMD,
-            &["-a", "/dev/*", &*curr_path.to_string_lossy()],
-            true,
-        )?;
-        if !cmd_res.status.success() {
-            error!(
-                "Failed to copy /dev file system to '{}', error : '{}",
-                curr_path.display(),
-                cmd_res.stderr
-            );
-            return Err(Error::displayed());
-        }
+        copy_dir("/dev", &curr_path)?;
 
         let curr_path = takeover_dir.join("dev/pts");
         if curr_path.exists() {
@@ -316,7 +306,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     // *********************************************************
     // make mountpoint for tmpfs
-    let takeover_dir = mktemp(true, Some("TO.XXXXXXXX"), Some("/"))?;
+    let takeover_dir = mktemp(true, Some("TO."), None, Some("/"))?;
     mig_info.set_to_dir(&takeover_dir);
 
     info!("Created takeover directory in '{}'", takeover_dir.display());
@@ -503,7 +493,7 @@ pub fn stage1(opts: &Options) -> Result<()> {
             let mut buffer = String::new();
             match std::io::stdin().read_line(&mut buffer) {
                 Ok(_) => match buffer.trim() {
-                    "Y" => {
+                    "Y" | "y" => {
                         break;
                     }
                     "n" => {
