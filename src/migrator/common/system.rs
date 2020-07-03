@@ -200,12 +200,10 @@ fn parse_status(base_path: &Path) -> Result<HashMap<String, String>> {
             }
             Ok(result)
         }
-        Err(why) => {
-            return Err(Error::from_upstream(
-                Box::new(why),
-                &format!("Failed to read process status: '{}'", status_path.display()),
-            ));
-        }
+        Err(why) => Err(Error::from_upstream(
+            Box::new(why),
+            &format!("Failed to read process status: '{}'", status_path.display()),
+        )),
     }
 }
 

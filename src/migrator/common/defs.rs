@@ -1,11 +1,11 @@
 pub(crate) const SWAPOFF_CMD: &str = "swapoff";
 pub(crate) const TELINIT_CMD: &str = "telinit";
-pub(crate) const REBOOT_CMD: &str = "reboot";
 
 pub(crate) const MOKUTIL_CMD: &str = "mokutil";
 pub(crate) const WHEREIS_CMD: &str = "whereis";
 pub(crate) const PIDOF_CMD: &str = "pidof";
 
+pub(crate) const EFIBOOTMGR_CMD: &str = "efibootmgr";
 pub(crate) const DD_CMD: &str = "dd";
 
 pub(crate) const STAGE2_CONFIG_NAME: &str = "stage2-config.yml";

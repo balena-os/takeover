@@ -16,7 +16,7 @@ use nix::{
 use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
-use libc::{ioctl, MS_RDONLY, MS_REMOUNT, SIGKILL, SIGTERM};
+use libc::{ioctl, LINUX_REBOOT_CMD_RESTART, MS_RDONLY, MS_REMOUNT, SIGKILL, SIGTERM};
 use log::{debug, error, info, trace, warn, Level};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
@@ -27,7 +27,7 @@ use crate::common::{
     defs::{
         BACKUP_ARCH_NAME, BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART, BALENA_CONFIG_PATH,
         BALENA_DATA_FSTYPE, BALENA_DATA_PART, BALENA_IMAGE_NAME, BALENA_IMAGE_PATH, BALENA_PART_MP,
-        DD_CMD, DISK_BY_LABEL_PATH, NIX_NONE, OLD_ROOT_MP, REBOOT_CMD, STAGE2_CONFIG_NAME,
+        DD_CMD, DISK_BY_LABEL_PATH, NIX_NONE, OLD_ROOT_MP, STAGE2_CONFIG_NAME,
         SYSTEM_CONNECTIONS_DIR,
     },
     dir_exists,
@@ -54,16 +54,13 @@ const TRANSFER_DIR: &str = "/transfer";
 
 const S2_XTRA_FS_SIZE: u64 = 10 * 1024 * 1024;
 
-pub(crate) const BUSYBOX_CMD: &str = "/busybox";
-
 pub(crate) fn busybox_reboot() -> ! {
     trace!("reboot entered");
     Logger::flush();
     sync();
     sleep(Duration::from_secs(3));
     info!("rebooting");
-    let _cmd_res = call_busybox!(&[REBOOT_CMD, "-f"]);
-    sleep(Duration::from_secs(1));
+    let _res = unsafe { libc::reboot(LINUX_REBOOT_CMD_RESTART) };
     exit(1);
 }
 
@@ -319,20 +316,37 @@ fn kill_procs(log_level: Level) -> Result<()> {
     if log_level >= Level::Debug {
         debug!("active processes:");
         for proc_info in get_process_infos()? {
-            let name = if let Some(name) = proc_info.status().get("Name") {
+            let mut name = if let Some(name) = proc_info.status().get("Name") {
                 name.to_owned()
             } else {
                 "-".to_owned()
             };
+
+            let ppid = if let Some(ppid) = proc_info.status().get("PPid") {
+                ppid.as_ref()
+            } else {
+                "-"
+            };
+
+            if proc_info.process_id() != 1 && (ppid == "0" || ppid == "2") {
+                name = format!("[{}]", name);
+            }
+
             if let Some(executable) = proc_info.executable() {
                 debug!(
-                    "{:6} {}\t {}",
+                    "pid: {:6} name: {}\t executable: {}\t ppid: {}",
                     proc_info.process_id(),
                     name,
                     executable.display(),
+                    ppid
                 );
             } else {
-                debug!("{:6} {}\t -", proc_info.process_id(), name,);
+                debug!(
+                    "pid: {:6} name: '{}'\t executable: -\t ppid: {}",
+                    proc_info.process_id(),
+                    name,
+                    ppid
+                );
             }
         }
     }
@@ -615,10 +629,10 @@ fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo)> {
     }
 }
 
-fn efi_setup(device: &Path, efi_boot_mgr: &Option<String>) -> Result<()> {
+fn efi_setup(device: &Path, efi_boot_mgr: &Option<&String>) -> Result<()> {
     if dir_exists(SYS_EFI_DIR)? {
         if let Some(efi_boot_mgr) = efi_boot_mgr {
-            match call_command!(efi_boot_mgr.as_ref(), &[], "Failed to execute efibootmgr") {
+            match call_command!(efi_boot_mgr, &[], "Failed to execute efibootmgr") {
                 Ok(cmd_stdout) => {
                     // TODO: setup efi boot
                     let efivar_regex =
@@ -638,7 +652,7 @@ fn efi_setup(device: &Path, efi_boot_mgr: &Option<String>) -> Result<()> {
                         }
                     }
                     match call_command!(
-                        efi_boot_mgr.as_ref(),
+                        efi_boot_mgr,
                         &[
                             "-c",
                             "-d",
@@ -680,7 +694,7 @@ fn efi_setup(device: &Path, efi_boot_mgr: &Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn raw_mount_balena(device: &Path, efi_boot_mgr: &Option<String>) -> Result<()> {
+fn raw_mount_balena(device: &Path, efi_boot_mgr: &Option<&String>) -> Result<()> {
     debug!("raw_mount_balena called");
 
     let backup_path = path_append(TRANSFER_DIR, BACKUP_ARCH_NAME);
@@ -970,7 +984,7 @@ fn validate(target_path: &Path, image_path: &Path) -> Result<bool> {
     Ok(err_count == 0)
 }
 
-fn flash_external(target_path: &Path, image_path: &Path) -> FlashState {
+fn flash_external(target_path: &Path, image_path: &Path, dd_cmd: &str) -> FlashState {
     let mut fail_res = FlashState::FailRecoverable;
 
     let mut decoder = GzDecoder::new(match File::open(&image_path) {
@@ -986,9 +1000,8 @@ fn flash_external(target_path: &Path, image_path: &Path) -> FlashState {
     });
 
     debug!("invoking dd");
-    match Command::new(BUSYBOX_CMD)
+    match Command::new(dd_cmd)
         .args(&[
-            DD_CMD,
             &format!("of={}", &target_path.to_string_lossy()),
             &format!("bs={}", DD_BLOCK_SIZE),
         ])
@@ -1134,11 +1147,14 @@ pub fn stage2(opts: &Options) -> ! {
     sync();
 
     let image_path = path_append(TRANSFER_DIR, BALENA_IMAGE_PATH);
-    match flash_external(&s2_config.flash_dev, &image_path) {
-        FlashState::Success => (),
-        _ => {
-            sleep(Duration::from_secs(10));
-            busybox_reboot();
+
+    if let Some(dd_cmd) = &s2_config.exe_paths.get(DD_CMD) {
+        match flash_external(&s2_config.flash_dev, &image_path, dd_cmd) {
+            FlashState::Success => (),
+            _ => {
+                sleep(Duration::from_secs(10));
+                busybox_reboot();
+            }
         }
     }
 
@@ -1167,7 +1183,8 @@ pub fn stage2(opts: &Options) -> ! {
         check_loop_control("Stage2 after flash", "/dev");
     }
 
-    if let Err(why) = raw_mount_balena(&s2_config.flash_dev, &s2_config.efi_boot_mgr_path) {
+    if let Err(why) = raw_mount_balena(&s2_config.flash_dev, &s2_config.exe_paths.get("efibootmgr"))
+    {
         error!("Failed to transfer files to balena OS, error: {:?}", why);
     } else {
         info!("Migration succeded successfully");

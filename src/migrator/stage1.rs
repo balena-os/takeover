@@ -29,7 +29,7 @@ mod defs;
 mod device;
 mod device_impl;
 
-mod efi_files;
+mod exe_copy;
 
 mod image_retrieval;
 mod utils;
@@ -52,12 +52,13 @@ use crate::{
     stage1::{
         block_device_info::BlockDevice,
         block_device_info::BlockDeviceInfo,
-        efi_files::EfiFiles,
+        exe_copy::ExeCopy,
         migrate_info::MigrateInfo,
         utils::{mktemp, mount_fs},
     },
 };
 
+use crate::common::defs::{DD_CMD, EFIBOOTMGR_CMD};
 use crate::common::dir_exists;
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
@@ -274,27 +275,22 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     let mut req_space = get_required_space(mig_info)?;
 
-    let efi_files = if mig_info.is_x86() && dir_exists(SYS_EFI_DIR)? {
-        match EfiFiles::new() {
-            Ok(efi_files) => {
-                req_space += efi_files.get_req_space();
-                Some(efi_files)
-            }
-            Err(why) => {
-                if opts.is_no_fail_on_efi() {
-                    warn!("Efi setup failed with error: {}", why);
-                    warn!("The device will not be able to boot in EFI mode");
-                    None
-                } else {
-                    return Err(Error::from_upstream_error(
-                        Box::new(why),
-                        "Failed to setup efi",
-                    ));
-                }
-            }
+    let mut copy_commands = vec![DD_CMD];
+    if mig_info.is_x86() && !opts.is_no_fail_on_efi() && dir_exists(SYS_EFI_DIR)? {
+        copy_commands.push(EFIBOOTMGR_CMD)
+    }
+
+    let commands = match ExeCopy::new(copy_commands) {
+        Ok(commands) => {
+            req_space += commands.get_req_space();
+            commands
         }
-    } else {
-        None
+        Err(why) => {
+            return Err(Error::from_upstream_error(
+                Box::new(why),
+                "Failed to setup efi",
+            ));
+        }
     };
 
     // TODO: maybe kill some procs first
@@ -327,9 +323,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     info!("Created directory '{}'", curr_path.display());
 
-    if let Some(efi_files) = &efi_files {
-        efi_files.copy_files(&takeover_dir)?;
-    }
+    commands.copy_files(&takeover_dir)?;
 
     copy_files(opts.get_work_dir(), mig_info, &takeover_dir)?;
 
@@ -391,11 +385,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         image_path: mig_info.get_image_path().to_path_buf(),
         config_path: mig_info.get_balena_cfg().get_path().to_path_buf(),
         backup_path: None,
-        efi_boot_mgr_path: if let Some(efi_files) = &efi_files {
-            Some(efi_files.get_exec_path().to_owned())
-        } else {
-            None
-        },
+        exe_paths: commands.get_exec_paths(),
     };
 
     let s2_cfg_path = takeover_dir.join(STAGE2_CONFIG_NAME);

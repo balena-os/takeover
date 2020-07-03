@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_yaml;
 
 use crate::common::error::{Result, ToError};
+use std::collections::HashMap;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub(crate) struct UmountPart {
@@ -22,7 +23,7 @@ pub(crate) struct Stage2Config {
     pub image_path: PathBuf,
     pub config_path: PathBuf,
     pub backup_path: Option<PathBuf>,
-    pub efi_boot_mgr_path: Option<String>,
+    pub exe_paths: HashMap<String, String>,
 }
 
 #[allow(dead_code)]
