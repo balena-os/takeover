@@ -7,7 +7,6 @@ pub(crate) const WHEREIS_CMD: &str = "whereis";
 pub(crate) const PIDOF_CMD: &str = "pidof";
 
 pub(crate) const DD_CMD: &str = "dd";
-pub(crate) const PS_CMD: &str = "ps";
 
 pub(crate) const STAGE2_CONFIG_NAME: &str = "stage2-config.yml";
 

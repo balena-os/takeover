@@ -95,10 +95,13 @@ impl Error {
     }
 
     #[allow(clippy::wrong_self_convention)]
-    pub fn from_upstream(cause: Error, context: &str) -> Error {
+    pub fn from_upstream<E: error::Error + Send + Sync + 'static>(
+        cause: Box<E>,
+        context: &str,
+    ) -> Error {
         Error {
             kind: ErrorKind::Upstream,
-            cause: Some(Box::new(cause)),
+            cause: Some(cause),
             context: Some(context.to_owned()),
         }
     }

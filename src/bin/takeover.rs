@@ -1,9 +1,16 @@
 use log::error;
 use std::process::exit;
 
+use libc;
+
 use mod_logger::Logger;
 
 use takeover::{init, stage1, stage2, ErrorKind, Options};
+
+fn is_init() -> bool {
+    let pid = unsafe { libc::getpid() };
+    pid == 1
+}
 
 #[paw::main]
 fn main(opts: Options) {
@@ -11,12 +18,9 @@ fn main(opts: Options) {
 
     if opts.is_stage2() {
         stage2(&opts);
-        // not supposed to return
-        exit_code = 1;
-    } else if opts.is_init() {
+    } else if is_init() {
+        // must only be called if pid is 1 == init
         init(&opts);
-        // not supposed to return
-        exit_code = 1;
     } else if let Err(why) = stage1(&opts) {
         exit_code = 1;
         match why.kind() {

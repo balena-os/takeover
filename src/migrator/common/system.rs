@@ -4,7 +4,7 @@ use libc::{
 };
 
 use std::collections::HashMap;
-use std::fs::copy;
+use std::fs::{copy, read_to_string, ReadDir};
 use std::fs::{read_dir, read_link};
 use std::io;
 use std::mem::MaybeUninit;
@@ -96,7 +96,180 @@ impl UtsName {
     }
 }
 
-pub(crate) fn fuser<P: AsRef<Path>>(path: P, signal: i32) -> Result<usize> {
+struct ProcessIterator {
+    read_dir: ReadDir,
+}
+
+impl ProcessIterator {
+    pub fn new() -> Result<ProcessIterator> {
+        Ok(ProcessIterator {
+            read_dir: read_dir("/proc")
+                .upstream_with_context("Failed to read directory '/proc'")?,
+        })
+    }
+}
+
+impl Iterator for ProcessIterator {
+    type Item = Result<(i32, PathBuf)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        lazy_static! {
+            static ref DIR_REGEX: Regex = Regex::new(r"^/proc/(\d+)$").unwrap();
+        }
+        loop {
+            if let Some(dir_entry) = self.read_dir.next() {
+                match dir_entry {
+                    Ok(dir_entry) => {
+                        let curr_path = dir_entry.path();
+                        if let Some(captures) = DIR_REGEX.captures(&*curr_path.to_string_lossy()) {
+                            let pid_str = captures.get(1).unwrap().as_str();
+                            match pid_str.parse::<i32>() {
+                                Ok(pid) => return Some(Ok((pid, curr_path))),
+                                Err(why) => {
+                                    return Some(Err(Error::from_upstream(
+                                        Box::new(why),
+                                        &format!(
+                                            "Failed to parse pid from path '{}'",
+                                            curr_path.display()
+                                        ),
+                                    )))
+                                }
+                            }
+                        }
+                    }
+                    Err(why) => {
+                        return Some(Err(Error::from_upstream(
+                            Box::new(why),
+                            &format!("Failed to read directory entry from '/proc'"),
+                        )))
+                    }
+                }
+            } else {
+                return None;
+            }
+        }
+    }
+}
+
+pub(crate) struct ProcessInfo {
+    process_id: i32,
+    status: HashMap<String, String>,
+    executable: Option<PathBuf>,
+    root: PathBuf,
+}
+
+impl ProcessInfo {
+    pub fn process_id(&self) -> i32 {
+        self.process_id
+    }
+    pub fn executable(&self) -> Option<&Path> {
+        if let Some(executable) = &self.executable {
+            Some(executable.as_path())
+        } else {
+            None
+        }
+    }
+    pub fn status(&self) -> &HashMap<String, String> {
+        &self.status
+    }
+
+    #[allow(dead_code)]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+}
+
+fn parse_status(base_path: &Path) -> Result<HashMap<String, String>> {
+    lazy_static! {
+        static ref STATUS_REGEX: Regex = Regex::new(r"^\s*([^:]+):\s+(.*)$").unwrap();
+    }
+
+    let status_path = path_append(base_path, "status");
+    match read_to_string(&status_path) {
+        Ok(file_content) => {
+            let mut result: HashMap<String, String> = HashMap::new();
+            for line in file_content.lines() {
+                if let Some(captures) = STATUS_REGEX.captures(line) {
+                    let _res = result.insert(
+                        captures.get(1).unwrap().as_str().to_owned(),
+                        captures.get(2).unwrap().as_str().to_owned(),
+                    );
+                } else {
+                    warn!("parse_status: no match on '{}'", line);
+                }
+            }
+            Ok(result)
+        }
+        Err(why) => {
+            return Err(Error::from_upstream(
+                Box::new(why),
+                &format!("Failed to read process status: '{}'", status_path.display()),
+            ));
+        }
+    }
+}
+
+pub(crate) fn get_process_infos() -> Result<Vec<ProcessInfo>> {
+    let mut result: Vec<ProcessInfo> = Vec::new();
+
+    for proc_info in ProcessIterator::new()? {
+        match proc_info {
+            Ok((pid, directory)) => {
+                let exec_path = path_append(&directory, "exe");
+                let executable = match read_link(&exec_path) {
+                    Ok(link_path) => Some(link_path),
+                    Err(why) => {
+                        if why.kind() == io::ErrorKind::NotFound {
+                            None
+                        } else {
+                            return Err(Error::from_upstream(
+                                Box::new(why),
+                                &format!(
+                                    "Failed to read link to executable: '{}'",
+                                    exec_path.display()
+                                ),
+                            ));
+                        }
+                    }
+                };
+                let root_path = path_append(&directory, "root");
+                let root = match read_link(&root_path) {
+                    Ok(link_path) => link_path,
+                    Err(why) => {
+                        return Err(Error::from_upstream(
+                            Box::new(why),
+                            &format!(
+                                "Failed to read link to executable: '{}'",
+                                exec_path.display()
+                            ),
+                        ));
+                    }
+                };
+
+                result.push(ProcessInfo {
+                    process_id: pid,
+                    status: parse_status(&directory)?,
+                    executable,
+                    root,
+                });
+            }
+            Err(why) => {
+                return Err(Error::from_upstream_error(
+                    Box::new(why),
+                    "Failed to read process info",
+                ))
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+pub(crate) fn fuser<P: AsRef<Path>>(
+    path: P,
+    signal: i32,
+    wait_for_term: Option<Duration>,
+) -> Result<usize> {
     trace!(
         "fuser: entered with '{}', {}",
         path.as_ref().display(),
@@ -108,96 +281,88 @@ pub(crate) fn fuser<P: AsRef<Path>>(path: P, signal: i32) -> Result<usize> {
 
     let mut sent_signals: Vec<i32> = Vec::new();
 
-    for dir_entry in read_dir("/proc").upstream_with_context("Failed to read directory '/proc'")? {
-        match dir_entry {
-            Ok(dir_entry) => {
-                let curr_path = dir_entry.path();
-                if let Some(captures) = DIR_REGEX.captures(&*curr_path.to_string_lossy()) {
-                    let curr_pid = captures
-                        .get(1)
-                        .unwrap()
-                        .as_str()
-                        .parse::<i32>()
-                        .upstream_with_context(&format!(
-                            "Failed to parse pid from path '{}'",
-                            curr_path.display()
-                        ))?;
-                    let fd_dir = path_append(&curr_path, "fd");
-                    if dir_exists(&fd_dir)? {
-                        for dir_entry in read_dir(&fd_dir).upstream_with_context(&format!(
-                            "Failed to read directory '{}'",
-                            fd_dir.display()
-                        ))? {
-                            match dir_entry {
-                                Ok(dir_entry) => {
-                                    let curr_path = dir_entry.path();
-                                    if let Some(captures) =
-                                        DIR_REGEX.captures(&*curr_path.to_string_lossy())
-                                    {
-                                        let curr_fd = captures
-                                            .get(1)
-                                            .unwrap()
-                                            .as_str()
-                                            .parse::<i32>()
-                                            .upstream_with_context(&format!(
-                                                "Failed to parse fd from path '{}'",
-                                                curr_path.display()
-                                            ))?;
+    for proc_info in ProcessIterator::new()? {
+        match proc_info {
+            Ok((curr_pid, directory)) => {
+                let fd_dir = path_append(&directory, "fd");
+                for dir_entry in match read_dir(&fd_dir) {
+                    Ok(read_dir) => read_dir,
+                    Err(why) => {
+                        if why.kind() == io::ErrorKind::NotFound {
+                            continue;
+                        } else {
+                            return Err(Error::from_upstream(
+                                Box::new(why),
+                                &format!("Failed to read directory '{}'", fd_dir.display()),
+                            ));
+                        }
+                    }
+                } {
+                    match dir_entry {
+                        Ok(dir_entry) => {
+                            let curr_path = dir_entry.path();
+                            if let Some(captures) =
+                                DIR_REGEX.captures(&*curr_path.to_string_lossy())
+                            {
+                                let curr_fd = captures
+                                    .get(1)
+                                    .unwrap()
+                                    .as_str()
+                                    .parse::<i32>()
+                                    .upstream_with_context(&format!(
+                                        "Failed to parse fd from path '{}'",
+                                        curr_path.display()
+                                    ))?;
 
-                                        debug!(
-                                            "looking at fd {}, file: '{}'",
-                                            curr_fd,
+                                debug!(
+                                    "looking at fd {}, file: '{}'",
+                                    curr_fd,
+                                    curr_path.display()
+                                );
+                                let stat_info = lstat(curr_path.as_path())?;
+                                if is_lnk(&stat_info) {
+                                    let link_data = read_link(curr_path.as_path())
+                                        .upstream_with_context(&format!(
+                                            "Failed to read link '{}'",
                                             curr_path.display()
-                                        );
-                                        let stat_info = lstat(curr_path.as_path())?;
-                                        if is_lnk(&stat_info) {
-                                            let link_data = read_link(curr_path.as_path())
-                                                .upstream_with_context(&format!(
-                                                    "Failed to read link '{}'",
-                                                    curr_path.display()
-                                                ))?;
-                                            debug!(
-                                                "looking at fd {}, file: '{}' -> '{}'",
-                                                curr_fd,
-                                                curr_path.display(),
-                                                link_data.display()
-                                            );
+                                        ))?;
+                                    debug!(
+                                        "looking at fd {}, file: '{}' -> '{}'",
+                                        curr_fd,
+                                        curr_path.display(),
+                                        link_data.display()
+                                    );
 
-                                            if link_data.starts_with(path.as_ref()) {
-                                                debug!("sending signal {} to {}", signal, curr_pid,);
-                                                if unsafe { libc::kill(curr_pid, signal) } != 0 {
-                                                    warn!(
-                                                        "Failed to send signal {} to pid {}, error: {}",
-                                                        signal,
-                                                        curr_pid,
-                                                        io::Error::last_os_error()
-                                                    );
-                                                } else {
-                                                    sent_signals.push(curr_pid);
-                                                }
-                                                break;
-                                            }
+                                    if link_data.starts_with(path.as_ref()) {
+                                        debug!("sending signal {} to {}", signal, curr_pid,);
+                                        if unsafe { libc::kill(curr_pid, signal) } != 0 {
+                                            warn!(
+                                                "Failed to send signal {} to pid {}, error: {}",
+                                                signal,
+                                                curr_pid,
+                                                io::Error::last_os_error()
+                                            );
                                         } else {
-                                            return Err(Error::with_context(
-                                                ErrorKind::InvState,
-                                                &format!(
-                                                    "file '{}' is not a link",
-                                                    curr_path.display()
-                                                ),
-                                            ));
+                                            sent_signals.push(curr_pid);
                                         }
+                                        break;
                                     }
-                                }
-                                Err(why) => {
-                                    return Err(Error::from_upstream_error(
-                                        Box::new(why),
-                                        &format!(
-                                            "Failed to read directory entry for '{}'",
-                                            fd_dir.display()
-                                        ),
-                                    ))
+                                } else {
+                                    return Err(Error::with_context(
+                                        ErrorKind::InvState,
+                                        &format!("file '{}' is not a link", curr_path.display()),
+                                    ));
                                 }
                             }
+                        }
+                        Err(why) => {
+                            return Err(Error::from_upstream_error(
+                                Box::new(why),
+                                &format!(
+                                    "Failed to read directory entry for '{}'",
+                                    fd_dir.display()
+                                ),
+                            ))
                         }
                     }
                 }
@@ -205,14 +370,18 @@ pub(crate) fn fuser<P: AsRef<Path>>(path: P, signal: i32) -> Result<usize> {
             Err(why) => {
                 return Err(Error::from_upstream_error(
                     Box::new(why),
-                    "Failed to read directory entry for '/proc'",
+                    &format!("Failed to read proc_info entry from '/proc'",),
                 ))
             }
         }
     }
 
     if !sent_signals.is_empty() {
-        sleep(Duration::from_millis(500));
+        sleep(if let Some(wait_for_term) = wait_for_term {
+            wait_for_term
+        } else {
+            Duration::from_millis(500)
+        });
         let mut kill_count = 0;
         for pid in sent_signals {
             if !dir_exists(&format!("/proc/{}", pid))? {

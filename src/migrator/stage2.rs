@@ -27,7 +27,7 @@ use crate::common::{
     defs::{
         BACKUP_ARCH_NAME, BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART, BALENA_CONFIG_PATH,
         BALENA_DATA_FSTYPE, BALENA_DATA_PART, BALENA_IMAGE_NAME, BALENA_IMAGE_PATH, BALENA_PART_MP,
-        DD_CMD, DISK_BY_LABEL_PATH, NIX_NONE, OLD_ROOT_MP, PS_CMD, REBOOT_CMD, STAGE2_CONFIG_NAME,
+        DD_CMD, DISK_BY_LABEL_PATH, NIX_NONE, OLD_ROOT_MP, REBOOT_CMD, STAGE2_CONFIG_NAME,
         SYSTEM_CONNECTIONS_DIR,
     },
     dir_exists,
@@ -38,6 +38,7 @@ use crate::common::{
     options::Options,
     path_append,
     stage2_config::{Stage2Config, UmountPart},
+    system::get_process_infos,
 };
 use regex::Regex;
 
@@ -55,7 +56,7 @@ const S2_XTRA_FS_SIZE: u64 = 10 * 1024 * 1024;
 
 pub(crate) const BUSYBOX_CMD: &str = "/busybox";
 
-pub(crate) fn busybox_reboot() {
+pub(crate) fn busybox_reboot() -> ! {
     trace!("reboot entered");
     Logger::flush();
     sync();
@@ -118,7 +119,7 @@ fn get_required_space(s2_cfg: &Stage2Config) -> Result<u64> {
             }
             Err(why) => {
                 return Err(Error::from_upstream(
-                    From::from(why),
+                    Box::new(why),
                     &format!(
                         "Failed to retrieve directory entry for '{}'",
                         nwmgr_path.display()
@@ -229,7 +230,7 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<()> {
             }
             Err(why) => {
                 return Err(Error::from_upstream(
-                    From::from(why),
+                    Box::new(why),
                     &format!(
                         "Failed to retrieve directory entry for '{}'",
                         nwmgr_path.display()
@@ -298,7 +299,7 @@ fn kill_procs(log_level: Level) -> Result<()> {
     let mut killed = false;
     let mut signal = SIGTERM;
     loop {
-        if fuser(OLD_ROOT_MP, signal)? > 0 {
+        if fuser(OLD_ROOT_MP, signal, None)? > 0 {
             killed = true
         } else {
             warn!(
@@ -315,13 +316,28 @@ fn kill_procs(log_level: Level) -> Result<()> {
         }
     }
 
-    if let Level::Trace = log_level {
-        if let Ok(res) = call_busybox!(&[PS_CMD, "-A"], "") {
-            trace!("ps: {}", res);
+    if log_level >= Level::Debug {
+        debug!("active processes:");
+        for proc_info in get_process_infos()? {
+            let name = if let Some(name) = proc_info.status().get("Name") {
+                name.to_owned()
+            } else {
+                "-".to_owned()
+            };
+            if let Some(executable) = proc_info.executable() {
+                debug!(
+                    "{:6} {}\t {}",
+                    proc_info.process_id(),
+                    name,
+                    executable.display(),
+                );
+            } else {
+                debug!("{:6} {}\t -", proc_info.process_id(), name,);
+            }
         }
     }
 
-    if !killed {
+    if killed {
         Ok(())
     } else {
         Err(Error::with_context(
@@ -1062,7 +1078,7 @@ fn flash_external(target_path: &Path, image_path: &Path) -> FlashState {
     }
 }
 
-pub fn stage2(opts: &Options) {
+pub fn stage2(opts: &Options) -> ! {
     Logger::set_default_level(opts.get_s2_log_level());
     Logger::set_brief_info(false);
     Logger::set_color(true);
@@ -1070,7 +1086,6 @@ pub fn stage2(opts: &Options) {
     if let Err(why) = Logger::set_log_dest(&LogDestination::BufferStderr, NO_STREAM) {
         error!("Failed to initialize logging, error: {:?}", why);
         busybox_reboot();
-        return;
     }
 
     info!("Stage 2 migrate_worker entered");
@@ -1080,7 +1095,6 @@ pub fn stage2(opts: &Options) {
         Err(why) => {
             error!("Failed to read stage2 configuration, error: {:?}", why);
             busybox_reboot();
-            return;
         }
     };
 
@@ -1088,18 +1102,11 @@ pub fn stage2(opts: &Options) {
 
     setup_logging(&s2_config.log_dev);
 
-    /*    if (opts.get_s2_log_level() == Level::Debug) || (opts.get_s2_log_level() == Level::Trace) {
-            use crate::common::debug::check_loop_control;
-            check_loop_control("Stage2 init", "/dev");
-        }
-    */
-
     match kill_procs(opts.get_s2_log_level()) {
         Ok(_) => (),
         Err(why) => {
             error!("kill_procs failed, error {}", why);
             busybox_reboot();
-            return;
         }
     };
 
@@ -1108,7 +1115,6 @@ pub fn stage2(opts: &Options) {
         Err(why) => {
             error!("Failed to copy files to RAMFS, error: {:?}", why);
             busybox_reboot();
-            return;
         }
     }
 
@@ -1120,16 +1126,9 @@ pub fn stage2(opts: &Options) {
         }
     }
 
-    /*    if (opts.get_s2_log_level() == Level::Debug) || (opts.get_s2_log_level() == Level::Trace) {
-            use crate::common::debug::check_loop_control;
-            check_loop_control("Stage2 before flash", "/dev");
-        }
-    */
-
     if s2_config.pretend {
         info!("Not flashing due to pretend mode");
         busybox_reboot();
-        return;
     }
 
     sync();
@@ -1140,7 +1139,6 @@ pub fn stage2(opts: &Options) {
         _ => {
             sleep(Duration::from_secs(10));
             busybox_reboot();
-            return;
         }
     }
 

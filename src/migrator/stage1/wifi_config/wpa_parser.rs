@@ -95,7 +95,7 @@ impl<'a> WpaParser<'a> {
                 }
                 Err(why) => {
                     return Err(Error::from_upstream(
-                        From::from(why),
+                        Box::new(why),
                         &format!("unexpected read error from {}", wpa_path.display()),
                     ));
                 }

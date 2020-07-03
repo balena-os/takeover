@@ -7,6 +7,8 @@ use std::rc::Rc;
 use std::thread::sleep;
 use std::time::Duration;
 
+use structopt::StructOpt;
+
 use nix::{
     mount::{mount, MsFlags},
     unistd::sync,
@@ -460,6 +462,12 @@ pub fn stage1(opts: &Options) -> Result<()> {
         return Ok(());
     }
 
+    if opts.get_config().is_none() {
+        let mut clap = Options::clap();
+        let _res = clap.print_help();
+        return Err(Error::displayed());
+    }
+
     if let Some(s1_log_path) = opts.get_log_file() {
         Logger::set_log_file(&LogDestination::StreamStderr, &s1_log_path, true)
             .upstream_with_context(&format!(
@@ -477,7 +485,10 @@ pub fn stage1(opts: &Options) -> Result<()> {
             if why.kind() == ErrorKind::ImageDownloaded {
                 return Ok(());
             } else {
-                return Err(Error::from_upstream(why, "Failed to create migrate info"));
+                return Err(Error::from_upstream(
+                    Box::new(why),
+                    "Failed to create migrate info",
+                ));
             }
         }
     };
@@ -507,7 +518,7 @@ pub fn stage1(opts: &Options) -> Result<()> {
                 },
                 Err(why) => {
                     return Err(Error::from_upstream(
-                        From::from(why),
+                        Box::new(why),
                         "Failed to read line from stdin",
                     ))
                 }

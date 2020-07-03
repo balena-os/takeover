@@ -67,8 +67,6 @@ pub struct Options {
     pretend: bool,
     #[structopt(long, help = "Internal - stage2 invocation")]
     stage2: bool,
-    #[structopt(long, help = "Internal - init process invocation")]
-    init: bool,
     #[structopt(long, help = "Debug - do not cleanup after stage1 failure")]
     no_cleanup: bool,
     #[structopt(long, help = "Do not check if OS is supported")]
@@ -137,10 +135,6 @@ pub struct Options {
 impl Options {
     pub fn is_stage2(&self) -> bool {
         self.stage2
-    }
-
-    pub fn is_init(&self) -> bool {
-        self.init
     }
 
     pub fn get_work_dir(&self) -> PathBuf {

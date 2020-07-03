@@ -177,7 +177,7 @@ fn close_fds() -> Result<i32> {
     Ok(close_count)
 }
 
-pub fn init(opts: &Options) {
+pub fn init(opts: &Options) -> ! {
     Logger::set_default_level(opts.get_s2_log_level());
     Logger::set_brief_info(false);
     Logger::set_color(true);
@@ -185,7 +185,6 @@ pub fn init(opts: &Options) {
     if let Err(why) = Logger::set_log_dest(&LogDestination::BufferStderr, NO_STREAM) {
         error!("Failed to initialize logging, error: {:?}", why);
         busybox_reboot();
-        return;
     }
 
     info!("Stage 2 entered");
@@ -193,7 +192,6 @@ pub fn init(opts: &Options) {
     if unsafe { getpid() } != 1 {
         error!("Process must be pid 1 to run init");
         busybox_reboot();
-        return;
     }
 
     info!("Stage 2 check pid success!");
@@ -203,7 +201,6 @@ pub fn init(opts: &Options) {
         Err(_) => {
             error!("Failed close open files");
             busybox_reboot();
-            return;
         }
     };
     info!("Stage 2 closed {} fd's", closed_fds);
@@ -213,7 +210,6 @@ pub fn init(opts: &Options) {
         Err(why) => {
             error!("Failed to read stage2 configuration, error: {:?}", why);
             busybox_reboot();
-            return;
         }
     };
 
@@ -248,7 +244,6 @@ pub fn init(opts: &Options) {
         Err(why) => {
             error!("Failed to spawn stage2 worker process, error: {:?}", why);
             busybox_reboot();
-            return;
         }
     };
 
