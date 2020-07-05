@@ -140,7 +140,7 @@ impl Iterator for ProcessIterator {
                     Err(why) => {
                         return Some(Err(Error::from_upstream(
                             Box::new(why),
-                            &format!("Failed to read directory entry from '/proc'"),
+                            "Failed to read directory entry from '/proc'",
                         )))
                     }
                 }
@@ -151,6 +151,7 @@ impl Iterator for ProcessIterator {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct ProcessInfo {
     process_id: i32,
     status: HashMap<String, String>,
@@ -207,49 +208,61 @@ fn parse_status(base_path: &Path) -> Result<HashMap<String, String>> {
     }
 }
 
+pub(crate) fn get_process_info_for(pid: i32, directory: Option<&Path>) -> Result<ProcessInfo> {
+    let proc_dir;
+    let directory = if let Some(directory) = directory {
+        directory
+    } else {
+        proc_dir = PathBuf::from(&format!("/proc/{}", pid));
+        &proc_dir
+    };
+
+    let exec_path = path_append(&directory, "exe");
+    let executable = match read_link(&exec_path) {
+        Ok(link_path) => Some(link_path),
+        Err(why) => {
+            if why.kind() == io::ErrorKind::NotFound {
+                None
+            } else {
+                return Err(Error::from_upstream(
+                    Box::new(why),
+                    &format!(
+                        "Failed to read link to executable: '{}'",
+                        exec_path.display()
+                    ),
+                ));
+            }
+        }
+    };
+    let root_path = path_append(&directory, "root");
+    let root = match read_link(&root_path) {
+        Ok(link_path) => link_path,
+        Err(why) => {
+            return Err(Error::from_upstream(
+                Box::new(why),
+                &format!(
+                    "Failed to read link to executable: '{}'",
+                    exec_path.display()
+                ),
+            ));
+        }
+    };
+
+    Ok(ProcessInfo {
+        process_id: pid,
+        status: parse_status(&directory)?,
+        executable,
+        root,
+    })
+}
+
 pub(crate) fn get_process_infos() -> Result<Vec<ProcessInfo>> {
     let mut result: Vec<ProcessInfo> = Vec::new();
 
     for proc_info in ProcessIterator::new()? {
         match proc_info {
             Ok((pid, directory)) => {
-                let exec_path = path_append(&directory, "exe");
-                let executable = match read_link(&exec_path) {
-                    Ok(link_path) => Some(link_path),
-                    Err(why) => {
-                        if why.kind() == io::ErrorKind::NotFound {
-                            None
-                        } else {
-                            return Err(Error::from_upstream(
-                                Box::new(why),
-                                &format!(
-                                    "Failed to read link to executable: '{}'",
-                                    exec_path.display()
-                                ),
-                            ));
-                        }
-                    }
-                };
-                let root_path = path_append(&directory, "root");
-                let root = match read_link(&root_path) {
-                    Ok(link_path) => link_path,
-                    Err(why) => {
-                        return Err(Error::from_upstream(
-                            Box::new(why),
-                            &format!(
-                                "Failed to read link to executable: '{}'",
-                                exec_path.display()
-                            ),
-                        ));
-                    }
-                };
-
-                result.push(ProcessInfo {
-                    process_id: pid,
-                    status: parse_status(&directory)?,
-                    executable,
-                    root,
-                });
+                result.push(get_process_info_for(pid, Some(&directory))?);
             }
             Err(why) => {
                 return Err(Error::from_upstream_error(
@@ -312,11 +325,6 @@ pub(crate) fn fuser<P: AsRef<Path>>(
                                         curr_path.display()
                                     ))?;
 
-                                debug!(
-                                    "looking at fd {}, file: '{}'",
-                                    curr_fd,
-                                    curr_path.display()
-                                );
                                 let stat_info = lstat(curr_path.as_path())?;
                                 if is_lnk(&stat_info) {
                                     let link_data = read_link(curr_path.as_path())
@@ -325,7 +333,8 @@ pub(crate) fn fuser<P: AsRef<Path>>(
                                             curr_path.display()
                                         ))?;
                                     debug!(
-                                        "looking at fd {}, file: '{}' -> '{}'",
+                                        "looking at pid: {}, fd {}, file: '{}' -> '{}'",
+                                        curr_pid,
                                         curr_fd,
                                         curr_path.display(),
                                         link_data.display()
@@ -368,12 +377,11 @@ pub(crate) fn fuser<P: AsRef<Path>>(
             Err(why) => {
                 return Err(Error::from_upstream_error(
                     Box::new(why),
-                    &format!("Failed to read proc_info entry from '/proc'",),
+                    "Failed to read proc_info entry from '/proc'",
                 ))
             }
         }
     }
-
     if !sent_signals.is_empty() {
         sleep(if let Some(wait_for_term) = wait_for_term {
             wait_for_term
@@ -560,6 +568,7 @@ pub(crate) fn mkdir<P: AsRef<Path>>(path: P, mode: u32) -> Result<()> {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn chmod<P: AsRef<Path>>(file_name: P, mode: mode_t) -> Result<()> {
     let fd = Fd::open(file_name.as_ref(), O_RDONLY)?;
     let res = unsafe { libc::fchmod(fd.get_fd(), mode) };

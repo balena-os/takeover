@@ -81,8 +81,6 @@ pub struct Options {
     no_nwmgr_check: bool,
     #[structopt(long, help = "Do not migrate host-name")]
     no_keep_name: bool,
-    #[structopt(long, help = "Debug - print build num and exit")]
-    build_num: bool,
     #[structopt(
         short,
         long,
@@ -171,10 +169,6 @@ impl Options {
 
     pub fn is_pretend(&self) -> bool {
         self.pretend
-    }
-
-    pub fn is_build_num(&self) -> bool {
-        self.build_num
     }
 
     pub fn get_log_file(&self) -> &Option<PathBuf> {

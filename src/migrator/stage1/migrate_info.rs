@@ -9,7 +9,7 @@ use crate::stage1::utils::mktemp;
 use crate::{
     common::{file_exists, get_os_name, options::Options, Error, ErrorKind, Result, ToError},
     stage1::{
-        assets::Assets, device::Device, device_impl::get_device, image_retrieval::download_image,
+        device::Device, device_impl::get_device, image_retrieval::download_image,
         migrate_info::balena_cfg_json::BalenaCfgJson, wifi_config::WifiConfig,
     },
 };
@@ -19,7 +19,7 @@ pub(crate) mod balena_cfg_json;
 #[derive(Debug)]
 pub(crate) struct MigrateInfo {
     os_name: String,
-    assets: Assets,
+    // assets: Assets,
     mounts: Vec<PathBuf>,
     to_dir: Option<PathBuf>,
     image_path: PathBuf,
@@ -123,7 +123,7 @@ impl MigrateInfo {
         }
 
         Ok(MigrateInfo {
-            assets: Assets::new(),
+            // assets: Assets::new(),
             os_name: get_os_name()?,
             to_dir: None,
             mounts: Vec::new(),
@@ -149,10 +149,10 @@ impl MigrateInfo {
         self.device.supports_device_type(DEV_TYPE_GEN_X86_64)
     }
 
-    pub fn get_assets(&self) -> &Assets {
-        &self.assets
-    }
-
+    /*    pub fn get_assets(&self) -> &Assets {
+            &self.assets
+        }
+    */
     pub fn set_to_dir(&mut self, to_dir: &PathBuf) {
         self.to_dir = Some(to_dir.clone())
     }

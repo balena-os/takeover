@@ -20,15 +20,13 @@ use libc::{ioctl, LINUX_REBOOT_CMD_RESTART, MS_RDONLY, MS_REMOUNT, SIGKILL, SIGT
 use log::{debug, error, info, trace, warn, Level};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
-use crate::common::defs::{IoctlReq, SYS_EFI_DIR};
-use crate::common::system::fuser;
 use crate::common::{
     call,
     defs::{
-        BACKUP_ARCH_NAME, BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART, BALENA_CONFIG_PATH,
-        BALENA_DATA_FSTYPE, BALENA_DATA_PART, BALENA_IMAGE_NAME, BALENA_IMAGE_PATH, BALENA_PART_MP,
-        DD_CMD, DISK_BY_LABEL_PATH, NIX_NONE, OLD_ROOT_MP, STAGE2_CONFIG_NAME,
-        SYSTEM_CONNECTIONS_DIR,
+        IoctlReq, BACKUP_ARCH_NAME, BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART,
+        BALENA_CONFIG_PATH, BALENA_DATA_FSTYPE, BALENA_DATA_PART, BALENA_IMAGE_NAME,
+        BALENA_IMAGE_PATH, BALENA_PART_MP, DD_CMD, DISK_BY_LABEL_PATH, EFIBOOTMGR_CMD, NIX_NONE,
+        OLD_ROOT_MP, STAGE2_CONFIG_NAME, SYSTEM_CONNECTIONS_DIR, SYS_EFI_DIR,
     },
     dir_exists,
     disk_util::{Disk, PartInfo, PartitionIterator, DEF_BLOCK_SIZE},
@@ -38,7 +36,7 @@ use crate::common::{
     options::Options,
     path_append,
     stage2_config::{Stage2Config, UmountPart},
-    system::get_process_infos,
+    system::{fuser, get_process_infos},
 };
 use regex::Regex;
 
@@ -54,7 +52,7 @@ const TRANSFER_DIR: &str = "/transfer";
 
 const S2_XTRA_FS_SIZE: u64 = 10 * 1024 * 1024;
 
-pub(crate) fn busybox_reboot() -> ! {
+pub(crate) fn reboot() -> ! {
     trace!("reboot entered");
     Logger::flush();
     sync();
@@ -240,8 +238,13 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn read_stage2_config() -> Result<Stage2Config> {
-    let s2_cfg_path = PathBuf::from(&format!("/{}", STAGE2_CONFIG_NAME));
+pub(crate) fn read_stage2_config<P: AsRef<Path>>(path_prefix: Option<P>) -> Result<Stage2Config> {
+    let s2_cfg_path = if let Some(path_prefix) = path_prefix {
+        path_append(path_prefix, STAGE2_CONFIG_NAME)
+    } else {
+        PathBuf::from(STAGE2_CONFIG_NAME)
+    };
+
     if file_exists(&s2_cfg_path) {
         let s2_cfg_txt = read_to_string(&s2_cfg_path).upstream_with_context(&format!(
             "Failed to read stage 2 config from '{}'",
@@ -513,74 +516,6 @@ fn transfer_boot_files<P: AsRef<Path>>(dev_root: P) -> Result<()> {
 
     Ok(())
 }
-/*
-fn raw_mount_partition<P1: AsRef<Path>, P2: AsRef<Path>>(
-    loop_device: &LoopDevice,
-    partition: &PartInfo,
-    device: P2,
-    mountpoint: P1,
-    fs_type: &str,
-) -> Result<String> {
-    let byte_offset = partition.start_lba * DEF_BLOCK_SIZE as u64;
-    let size_limit = partition.num_sectors * DEF_BLOCK_SIZE as u64;
-
-    debug!(
-        "file '{}' exists: {}",
-        device.as_ref().display(),
-        file_exists(&device)
-    );
-
-    let mut loop_device =
-        match LoopDevice::for_file(device, Some(byte_offset), Some(size_limit), None) {
-            Ok(loop_device) => loop_device,
-            Err(why) => {
-                error!(
-                    "Failed to loop mount device '{}' with offset {}, sizelimit {}, error {:?}",
-                    device.as_ref().display(),
-                    byte_offset,
-                    size_limit,
-                    why
-                );
-                return Err(Error::displayed());
-            }
-        };
-
-    info!(
-        "Loop-mounted {} on '{}'",
-        loop_device.get_path().display(),
-        mountpoint.as_ref().display()
-    );
-    mount(
-        Some(loop_device.get_path()),
-        mountpoint.as_ref(),
-        Some(fs_type.as_bytes()),
-        MsFlags::empty(),
-        NIX_NONE,
-    )
-    .upstream_with_context(&format!(
-        "Failed to mount {} on {}",
-        loop_dev,
-        mountpoint.as_ref().display()
-    )))?;
-    Ok(loop_dev)
-}
-
-fn raw_umount_partition<P: AsRef<Path>>(device: &str, mountpoint: P) -> Result<()> {
-    umount(mountpoint.as_ref()).upstream_with_context(&format!(
-        "Failed to unmount {}",
-        mountpoint.as_ref().display()
-    )))?;
-
-    call_command!(
-        BUSYBOX_CMD,
-        &[LOSETUP_CMD, "-d", device],
-        &format!("Failed to remove loop device {}", device,)
-    )?;
-
-    Ok(())
-}
-
- */
 
 fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo)> {
     let mut disk = Disk::from_drive_file(device, None)?;
@@ -629,49 +564,48 @@ fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo)> {
     }
 }
 
-fn efi_setup(device: &Path, efi_boot_mgr: &Option<&String>) -> Result<()> {
+fn efi_setup(device: &Path) -> Result<()> {
+    let efi_boot_mgr = format!("/bin/{}", EFIBOOTMGR_CMD);
     if dir_exists(SYS_EFI_DIR)? {
-        if let Some(efi_boot_mgr) = efi_boot_mgr {
-            match call_command!(efi_boot_mgr, &[], "Failed to execute efibootmgr") {
-                Ok(cmd_stdout) => {
-                    // TODO: setup efi boot
-                    let efivar_regex =
-                        Regex::new(r#"\s*Boot([0-9,a-f,A-F]{4})\*?\s+resinOS.*"#).unwrap();
-                    for line in cmd_stdout.lines() {
-                        if let Some(captures) = efivar_regex.captures(line) {
-                            let boot_num = captures.get(1).unwrap().as_str();
-                            match call_command!(efi_boot_mgr, &["-B", "-b", boot_num]) {
-                                Ok(_) => (),
-                                Err(why) => {
-                                    error!(
-                                        "Failed to delete boot manager '{}' as {}, error: {}",
-                                        line, boot_num, why
-                                    );
-                                }
+        match call_command!(&efi_boot_mgr, &[], "Failed to execute efibootmgr") {
+            Ok(cmd_stdout) => {
+                // TODO: setup efi boot
+                let efivar_regex =
+                    Regex::new(r#"\s*Boot([0-9,a-f,A-F]{4})\*?\s+resinOS.*"#).unwrap();
+                for line in cmd_stdout.lines() {
+                    if let Some(captures) = efivar_regex.captures(line) {
+                        let boot_num = captures.get(1).unwrap().as_str();
+                        match call_command!(&efi_boot_mgr, &["-B", "-b", boot_num]) {
+                            Ok(_) => (),
+                            Err(why) => {
+                                error!(
+                                    "Failed to delete boot manager '{}' as {}, error: {}",
+                                    line, boot_num, why
+                                );
                             }
                         }
                     }
-                    match call_command!(
-                        efi_boot_mgr,
-                        &[
-                            "-c",
-                            "-d",
-                            &*device.to_string_lossy(),
-                            "-p",
-                            "1",
-                            "-L",
-                            "resinOS",
-                            "-l",
-                            r"\EFI\BOOT\bootx64.efi"
-                        ]
-                    ) {
-                        Ok(_) => (),
-                        Err(why) => error!("Failed to setup EFI boot, error {}", why),
-                    }
                 }
-                Err(why) => {
-                    error!("Failed to execute '{}', error: {}", efi_boot_mgr, why);
+                match call_command!(
+                    &efi_boot_mgr,
+                    &[
+                        "-c",
+                        "-d",
+                        &*device.to_string_lossy(),
+                        "-p",
+                        "1",
+                        "-L",
+                        "resinOS",
+                        "-l",
+                        r"\EFI\BOOT\bootx64.efi"
+                    ]
+                ) {
+                    Ok(_) => (),
+                    Err(why) => error!("Failed to setup EFI boot, error {}", why),
                 }
+            }
+            Err(why) => {
+                error!("Failed to execute '{}', error: {}", efi_boot_mgr, why);
             }
         }
     } else {
@@ -694,7 +628,7 @@ fn efi_setup(device: &Path, efi_boot_mgr: &Option<&String>) -> Result<()> {
     Ok(())
 }
 
-fn raw_mount_balena(device: &Path, efi_boot_mgr: &Option<&String>) -> Result<()> {
+fn raw_mount_balena(device: &Path) -> Result<()> {
     debug!("raw_mount_balena called");
 
     let backup_path = path_append(TRANSFER_DIR, BACKUP_ARCH_NAME);
@@ -752,7 +686,7 @@ fn raw_mount_balena(device: &Path, efi_boot_mgr: &Option<&String>) -> Result<()>
 
     transfer_boot_files(BALENA_PART_MP)?;
 
-    efi_setup(device, efi_boot_mgr)?;
+    efi_setup(device)?;
 
     sync();
 
@@ -1091,6 +1025,7 @@ fn flash_external(target_path: &Path, image_path: &Path, dd_cmd: &str) -> FlashS
     }
 }
 
+#[allow(clippy::cognitive_complexity)]
 pub fn stage2(opts: &Options) -> ! {
     Logger::set_default_level(opts.get_s2_log_level());
     Logger::set_brief_info(false);
@@ -1098,16 +1033,17 @@ pub fn stage2(opts: &Options) -> ! {
 
     if let Err(why) = Logger::set_log_dest(&LogDestination::BufferStderr, NO_STREAM) {
         error!("Failed to initialize logging, error: {:?}", why);
-        busybox_reboot();
+        reboot();
     }
 
     info!("Stage 2 migrate_worker entered");
 
-    let s2_config = match read_stage2_config() {
+    const NO_PREFIX: Option<&Path> = None;
+    let s2_config = match read_stage2_config(NO_PREFIX) {
         Ok(s2_config) => s2_config,
         Err(why) => {
             error!("Failed to read stage2 configuration, error: {:?}", why);
-            busybox_reboot();
+            reboot();
         }
     };
 
@@ -1119,7 +1055,7 @@ pub fn stage2(opts: &Options) -> ! {
         Ok(_) => (),
         Err(why) => {
             error!("kill_procs failed, error {}", why);
-            busybox_reboot();
+            reboot();
         }
     };
 
@@ -1127,7 +1063,7 @@ pub fn stage2(opts: &Options) -> ! {
         Ok(_) => (),
         Err(why) => {
             error!("Failed to copy files to RAMFS, error: {:?}", why);
-            busybox_reboot();
+            reboot();
         }
     }
 
@@ -1135,26 +1071,28 @@ pub fn stage2(opts: &Options) -> ! {
         Ok(_) => (),
         Err(why) => {
             error!("unmount_partitions failed; {:?}", why);
-            busybox_reboot();
+            reboot();
         }
     }
 
     if s2_config.pretend {
         info!("Not flashing due to pretend mode");
-        busybox_reboot();
+        reboot();
     }
 
     sync();
 
     let image_path = path_append(TRANSFER_DIR, BALENA_IMAGE_PATH);
 
-    if let Some(dd_cmd) = &s2_config.exe_paths.get(DD_CMD) {
-        match flash_external(&s2_config.flash_dev, &image_path, dd_cmd) {
-            FlashState::Success => (),
-            _ => {
-                sleep(Duration::from_secs(10));
-                busybox_reboot();
-            }
+    match flash_external(
+        &s2_config.flash_dev,
+        &image_path,
+        &format!("/bin/{}", DD_CMD),
+    ) {
+        FlashState::Success => (),
+        _ => {
+            sleep(Duration::from_secs(10));
+            reboot();
         }
     }
 
@@ -1183,8 +1121,7 @@ pub fn stage2(opts: &Options) -> ! {
         check_loop_control("Stage2 after flash", "/dev");
     }
 
-    if let Err(why) = raw_mount_balena(&s2_config.flash_dev, &s2_config.exe_paths.get("efibootmgr"))
-    {
+    if let Err(why) = raw_mount_balena(&s2_config.flash_dev) {
         error!("Failed to transfer files to balena OS, error: {:?}", why);
     } else {
         info!("Migration succeded successfully");
@@ -1192,5 +1129,5 @@ pub fn stage2(opts: &Options) -> ! {
 
     sync();
 
-    busybox_reboot();
+    reboot();
 }

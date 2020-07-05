@@ -2,37 +2,42 @@ use crate::common::system::stat;
 use crate::common::{call, dir_exists, path_append, Error, ErrorKind, Result, ToError};
 use crate::stage1::utils::whereis;
 use lazy_static::lazy_static;
-use log::{debug, trace, warn};
+use log::{debug, info, trace, warn};
 use regex::Regex;
-use std::collections::{HashMap, HashSet};
-use std::fs::{copy, create_dir_all};
+use std::collections::HashSet;
+use std::fs::{copy, create_dir, create_dir_all, read_link};
 use std::path::{Path, PathBuf};
 
 pub(crate) struct ExeCopy {
     req_space: u64,
-    files: HashSet<String>,
-    exe_path: HashMap<String, String>,
+    libraries: HashSet<String>,
+    executables: HashSet<String>,
 }
 
 impl ExeCopy {
     pub fn new(cmd_list: Vec<&str>) -> Result<ExeCopy> {
         trace!("new: entered with {:?}", cmd_list);
 
-        let mut exe_path: HashMap<String, String> = HashMap::new();
+        let mut executables: HashSet<String> = HashSet::new();
+
+        executables.insert(
+            read_link("/proc/self/exe")
+                .upstream_with_context("Failed to read link to this executable")?
+                .to_string_lossy()
+                .to_string(),
+        );
+
         for command in cmd_list {
-            exe_path.insert(
-                command.to_owned(),
-                whereis(&command).error_with_all(
-                    ErrorKind::FileNotFound,
-                    &format!("Command '{}' could not be located", command),
-                )?,
-            );
+            executables.insert(whereis(&command).error_with_all(
+                ErrorKind::FileNotFound,
+                &format!("Command '{}' could not be located", command),
+            )?);
         }
 
         let mut efi_files = ExeCopy {
             req_space: 0,
-            files: HashSet::new(),
-            exe_path,
+            libraries: HashSet::new(),
+            executables,
         };
 
         efi_files.get_libs_for()?;
@@ -44,11 +49,17 @@ impl ExeCopy {
     }
 
     fn get_libs_for(&mut self) -> Result<()> {
-        trace!("get_libs_for: entered with '{:?}'", self.exe_path);
+        trace!("get_libs_for: entered");
         let ldd_path = whereis("ldd").upstream_with_context("Failed to locate ldd executable")?;
         let mut check_libs: HashSet<String> = HashSet::new();
-        for (_, curr_path) in &self.exe_path {
-            self.get_libs(curr_path, ldd_path.as_str(), &mut check_libs)?;
+
+        // TODO: this_path processing
+
+        for curr_path in &self.executables {
+            let stat = stat(curr_path)
+                .upstream_with_context(&format!("Failed to stat '{}'", curr_path))?;
+            self.req_space += stat.st_size as u64;
+            self.get_libs(&curr_path, ldd_path.as_str(), &mut check_libs)?;
         }
 
         while !check_libs.is_empty() {
@@ -68,7 +79,7 @@ impl ExeCopy {
         trace!("add_lib: entered with '{}'", lib_path);
         match stat(lib_path) {
             Ok(stat) => {
-                if self.files.insert(lib_path.to_owned()) {
+                if self.libraries.insert(lib_path.to_owned()) {
                     self.req_space += stat.st_size as u64;
                     Ok(true)
                 } else {
@@ -85,11 +96,29 @@ impl ExeCopy {
 
     fn get_libs(&self, file: &str, ldd_path: &str, found: &mut HashSet<String>) -> Result<()> {
         trace!("get_libs: entered with '{}'", file);
-        let ldd_res = call_command!(
-            ldd_path,
-            &[file],
-            &format!("failed to retrieve dynamic libs for '{}'", file)
-        )?;
+        let ldd_res = match call(ldd_path, &[file], true) {
+            Ok(cmd_res) => {
+                if cmd_res.status.success() {
+                    cmd_res.stdout
+                } else {
+                    if cmd_res.stderr.contains("not a dynamic executable") {
+                        "".to_owned()
+                    } else {
+                        return Err(Error::with_context(
+                            ErrorKind::ExecProcess,
+                            &format!("1failed to retrieve dynamic libs for '{}'", file),
+                        ));
+                    }
+                }
+            }
+            Err(why) => {
+                return Err(Error::with_all(
+                    ErrorKind::ExecProcess,
+                    &format!("2failed to retrieve dynamic libs for '{}'", file),
+                    Box::new(why),
+                ));
+            }
+        };
 
         lazy_static! {
             static ref LIB_REGEX: Regex = Regex::new(
@@ -104,12 +133,12 @@ impl ExeCopy {
                     let lib_name = lib_name.as_str();
                     if let Some(lib_path) = captures.get(3) {
                         let lib_path = lib_path.as_str();
-                        if !self.files.contains(lib_path) {
+                        if !self.libraries.contains(lib_path) {
                             found.insert(lib_path.to_owned());
                         }
                     } else {
                         let lib_path = PathBuf::from(lib_name);
-                        if !self.files.contains(lib_name) {
+                        if !self.libraries.contains(lib_name) {
                             if lib_path.is_absolute() && lib_path.exists() {
                                 found.insert(lib_name.to_owned());
                             } else {
@@ -127,11 +156,11 @@ impl ExeCopy {
         Ok(())
     }
 
-    pub fn get_exec_paths(self) -> HashMap<String, String> {
-        self.exe_path
-    }
-
     fn copy_file<P1: AsRef<Path>, P2: AsRef<Path>>(src_path: P1, takeover_dir: P2) -> Result<()> {
+        trace!(
+            "copy_file: entered with '{}'",
+            takeover_dir.as_ref().display()
+        );
         let src_path = src_path.as_ref();
 
         let dest_dir = if let Some(parent) = src_path.parent() {
@@ -174,15 +203,46 @@ impl ExeCopy {
     }
 
     pub fn copy_files<P: AsRef<Path>>(&self, takeover_dir: P) -> Result<()> {
+        trace!(
+            "copy_files: entered with '{}'",
+            takeover_dir.as_ref().display()
+        );
         let takeover_dir = takeover_dir.as_ref();
 
-        for (_, file) in &self.exe_path {
-            ExeCopy::copy_file(file, takeover_dir)?;
-        }
-
-        for src_path in &self.files {
+        for src_path in &self.libraries {
             ExeCopy::copy_file(src_path, takeover_dir)?;
         }
+
+        let dest_path = path_append(takeover_dir, "/bin");
+        if !dest_path.exists() {
+            create_dir(&dest_path).upstream_with_context(&format!(
+                "Failed to create directory '{}'",
+                dest_path.display()
+            ))?;
+        }
+
+        for file in &self.executables {
+            if let Some(file_name) = PathBuf::from(file).file_name() {
+                let dest_path = path_append(&dest_path, file_name);
+                trace!(
+                    "copy_files: copying '{}' to '{}'",
+                    &file,
+                    dest_path.display()
+                );
+                copy(&file, &dest_path).upstream_with_context(&format!(
+                    "Failed to copy '{}' to '{}'",
+                    file,
+                    dest_path.display()
+                ))?;
+                info!("Copied '{}' to '{}'", &file, dest_path.display());
+            } else {
+                return Err(Error::with_context(
+                    ErrorKind::InvState,
+                    &format!("Failed to retrieve filename from '{}'", file),
+                ));
+            }
+        }
+
         Ok(())
     }
 }

@@ -1,6 +1,7 @@
 use std::cmp::min;
 use std::ffi::{CStr, CString, OsString};
-use std::fs::read_to_string;
+use std::fs::{read_to_string, OpenOptions};
+use std::io::Write;
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -24,8 +25,9 @@ pub mod error;
 pub use error::{Error, ErrorKind, Result, ToError};
 
 pub mod options;
-use crate::common::defs::PIDOF_CMD;
+use crate::common::defs::{OLD_ROOT_MP, PIDOF_CMD};
 
+use nix::unistd::sync;
 pub use options::Options;
 
 pub(crate) mod debug;
@@ -286,5 +288,23 @@ pub(crate) fn string_from_c_string(c_string: &[i8]) -> Result<String> {
             ErrorKind::InvParam,
             "Not a nul terminated C string",
         ))
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) fn log(text: &str) {
+    let log_path = if let Ok(stat) = stat(OLD_ROOT_MP) {
+        if is_dir(&stat) {
+            path_append(OLD_ROOT_MP, "balena-takeover.log")
+        } else {
+            PathBuf::from("/balena-takeover.log")
+        }
+    } else {
+        PathBuf::from("/balena-takeover.log")
+    };
+    if let Ok(mut log_file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+        let _res = writeln!(log_file, "{}", text);
+        let _res = log_file.flush();
+        sync()
     }
 }

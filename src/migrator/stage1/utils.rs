@@ -229,7 +229,7 @@ pub(crate) fn mount_fs<P: AsRef<Path>>(
     mount_dir: P,
     fs: &str,
     fs_type: &str,
-    mig_info: &mut MigrateInfo,
+    mig_info: Option<&mut MigrateInfo>,
 ) -> Result<()> {
     let mount_dir = mount_dir.as_ref();
     if !dir_exists(mount_dir)? {
@@ -253,7 +253,9 @@ pub(crate) fn mount_fs<P: AsRef<Path>>(
         fs_type
     ))?;
 
-    mig_info.add_mount(mount_dir);
+    if let Some(mig_info) = mig_info {
+        mig_info.add_mount(mount_dir);
+    }
 
     info!("Mounted {} file system on '{}'", fs, mount_dir.display());
 

@@ -8,6 +8,7 @@ pub(crate) const PIDOF_CMD: &str = "pidof";
 pub(crate) const EFIBOOTMGR_CMD: &str = "efibootmgr";
 pub(crate) const DD_CMD: &str = "dd";
 
+pub(crate) const TAKEOVER_DIR: &str = "/balena-takeover";
 pub(crate) const STAGE2_CONFIG_NAME: &str = "stage2-config.yml";
 
 pub(crate) const BALENA_IMAGE_NAME: &str = "balena.img.gz";
