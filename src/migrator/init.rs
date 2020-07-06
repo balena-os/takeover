@@ -1,5 +1,9 @@
 use crate::{
-    common::{call, defs::NIX_NONE, get_mountpoint, Error, Result, ToError},
+    common::{
+        call,
+        defs::{MOUNT_CMD, NIX_NONE, PIVOT_ROOT_CMD, TAKEOVER_DIR},
+        get_mountpoint, path_append, whereis, Error, Result, ToError,
+    },
     stage2::{read_stage2_config, reboot},
     ErrorKind,
 };
@@ -23,9 +27,6 @@ use std::str::FromStr;
 use std::thread::sleep;
 use std::time::Duration;
 
-use crate::common::defs::TAKEOVER_DIR;
-
-use crate::common::path_append;
 use libc::{
     close, dup2, getpid, open, pipe, sigfillset, sigprocmask, sigset_t, wait, O_CREAT, O_TRUNC,
     O_WRONLY, SIG_BLOCK, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO,
@@ -194,6 +195,7 @@ fn close_fds() -> Result<i32> {
     Ok(close_count)
 }
 
+#[allow(clippy::cognitive_complexity)]
 pub fn init() -> ! {
     Logger::set_default_level(INITIAL_LOG_LEVEL);
     Logger::set_brief_info(false);
@@ -266,14 +268,47 @@ pub fn init() -> ! {
     Logger::flush();
     sync();
 
-    if let Err(why) = call_command!("mount", &["--make-rprivate", "/"]) {
-        error!("Failed to call 'mount --make-rprivate /' error: {}", why);
-        reboot();
+    match whereis(MOUNT_CMD) {
+        Ok(mount_cmd) => {
+            if let Err(why) = call_command!(
+                mount_cmd.as_str(),
+                &["--make-rprivate", "/"],
+                "failed to mount / private"
+            ) {
+                error!(
+                    "Failed to call '{} --make-rprivate /' error: {}",
+                    mount_cmd, why
+                );
+                reboot();
+            }
+        }
+        Err(why) => {
+            error!("Failed to locate '{}' command, error: {}", MOUNT_CMD, why);
+            reboot();
+        }
     }
 
-    if let Err(why) = call_command!("pivot_root", &[".", "mnt/old_root"]) {
-        error!("Failed to call 'pivot_root . mnt/old_root' error: {}", why);
-        reboot();
+    match whereis(PIVOT_ROOT_CMD) {
+        Ok(pivot_root_cmd) => {
+            if let Err(why) = call_command!(
+                pivot_root_cmd.as_str(),
+                &[".", "mnt/old_root"],
+                "Failed to pivot root"
+            ) {
+                error!(
+                    "Failed to call '{} . mnt/old_root' error: {}",
+                    pivot_root_cmd, why
+                );
+                reboot();
+            }
+        }
+        Err(why) => {
+            error!(
+                "Failed to locate '{}' command, error: {}",
+                PIVOT_ROOT_CMD, why
+            );
+            reboot();
+        }
     }
 
     let _child_pid = match Command::new(&format!("/bin/{}", env!("CARGO_PKG_NAME")))

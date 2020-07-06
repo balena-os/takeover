@@ -1,6 +1,6 @@
 use crate::common::system::stat;
-use crate::common::{call, dir_exists, path_append, Error, ErrorKind, Result, ToError};
-use crate::stage1::utils::whereis;
+use crate::common::{call, dir_exists, path_append, whereis, Error, ErrorKind, Result, ToError};
+
 use lazy_static::lazy_static;
 use log::{debug, info, trace, warn};
 use regex::Regex;
@@ -100,15 +100,18 @@ impl ExeCopy {
             Ok(cmd_res) => {
                 if cmd_res.status.success() {
                     cmd_res.stdout
+                } else if cmd_res.stderr.contains("not a dynamic executable")
+                    || cmd_res.stdout.contains("not a dynamic executable")
+                {
+                    return Ok(());
                 } else {
-                    if cmd_res.stderr.contains("not a dynamic executable") {
-                        "".to_owned()
-                    } else {
-                        return Err(Error::with_context(
-                            ErrorKind::ExecProcess,
-                            &format!("1failed to retrieve dynamic libs for '{}'", file),
-                        ));
-                    }
+                    return Err(Error::with_context(
+                        ErrorKind::ExecProcess,
+                        &format!(
+                            "Failed to retrieve dynamic libs for '{}', error: {}",
+                            file, cmd_res.stderr
+                        ),
+                    ));
                 }
             }
             Err(why) => {

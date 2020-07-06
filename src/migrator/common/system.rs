@@ -1,5 +1,5 @@
 use libc::{
-    self, mode_t, utsname, EACCES, EEXIST, ENOENT, ENXIO, EPERM, O_RDONLY, S_IFBLK, S_IFCHR,
+    self, ino_t, mode_t, utsname, EACCES, EEXIST, ENOENT, ENXIO, EPERM, O_RDONLY, S_IFBLK, S_IFCHR,
     S_IFDIR, S_IFIFO, S_IFLNK, S_IFMT, S_IFREG, S_IFSOCK,
 };
 
@@ -421,12 +421,12 @@ pub(crate) fn uname() -> Result<UtsName> {
 
     if res == 0 {
         Ok(UtsName {
-            sysname: string_from_c_string(&uts_name.sysname)?,
-            nodename: string_from_c_string(&uts_name.nodename)?,
-            release: string_from_c_string(&uts_name.release)?,
-            version: string_from_c_string(&uts_name.version)?,
-            machine: string_from_c_string(&uts_name.machine)?,
-            domainname: string_from_c_string(&uts_name.domainname)?,
+            sysname: string_from_c_string(&uts_name.sysname[0..])?,
+            nodename: string_from_c_string(&uts_name.nodename[0..])?,
+            release: string_from_c_string(&uts_name.release[0..])?,
+            version: string_from_c_string(&uts_name.version[0..])?,
+            machine: string_from_c_string(&uts_name.machine[0..])?,
+            domainname: string_from_c_string(&uts_name.domainname[0..])?,
         })
     } else {
         Err(Error::with_all(
@@ -438,15 +438,16 @@ pub(crate) fn uname() -> Result<UtsName> {
 }
 
 pub(crate) fn lstat<P: AsRef<Path>>(path: P) -> Result<libc::stat> {
-    let c_path = path_to_cstring(&path)?;
     let mut file_stat: libc::stat = unsafe { MaybeUninit::zeroed().assume_init() };
 
-    let res = unsafe {
-        libc::lstat(
-            c_path.as_bytes_with_nul() as *const [u8] as *const i8,
-            &mut file_stat,
-        )
-    };
+    let c_path = path_to_cstring(&path)?;
+    #[cfg(target_arch = "arm")]
+    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;
+
+    #[cfg(target_arch = "x86_64")]
+    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+
+    let res = unsafe { libc::lstat(c_path_ptr, &mut file_stat) };
     if res == 0 {
         Ok(file_stat)
     } else {
@@ -458,15 +459,16 @@ pub(crate) fn lstat<P: AsRef<Path>>(path: P) -> Result<libc::stat> {
 }
 
 pub(crate) fn stat<P: AsRef<Path>>(path: P) -> Result<libc::stat> {
-    let c_path = path_to_cstring(&path)?;
     let mut file_stat: libc::stat = unsafe { MaybeUninit::zeroed().assume_init() };
 
-    let res = unsafe {
-        libc::stat(
-            c_path.as_bytes_with_nul() as *const [u8] as *const i8,
-            &mut file_stat,
-        )
-    };
+    let c_path = path_to_cstring(&path)?;
+    #[cfg(target_arch = "arm")]
+    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;
+
+    #[cfg(target_arch = "x86_64")]
+    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+
+    let res = unsafe { libc::stat(c_path_ptr, &mut file_stat) };
     if res == 0 {
         Ok(file_stat)
     } else {
@@ -479,8 +481,13 @@ pub(crate) fn stat<P: AsRef<Path>>(path: P) -> Result<libc::stat> {
 
 pub(crate) fn mkfifo<P: AsRef<Path>>(path: P, mode: u32) -> Result<()> {
     let c_path = path_to_cstring(&path)?;
+    #[cfg(target_arch = "arm")]
+    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;
 
-    let res = unsafe { libc::mkfifo(c_path.as_bytes_with_nul() as *const [u8] as *const i8, mode) };
+    #[cfg(target_arch = "x86_64")]
+    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+
+    let res = unsafe { libc::mkfifo(c_path_ptr, mode) };
     if res == 0 {
         Ok(())
     } else {
@@ -493,14 +500,13 @@ pub(crate) fn mkfifo<P: AsRef<Path>>(path: P, mode: u32) -> Result<()> {
 
 pub(crate) fn mknod<P: AsRef<Path>>(path: P, mode: u32, dev_id: u64) -> Result<()> {
     let c_path = path_to_cstring(&path)?;
+    #[cfg(target_arch = "arm")]
+    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;
 
-    let res = unsafe {
-        libc::mknod(
-            c_path.as_bytes_with_nul() as *const [u8] as *const i8,
-            mode,
-            dev_id,
-        )
-    };
+    #[cfg(target_arch = "x86_64")]
+    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+
+    let res = unsafe { libc::mknod(c_path_ptr, mode, dev_id) };
     if res == 0 {
         Ok(())
     } else {
@@ -512,15 +518,19 @@ pub(crate) fn mknod<P: AsRef<Path>>(path: P, mode: u32, dev_id: u64) -> Result<(
 }
 
 pub(crate) fn link<P1: AsRef<Path>, P2: AsRef<Path>>(old_file: P1, new_file: P2) -> Result<()> {
-    let old_path = path_to_cstring(&old_file)?;
-    let new_path = path_to_cstring(&new_file)?;
+    let old_c_path = path_to_cstring(&old_file)?;
+    #[cfg(target_arch = "arm")]
+    let old_c_path_ptr = old_c_path.as_bytes_with_nul() as *const [u8] as *const u8;
+    #[cfg(target_arch = "x86_64")]
+    let old_c_path_ptr = old_c_path.as_bytes_with_nul() as *const [u8] as *const i8;
 
-    let res = unsafe {
-        libc::link(
-            old_path.as_bytes_with_nul() as *const [u8] as *const i8,
-            new_path.as_bytes_with_nul() as *const [u8] as *const i8,
-        )
-    };
+    let new_c_path = path_to_cstring(&new_file)?;
+    #[cfg(target_arch = "arm")]
+    let new_c_path_ptr = new_c_path.as_bytes_with_nul() as *const [u8] as *const u8;
+    #[cfg(target_arch = "x86_64")]
+    let new_c_path_ptr = new_c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+
+    let res = unsafe { libc::link(old_c_path_ptr, new_c_path_ptr) };
     if res == 0 {
         Ok(())
     } else {
@@ -533,15 +543,19 @@ pub(crate) fn link<P1: AsRef<Path>, P2: AsRef<Path>>(old_file: P1, new_file: P2)
 }
 
 pub(crate) fn symlink<P1: AsRef<Path>, P2: AsRef<Path>>(source: P1, dest: P2) -> Result<()> {
-    let source_path = path_to_cstring(&source)?;
-    let dest_path = path_to_cstring(&dest)?;
+    let src_c_path = path_to_cstring(&source)?;
+    #[cfg(target_arch = "arm")]
+    let src_c_path_ptr = src_c_path.as_bytes_with_nul() as *const [u8] as *const u8;
+    #[cfg(target_arch = "x86_64")]
+    let src_c_path_ptr = src_c_path.as_bytes_with_nul() as *const [u8] as *const i8;
 
-    let res = unsafe {
-        libc::symlink(
-            source_path.as_bytes_with_nul() as *const [u8] as *const i8,
-            dest_path.as_bytes_with_nul() as *const [u8] as *const i8,
-        )
-    };
+    let dest_c_path = path_to_cstring(&dest)?;
+    #[cfg(target_arch = "arm")]
+    let dest_c_path_ptr = dest_c_path.as_bytes_with_nul() as *const [u8] as *const u8;
+    #[cfg(target_arch = "x86_64")]
+    let dest_c_path_ptr = dest_c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+
+    let res = unsafe { libc::symlink(src_c_path_ptr, dest_c_path_ptr) };
     if res == 0 {
         Ok(())
     } else {
@@ -556,8 +570,12 @@ pub(crate) fn symlink<P1: AsRef<Path>, P2: AsRef<Path>>(source: P1, dest: P2) ->
 pub(crate) fn mkdir<P: AsRef<Path>>(path: P, mode: u32) -> Result<()> {
     debug!("mkdir: '{}'", path.as_ref().display());
     let c_path = path_to_cstring(&path)?;
+    #[cfg(target_arch = "arm")]
+    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;
+    #[cfg(target_arch = "x86_64")]
+    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
 
-    let res = unsafe { libc::mkdir(c_path.as_bytes_with_nul() as *const [u8] as *const i8, mode) };
+    let res = unsafe { libc::mkdir(c_path_ptr, mode) };
     if res == 0 {
         Ok(())
     } else {
@@ -584,7 +602,7 @@ pub(crate) fn chmod<P: AsRef<Path>>(file_name: P, mode: mode_t) -> Result<()> {
 
 enum CopyInodes {
     SameFs,
-    SeparateFs(HashMap<u64, PathBuf>),
+    SeparateFs(HashMap<ino_t, PathBuf>),
 }
 
 fn recursive_copy(source: &Path, dest: &Path, inode_list: &mut CopyInodes) -> Result<()> {

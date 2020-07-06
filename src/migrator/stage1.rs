@@ -20,9 +20,6 @@ use log::{debug, error, info, warn, Level};
 
 pub(crate) mod migrate_info;
 
-// pub(crate) mod assets;
-// use assets::Assets;
-
 mod api_calls;
 mod block_device_info;
 mod defs;
@@ -245,13 +242,18 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     let commands = match ExeCopy::new(copy_commands) {
         Ok(commands) => {
-            req_space += commands.get_req_space();
+            let cmd_space = commands.get_req_space();
+            debug!(
+                "Space required for commands: {}",
+                format_size_with_unit(cmd_space)
+            );
+            req_space += cmd_space;
             commands
         }
         Err(why) => {
             return Err(Error::from_upstream_error(
                 Box::new(why),
-                "Failed to setup efi",
+                "Failed to gather dependencies for copied commands",
             ));
         }
     };

@@ -9,10 +9,10 @@ use log::info;
 use crate::{
     common::{
         call,
-        defs::{MOKUTIL_CMD, NIX_NONE, SYS_EFI_DIR, WHEREIS_CMD},
-        dir_exists, file_exists,
+        defs::{MOKUTIL_CMD, NIX_NONE, SYS_EFI_DIR},
+        dir_exists,
         system::{mkdir, mknod, uname},
-        Error, ErrorKind, Result, ToError,
+        whereis, Error, ErrorKind, Result, ToError,
     },
     stage1::defs::OSArch,
 };
@@ -95,61 +95,6 @@ pub(crate) fn is_secure_boot() -> Result<bool> {
         }
     } else {
         Ok(false)
-    }
-}
-
-pub(crate) fn whereis(cmd: &str) -> Result<String> {
-    const BIN_DIRS: &[&str] = &["/bin", "/usr/bin", "/sbin", "/usr/sbin"];
-    // try manually first
-    for path in BIN_DIRS {
-        let path = format!("{}/{}", &path, cmd);
-        if file_exists(&path) {
-            return Ok(path);
-        }
-    }
-
-    // else try whereis command
-    let args: [&str; 2] = ["-b", cmd];
-    let cmd_res = match call(WHEREIS_CMD, &args, true) {
-        Ok(cmd_res) => cmd_res,
-        Err(why) => {
-            // manually try the usual suspects
-            return Err(Error::with_context(
-                ErrorKind::NotFound,
-                &format!(
-                    "whereis failed to execute for: {:?}, error: {:?}",
-                    args, why
-                ),
-            ));
-        }
-    };
-
-    if cmd_res.status.success() {
-        if cmd_res.stdout.is_empty() {
-            Err(Error::with_context(
-                ErrorKind::InvParam,
-                &format!("whereis: no command output for {}", cmd),
-            ))
-        } else {
-            let mut words = cmd_res.stdout.split(' ');
-            if let Some(s) = words.nth(1) {
-                Ok(String::from(s))
-            } else {
-                Err(Error::with_context(
-                    ErrorKind::NotFound,
-                    &format!("whereis: command not found: '{}'", cmd),
-                ))
-            }
-        }
-    } else {
-        Err(Error::with_context(
-            ErrorKind::ExecProcess,
-            &format!(
-                "whereis: command failed for {}: {}",
-                cmd,
-                cmd_res.status.code().unwrap_or(0)
-            ),
-        ))
     }
 }
 

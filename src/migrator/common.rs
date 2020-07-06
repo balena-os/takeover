@@ -25,7 +25,7 @@ pub mod error;
 pub use error::{Error, ErrorKind, Result, ToError};
 
 pub mod options;
-use crate::common::defs::{OLD_ROOT_MP, PIDOF_CMD};
+use crate::common::defs::{OLD_ROOT_MP, PIDOF_CMD, WHEREIS_CMD};
 
 use nix::unistd::sync;
 pub use options::Options;
@@ -72,6 +72,61 @@ pub(crate) fn call(cmd: &str, args: &[&str], trim_stdout: bool) -> Result<CmdRes
                 &format!("call: failed to execute: command {} '{:?}'", cmd, args),
             ))
         }
+    }
+}
+
+pub(crate) fn whereis(cmd: &str) -> Result<String> {
+    const BIN_DIRS: &[&str] = &["./", "/bin", "/usr/bin", "/sbin", "/usr/sbin"];
+    // try manually first
+    for path in BIN_DIRS {
+        let path = format!("{}/{}", &path, cmd);
+        if file_exists(&path) {
+            return Ok(path);
+        }
+    }
+
+    // else try whereis command
+    let args: [&str; 2] = ["-b", cmd];
+    let cmd_res = match call(WHEREIS_CMD, &args, true) {
+        Ok(cmd_res) => cmd_res,
+        Err(why) => {
+            // manually try the usual suspects
+            return Err(Error::with_context(
+                ErrorKind::NotFound,
+                &format!(
+                    "whereis failed to execute for: {:?}, error: {:?}",
+                    args, why
+                ),
+            ));
+        }
+    };
+
+    if cmd_res.status.success() {
+        if cmd_res.stdout.is_empty() {
+            Err(Error::with_context(
+                ErrorKind::InvParam,
+                &format!("whereis: no command output for {}", cmd),
+            ))
+        } else {
+            let mut words = cmd_res.stdout.split(' ');
+            if let Some(s) = words.nth(1) {
+                Ok(String::from(s))
+            } else {
+                Err(Error::with_context(
+                    ErrorKind::NotFound,
+                    &format!("whereis: command not found: '{}'", cmd),
+                ))
+            }
+        }
+    } else {
+        Err(Error::with_context(
+            ErrorKind::ExecProcess,
+            &format!(
+                "whereis: command failed for {}: {}",
+                cmd,
+                cmd_res.status.code().unwrap_or(0)
+            ),
+        ))
     }
 }
 
@@ -244,7 +299,12 @@ pub(crate) fn path_to_cstring<P: AsRef<Path>>(path: P) -> Result<CString> {
     )
 }
 
-pub(crate) unsafe fn hex_dump_ptr(buffer: *const u8, length: isize) -> String {
+#[allow(dead_code)]
+pub(crate) unsafe fn hex_dump_ptr_i8(buffer: *const i8, length: isize) -> String {
+    hex_dump_ptr_u8(buffer as *const u8, length)
+}
+
+pub(crate) unsafe fn hex_dump_ptr_u8(buffer: *const u8, length: isize) -> String {
     let mut idx = 0;
     let mut output = String::new();
     while idx < length {
@@ -268,14 +328,34 @@ pub(crate) unsafe fn hex_dump_ptr(buffer: *const u8, length: isize) -> String {
 }
 
 pub(crate) fn hex_dump(buffer: &[u8]) -> String {
-    unsafe { hex_dump_ptr(buffer as *const [u8] as *const u8, buffer.len() as isize) }
+    unsafe { hex_dump_ptr_u8(buffer as *const [u8] as *const u8, buffer.len() as isize) }
 }
 
-pub(crate) fn string_from_c_string(c_string: &[i8]) -> Result<String> {
-    // There must be a better way
+#[cfg(target_arch = "arm")]
+pub(crate) fn string_from_c_string(c_string: &[u8]) -> Result<String> {
     let mut len: Option<usize> = None;
-    for (idx, curr) in c_string.iter().enumerate() {
-        if *curr == 0 {
+    for (idx, char) in c_string.iter().enumerate() {
+        if *char == 0 {
+            len = Some(idx);
+            break;
+        }
+    }
+    if let Some(len) = len {
+        let u8_str = &c_string[0..=len] as *const [u8] as *const CStr;
+        unsafe { Ok(String::from(&*(*u8_str).to_string_lossy())) }
+    } else {
+        Err(Error::with_context(
+            ErrorKind::InvParam,
+            "Not a nul terminated C string",
+        ))
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn string_from_c_string(c_string: &[i8]) -> Result<String> {
+    let mut len: Option<usize> = None;
+    for (idx, char) in c_string.iter().enumerate() {
+        if *char == 0 {
             len = Some(idx);
             break;
         }
@@ -306,5 +386,16 @@ pub(crate) fn log(text: &str) {
         let _res = writeln!(log_file, "{}", text);
         let _res = log_file.flush();
         sync()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_path_to_cstring() {
+        const PATH: &str = "/bla/blub";
+        let c_path = path_to_cstring(PATH).unwrap();
+        assert_eq!(&*c_path.to_string_lossy(), PATH);
     }
 }
