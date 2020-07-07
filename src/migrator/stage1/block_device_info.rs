@@ -284,16 +284,17 @@ impl BlockDeviceInfo {
                             None
                         };
 
-                        let partition = Rc::new(Box::new(Partition {
-                            name: part_name,
-                            device_num: curr_number,
+                        let partition = Rc::new(Box::new(Partition::new(
+                            part_name.as_str(),
+                            curr_number,
                             mounted,
-                            parent: device.clone(),
-                        }) as Box<dyn BlockDevice>);
+                            device.clone(),
+                        )?)
+                            as Box<dyn BlockDevice>);
 
                         debug!(
                             "found  partition '{:?}' in '{}'",
-                            partition,
+                            partition.get_name(),
                             currdir.display(),
                         );
                         device_map.insert(dev_path, partition);

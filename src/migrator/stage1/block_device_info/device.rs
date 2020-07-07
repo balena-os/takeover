@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use crate::stage1::block_device_info::partition::PartitionInfo;
 use crate::stage1::block_device_info::DeviceNum;
 use crate::{
     common::path_append,
@@ -41,5 +42,9 @@ impl BlockDevice for Device {
 
     fn set_mountpoint(&mut self, mountpoint: Mount) {
         self.mounted = Some(mountpoint);
+    }
+
+    fn get_partition_info(&self) -> Option<&PartitionInfo> {
+        None
     }
 }

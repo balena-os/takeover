@@ -376,6 +376,51 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         ));
     }
 
+    let log_fs_type = if let Some(log_dev) = opts.get_log_to() {
+        if let Some(log_dev) = block_dev_info.get_devices().get(log_dev) {
+            if let Some(partition_info) = log_dev.get_partition_info() {
+                if let Some(fs_type) = partition_info.fs_type() {
+                    const SUPPORTED_LOG_FS_TYPES: [&str; 3] = ["vfat", "ext3", "ext4"];
+                    if SUPPORTED_LOG_FS_TYPES.iter().any(|val| *val == fs_type) {
+                        fs_type.to_owned()
+                    } else {
+                        return Err(Error::with_context(
+                            ErrorKind::InvState,
+                            &format!(
+                                "Unsupported fs_type '{}' for log partition '{}'",
+                                fs_type,
+                                log_dev.get_dev_path().display()
+                            ),
+                        ));
+                    }
+                } else {
+                    return Err(Error::with_context(
+                        ErrorKind::InvState,
+                        &format!(
+                            "No fs_type detected for partition '{}'",
+                            log_dev.get_dev_path().display()
+                        ),
+                    ));
+                }
+            } else {
+                return Err(Error::with_context(
+                    ErrorKind::DeviceNotFound,
+                    &format!(
+                        "The device is not a partition: '{}'",
+                        log_dev.get_dev_path().display()
+                    ),
+                ));
+            }
+        } else {
+            return Err(Error::with_context(
+                ErrorKind::DeviceNotFound,
+                &format!("The device could not be found: '{}'", log_dev.display()),
+            ));
+        }
+    } else {
+        "".to_owned()
+    };
+
     // collect partitions that need to be unmounted
 
     let s2_cfg = Stage2Config {
