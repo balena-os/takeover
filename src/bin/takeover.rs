@@ -1,30 +1,35 @@
+use libc;
 use log::error;
 use std::process::exit;
 
 use mod_logger::Logger;
+use structopt::StructOpt;
 
 use takeover::{init, stage1, stage2, ErrorKind, Options};
 
-#[paw::main]
-fn main(opts: Options) {
+fn is_init() -> bool {
+    let pid = unsafe { libc::getpid() };
+    pid == 1
+}
+
+fn main() {
     let mut exit_code = 0;
 
-    if opts.is_stage2() {
-        stage2(&opts);
-        // not supposed to return
-        exit_code = 1;
-    } else if opts.is_init() {
-        init(&opts);
-        // not supposed to return
-        exit_code = 1;
-    } else if let Err(why) = stage1(&opts) {
-        exit_code = 1;
-        match why.kind() {
-            ErrorKind::Displayed => (),
-            _ => error!("Migrate stage 1 returned an error: {}", why),
-        };
-    };
+    if is_init() {
+        init();
+    } else {
+        let opts = Options::from_args();
 
-    Logger::flush();
-    exit(exit_code);
+        if opts.is_stage2() {
+            stage2(&opts);
+        } else if let Err(why) = stage1(&opts) {
+            exit_code = 1;
+            match why.kind() {
+                ErrorKind::Displayed => (),
+                _ => error!("Migrate stage 1 returned an error: {}", why),
+            };
+        };
+        Logger::flush();
+        exit(exit_code);
+    }
 }

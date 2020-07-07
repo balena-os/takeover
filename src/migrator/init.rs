@@ -1,31 +1,38 @@
 use crate::{
-    common::{defs::NIX_NONE, get_mountpoint, Error, Options, Result, ToError},
-    stage2::{busybox_reboot, read_stage2_config},
+    common::{
+        call,
+        defs::{MOUNT_CMD, NIX_NONE, PIVOT_ROOT_CMD, TAKEOVER_DIR},
+        get_mountpoint, path_append, whereis, Error, Result, ToError,
+    },
+    stage2::{read_stage2_config, reboot},
     ErrorKind,
 };
-use log::{error, info, trace, warn};
+use log::{error, info, trace, warn, Level};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
-use std::ffi::CString;
-use std::fs::create_dir_all;
-use std::io;
-use std::mem::MaybeUninit;
-use std::os::raw::c_int;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::thread::sleep;
-use std::time::Duration;
-
 use nix::{
     errno::{errno, Errno},
     fcntl::{fcntl, F_GETFD},
     mount::{mount, umount, MsFlags},
     unistd::sync,
 };
+use std::env::set_current_dir;
+use std::ffi::CString;
+use std::fs::create_dir_all;
+use std::io;
+use std::mem::MaybeUninit;
+use std::os::raw::c_int;
+use std::path::Path;
+use std::process::Command;
+use std::str::FromStr;
+use std::thread::sleep;
+use std::time::Duration;
 
 use libc::{
     close, dup2, getpid, open, pipe, sigfillset, sigprocmask, sigset_t, wait, O_CREAT, O_TRUNC,
     O_WRONLY, SIG_BLOCK, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO,
 };
+
+const INITIAL_LOG_LEVEL: Level = Level::Trace;
 
 fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<()> {
     let log_dev = log_dev.as_ref();
@@ -44,35 +51,38 @@ fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<()> {
             }
         }
 
-        create_dir_all("/mnt/log")
+        let mountpoint = path_append(TAKEOVER_DIR, "/mnt/log");
+        create_dir_all(&mountpoint)
             .upstream_with_context("Failed to create log mount directory /mnt/log")?;
 
-        trace!("Created log mountpoint: '/mnt/log'");
+        trace!("Created log mountpoint: '{}'", mountpoint.display());
+
+        // TODO: support other filesystem types
         mount(
             Some(log_dev),
-            "/mnt/log",
+            &mountpoint,
             Some("vfat"),
             MsFlags::empty(),
             NIX_NONE,
         )
         .upstream_with_context(&format!(
-            "Failed to mount '{}' on /mnt/log",
-            log_dev.display()
+            "Failed to mount '{}' on '{}'",
+            log_dev.display(),
+            mountpoint.display(),
         ))?;
 
         trace!(
-            "Mounted '{}' to log mountpoint: '/mnt/log'",
-            log_dev.display()
+            "Mounted '{}' to log mountpoint: '{}'",
+            log_dev.display(),
+            mountpoint.display()
         );
         // TODO: remove this later
-        Logger::set_log_file(
-            &LogDestination::Stderr,
-            &PathBuf::from("/mnt/log/stage2-init.log"),
-            false,
-        )
-        .upstream_with_context("Failed set log file to  '/mnt/log/stage2-init.log'")?;
+        let logfile = path_append(&mountpoint, "stage2-init.log");
+        Logger::set_log_file(&LogDestination::Stderr, &logfile, false)
+            .upstream_with_context(&format!("Failed set log file to  '{}'", logfile.display()))?;
         info!(
-            "Now logging to /mnt/log/stage2-init.log on '{}'",
+            "Now logging to '{}' on '{}'",
+            logfile.display(),
             log_dev.display()
         );
         Ok(())
@@ -145,8 +155,16 @@ fn close_fds() -> Result<i32> {
         ));
     }
 
-    redirect_fd("/stdout.log", STDOUT_FILENO, O_WRONLY | O_CREAT | O_TRUNC)?;
-    redirect_fd("/stderr.log", STDERR_FILENO, O_WRONLY | O_CREAT | O_TRUNC)?;
+    redirect_fd(
+        &format!("{}/stdout.log", TAKEOVER_DIR),
+        STDOUT_FILENO,
+        O_WRONLY | O_CREAT | O_TRUNC,
+    )?;
+    redirect_fd(
+        &format!("{}/stderr.log", TAKEOVER_DIR),
+        STDERR_FILENO,
+        O_WRONLY | O_CREAT | O_TRUNC,
+    )?;
 
     const START_FD: i32 = 3;
     let mut close_count = 1;
@@ -177,47 +195,61 @@ fn close_fds() -> Result<i32> {
     Ok(close_count)
 }
 
-pub fn init(opts: &Options) {
-    Logger::set_default_level(opts.get_s2_log_level());
+#[allow(clippy::cognitive_complexity)]
+pub fn init() -> ! {
+    Logger::set_default_level(INITIAL_LOG_LEVEL);
     Logger::set_brief_info(false);
     Logger::set_color(true);
 
     if let Err(why) = Logger::set_log_dest(&LogDestination::BufferStderr, NO_STREAM) {
         error!("Failed to initialize logging, error: {:?}", why);
-        busybox_reboot();
-        return;
+        reboot();
     }
 
-    info!("Stage 2 entered");
+    info!("Init entered");
 
     if unsafe { getpid() } != 1 {
         error!("Process must be pid 1 to run init");
-        busybox_reboot();
-        return;
+        reboot();
     }
 
-    info!("Stage 2 check pid success!");
+    info!("Init check pid success!");
+
+    if let Err(why) = set_current_dir(TAKEOVER_DIR) {
+        error!(
+            "Failed to change to directory '{}', error: {:?}",
+            TAKEOVER_DIR, why
+        );
+        reboot();
+    }
+
+    let s2_config = match read_stage2_config(Some(TAKEOVER_DIR)) {
+        Ok(s2_config) => s2_config,
+        Err(why) => {
+            error!("Failed to read stage2 configuration, error: {:?}", why);
+            reboot();
+        }
+    };
+    info!("Stage 2 config was read successfully");
+
+    match Level::from_str(&s2_config.log_level) {
+        Ok(level) => Logger::set_default_level(level),
+        Err(why) => {
+            warn!(
+                "Failed to read log level from '{}', error: {:?}",
+                s2_config.log_level, why
+            );
+        }
+    }
 
     let closed_fds = match close_fds() {
         Ok(fds) => fds,
         Err(_) => {
             error!("Failed close open files");
-            busybox_reboot();
-            return;
+            reboot();
         }
     };
     info!("Stage 2 closed {} fd's", closed_fds);
-
-    let s2_config = match read_stage2_config() {
-        Ok(s2_config) => s2_config,
-        Err(why) => {
-            error!("Failed to read stage2 configuration, error: {:?}", why);
-            busybox_reboot();
-            return;
-        }
-    };
-
-    info!("Stage 2 config was read successfully");
 
     let ext_log = if let Some(log_dev) = s2_config.get_log_dev() {
         match setup_log(log_dev) {
@@ -236,19 +268,57 @@ pub fn init(opts: &Options) {
     Logger::flush();
     sync();
 
-    let _child_pid = match Command::new("./takeover")
-        .args(&[
-            "--stage2",
-            "--s2-log-level",
-            opts.get_s2_log_level().to_string().as_str(),
-        ])
+    match whereis(MOUNT_CMD) {
+        Ok(mount_cmd) => {
+            if let Err(why) = call_command!(
+                mount_cmd.as_str(),
+                &["--make-rprivate", "/"],
+                "failed to mount / private"
+            ) {
+                error!(
+                    "Failed to call '{} --make-rprivate /' error: {}",
+                    mount_cmd, why
+                );
+                reboot();
+            }
+        }
+        Err(why) => {
+            error!("Failed to locate '{}' command, error: {}", MOUNT_CMD, why);
+            reboot();
+        }
+    }
+
+    match whereis(PIVOT_ROOT_CMD) {
+        Ok(pivot_root_cmd) => {
+            if let Err(why) = call_command!(
+                pivot_root_cmd.as_str(),
+                &[".", "mnt/old_root"],
+                "Failed to pivot root"
+            ) {
+                error!(
+                    "Failed to call '{} . mnt/old_root' error: {}",
+                    pivot_root_cmd, why
+                );
+                reboot();
+            }
+        }
+        Err(why) => {
+            error!(
+                "Failed to locate '{}' command, error: {}",
+                PIVOT_ROOT_CMD, why
+            );
+            reboot();
+        }
+    }
+
+    let _child_pid = match Command::new(&format!("/bin/{}", env!("CARGO_PKG_NAME")))
+        .args(&["--stage2", "--s2-log-level", &s2_config.log_level])
         .spawn()
     {
         Ok(cmd_res) => cmd_res.id(),
         Err(why) => {
             error!("Failed to spawn stage2 worker process, error: {:?}", why);
-            busybox_reboot();
-            return;
+            reboot();
         }
     };
 

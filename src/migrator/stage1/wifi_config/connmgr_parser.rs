@@ -62,7 +62,7 @@ impl ConnMgrParser {
                 }
                 Err(why) => {
                     return Err(Error::from_upstream(
-                        From::from(why),
+                        Box::new(why),
                         &format!("unexpected read error from {}", file_path.display()),
                     ));
                 }

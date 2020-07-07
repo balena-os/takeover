@@ -38,6 +38,7 @@ macro_rules! call_command {
     };
 }
 
+#[allow(unused_macros)]
 macro_rules! call_busybox {
     (  $args:expr , $errmsg:expr ) => {
         call_command!(BUSYBOX_CMD, $args, $errmsg)

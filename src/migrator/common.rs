@@ -1,28 +1,33 @@
-use std::fs::read_to_string;
+use std::cmp::min;
+use std::ffi::{CStr, CString, OsString};
+use std::fs::{read_to_string, OpenOptions};
+use std::io::Write;
 use std::mem::MaybeUninit;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 
-use libc::getuid;
-use regex::Regex;
-
+use libc;
 use log::{debug, error, trace, warn};
+
+use regex::Regex;
 
 pub(crate) mod stage2_config;
 
 pub(crate) mod defs;
+
+pub(crate) mod system;
+use system::{is_dir, stat};
 
 pub(crate) mod loop_device;
 
 pub mod error;
 pub use error::{Error, ErrorKind, Result, ToError};
 
-// pub mod mig_error;
-// pub use error::{MigErrCtx, Error, ErrorKind};
-
 pub mod options;
-use crate::common::defs::PIDOF_CMD;
+use crate::common::defs::{OLD_ROOT_MP, PIDOF_CMD, WHEREIS_CMD};
 
+use nix::unistd::sync;
 pub use options::Options;
 
 pub(crate) mod debug;
@@ -67,6 +72,61 @@ pub(crate) fn call(cmd: &str, args: &[&str], trim_stdout: bool) -> Result<CmdRes
                 &format!("call: failed to execute: command {} '{:?}'", cmd, args),
             ))
         }
+    }
+}
+
+pub(crate) fn whereis(cmd: &str) -> Result<String> {
+    const BIN_DIRS: &[&str] = &["./", "/bin", "/usr/bin", "/sbin", "/usr/sbin"];
+    // try manually first
+    for path in BIN_DIRS {
+        let path = format!("{}/{}", &path, cmd);
+        if file_exists(&path) {
+            return Ok(path);
+        }
+    }
+
+    // else try whereis command
+    let args: [&str; 2] = ["-b", cmd];
+    let cmd_res = match call(WHEREIS_CMD, &args, true) {
+        Ok(cmd_res) => cmd_res,
+        Err(why) => {
+            // manually try the usual suspects
+            return Err(Error::with_context(
+                ErrorKind::NotFound,
+                &format!(
+                    "whereis failed to execute for: {:?}, error: {:?}",
+                    args, why
+                ),
+            ));
+        }
+    };
+
+    if cmd_res.status.success() {
+        if cmd_res.stdout.is_empty() {
+            Err(Error::with_context(
+                ErrorKind::InvParam,
+                &format!("whereis: no command output for {}", cmd),
+            ))
+        } else {
+            let mut words = cmd_res.stdout.split(' ');
+            if let Some(s) = words.nth(1) {
+                Ok(String::from(s))
+            } else {
+                Err(Error::with_context(
+                    ErrorKind::NotFound,
+                    &format!("whereis: command not found: '{}'", cmd),
+                ))
+            }
+        }
+    } else {
+        Err(Error::with_context(
+            ErrorKind::ExecProcess,
+            &format!(
+                "whereis: command failed for {}: {}",
+                cmd,
+                cmd_res.status.code().unwrap_or(0)
+            ),
+        ))
     }
 }
 
@@ -128,7 +188,7 @@ pub(crate) fn get_os_name() -> Result<String> {
 
 pub(crate) fn is_admin() -> Result<bool> {
     trace!("is_admin: entered");
-    let admin = Some(unsafe { getuid() } == 0);
+    let admin = Some(unsafe { libc::getuid() } == 0);
     Ok(admin.unwrap())
 }
 
@@ -137,19 +197,15 @@ pub fn file_exists<P: AsRef<Path>>(file: P) -> bool {
 }
 
 pub fn dir_exists<P: AsRef<Path>>(name: P) -> Result<bool> {
-    let path = name.as_ref();
-    if path.exists() {
-        Ok(name
-            .as_ref()
-            .metadata()
-            .upstream_with_context(&format!(
-                "dir_exists: failed to retrieve metadata for path: '{}'",
-                path.display()
-            ))?
-            .file_type()
-            .is_dir())
-    } else {
-        Ok(false)
+    match stat(name) {
+        Ok(stat_info) => Ok(is_dir(&stat_info)),
+        Err(why) => {
+            if why.kind() == ErrorKind::FileNotFound {
+                Ok(false)
+            } else {
+                Err(Error::with_cause(ErrorKind::Upstream, Box::new(why)))
+            }
+        }
     }
 }
 
@@ -230,5 +286,116 @@ pub(crate) fn path_append<P1: AsRef<Path>, P2: AsRef<Path>>(base: P1, append: P2
         curr
     } else {
         base.join(append)
+    }
+}
+
+pub(crate) fn path_to_cstring<P: AsRef<Path>>(path: P) -> Result<CString> {
+    let temp: OsString = path.as_ref().into();
+    Ok(
+        CString::new(temp.as_bytes()).upstream_with_context(&format!(
+            "Failed to convert path to CString: '{}'",
+            path.as_ref().display()
+        ))?,
+    )
+}
+
+#[allow(dead_code)]
+pub(crate) unsafe fn hex_dump_ptr_i8(buffer: *const i8, length: isize) -> String {
+    hex_dump_ptr_u8(buffer as *const u8, length)
+}
+
+pub(crate) unsafe fn hex_dump_ptr_u8(buffer: *const u8, length: isize) -> String {
+    let mut idx = 0;
+    let mut output = String::new();
+    while idx < length {
+        output.push_str(&format!("0x{:08x}: ", idx));
+        for _ in 0..min(length - idx, 16) {
+            let byte: u8 = *buffer.offset(idx);
+            let char: char = if (byte as u8).is_ascii_alphanumeric()
+                || (byte as u8).is_ascii_punctuation()
+                || (byte as u8) == 32
+            {
+                char::from(byte as u8)
+            } else {
+                '.'
+            };
+            output.push_str(&format!("{:02x} {}  ", byte, char));
+            idx += 1;
+        }
+        output.push('\n');
+    }
+    output
+}
+
+pub(crate) fn hex_dump(buffer: &[u8]) -> String {
+    unsafe { hex_dump_ptr_u8(buffer as *const [u8] as *const u8, buffer.len() as isize) }
+}
+
+#[cfg(target_arch = "arm")]
+pub(crate) fn string_from_c_string(c_string: &[u8]) -> Result<String> {
+    let mut len: Option<usize> = None;
+    for (idx, char) in c_string.iter().enumerate() {
+        if *char == 0 {
+            len = Some(idx);
+            break;
+        }
+    }
+    if let Some(len) = len {
+        let u8_str = &c_string[0..=len] as *const [u8] as *const CStr;
+        unsafe { Ok(String::from(&*(*u8_str).to_string_lossy())) }
+    } else {
+        Err(Error::with_context(
+            ErrorKind::InvParam,
+            "Not a nul terminated C string",
+        ))
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn string_from_c_string(c_string: &[i8]) -> Result<String> {
+    let mut len: Option<usize> = None;
+    for (idx, char) in c_string.iter().enumerate() {
+        if *char == 0 {
+            len = Some(idx);
+            break;
+        }
+    }
+    if let Some(len) = len {
+        let u8_str = &c_string[0..=len] as *const [i8] as *const [u8] as *const CStr;
+        unsafe { Ok(String::from(&*(*u8_str).to_string_lossy())) }
+    } else {
+        Err(Error::with_context(
+            ErrorKind::InvParam,
+            "Not a nul terminated C string",
+        ))
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) fn log(text: &str) {
+    let log_path = if let Ok(stat) = stat(OLD_ROOT_MP) {
+        if is_dir(&stat) {
+            path_append(OLD_ROOT_MP, "balena-takeover.log")
+        } else {
+            PathBuf::from("/balena-takeover.log")
+        }
+    } else {
+        PathBuf::from("/balena-takeover.log")
+    };
+    if let Ok(mut log_file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+        let _res = writeln!(log_file, "{}", text);
+        let _res = log_file.flush();
+        sync()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_path_to_cstring() {
+        const PATH: &str = "/bla/blub";
+        let c_path = path_to_cstring(PATH).unwrap();
+        assert_eq!(&*c_path.to_string_lossy(), PATH);
     }
 }

@@ -1,5 +1,5 @@
-use std::env::{current_exe, set_current_dir};
-use std::fs::{copy, create_dir, create_dir_all, read_link, remove_dir_all, OpenOptions};
+use std::env::set_current_dir;
+use std::fs::{copy, create_dir, create_dir_all, read_dir, read_link, remove_dir_all, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
@@ -7,18 +7,18 @@ use std::rc::Rc;
 use std::thread::sleep;
 use std::time::Duration;
 
+use structopt::StructOpt;
+
 use nix::{
     mount::{mount, MsFlags},
     unistd::sync,
 };
 
 use libc::MS_BIND;
+
 use log::{debug, error, info, warn, Level};
 
 pub(crate) mod migrate_info;
-
-pub(crate) mod assets;
-use assets::Assets;
 
 mod api_calls;
 mod block_device_info;
@@ -26,7 +26,7 @@ mod defs;
 mod device;
 mod device_impl;
 
-mod efi_files;
+mod exe_copy;
 
 mod image_retrieval;
 mod utils;
@@ -36,7 +36,7 @@ use crate::{
     common::{
         call,
         defs::{
-            CP_CMD, NIX_NONE, OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD, SYSTEM_CONNECTIONS_DIR,
+            NIX_NONE, OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD, SYSTEM_CONNECTIONS_DIR,
             SYS_EFIVARS_DIR, SYS_EFI_DIR, TELINIT_CMD,
         },
         error::{Error, ErrorKind, Result, ToError},
@@ -44,51 +44,35 @@ use crate::{
         options::Options,
         path_append,
         stage2_config::{Stage2Config, UmountPart},
+        system::copy_dir,
     },
     stage1::{
-        block_device_info::BlockDevice,
-        block_device_info::BlockDeviceInfo,
-        efi_files::EfiFiles,
-        migrate_info::MigrateInfo,
-        utils::{mktemp, mount_fs},
+        block_device_info::BlockDevice, block_device_info::BlockDeviceInfo, exe_copy::ExeCopy,
+        migrate_info::MigrateInfo, utils::mount_fs,
     },
 };
 
+use crate::common::defs::{DD_CMD, EFIBOOTMGR_CMD, TAKEOVER_DIR};
 use crate::common::dir_exists;
+use crate::common::system::{is_dir, mkdir, stat};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
 const S1_XTRA_FS_SIZE: u64 = 10 * 1024 * 1024; // const XTRA_MEM_FREE: u64 = 10 * 1024 * 1024; // 10 MB
 
-fn get_required_space(mig_info: &MigrateInfo) -> Result<u64> {
-    let mut req_size: u64 = mig_info.get_assets().busybox_size()?;
-
-    let curr_exe =
-        current_exe().upstream_with_context("Failed to retrieve path of current executable")?;
-    req_size += curr_exe
-        .metadata()
-        .upstream_with_context(&format!(
-            "Failed to retrieve file size for '{}'",
-            curr_exe.display()
-        ))?
-        .len();
-
-    Ok(req_size)
-}
-
-fn copy_files<P1: AsRef<Path>, P2: AsRef<Path>>(
+fn prepare_configs<P1: AsRef<Path>>(
     work_dir: P1,
     mig_info: &mut MigrateInfo,
-    takeover_dir: P2,
+    // takeover_dir: P2,
 ) -> Result<()> {
     let work_dir = work_dir.as_ref();
-    let takeover_dir = takeover_dir.as_ref();
+    // let takeover_dir = takeover_dir.as_ref();
 
     // *********************************************************
     // write busybox executable to tmpfs
 
-    let busybox = mig_info.get_assets().write_to(&takeover_dir)?;
+    //let busybox = mig_info.get_assets().write_to(&takeover_dir)?;
 
-    info!("Copied busybox executable to '{}'", busybox.display());
+    // info!("Copied busybox executable to '{}'", busybox.display());
 
     // *********************************************************
     // write config.json to tmpfs
@@ -123,17 +107,6 @@ fn copy_files<P1: AsRef<Path>, P2: AsRef<Path>>(
         wifi_config.create_nwmgr_file(&nwmgr_path, nwmgr_cfgs)?;
     }
 
-    let target_path = path_append(takeover_dir, "takeover");
-    let curr_exe =
-        current_exe().upstream_with_context("Failed to retrieve path of current executable")?;
-
-    copy(&curr_exe, &target_path).upstream_with_context(&format!(
-        "Failed to copy current executable '{}' to '{}",
-        curr_exe.display(),
-        target_path.display()
-    ))?;
-
-    info!("Copied current executable to '{}'", target_path.display());
     Ok(())
 }
 
@@ -187,7 +160,7 @@ fn mount_sys_filesystems(
     // *********************************************************
     // mount tmpfs
 
-    mount_fs(&takeover_dir, "tmpfs", "tmpfs", mig_info)?;
+    mount_fs(&takeover_dir, "tmpfs", "tmpfs", None)?;
 
     let curr_path = takeover_dir.join("etc");
     create_dir(&curr_path).upstream_with_context(&format!(
@@ -207,39 +180,27 @@ fn mount_sys_filesystems(
     info!("Created mtab in  '{}'", curr_path.display());
 
     let curr_path = takeover_dir.join("proc");
-    mount_fs(curr_path, "proc", "proc", mig_info)?;
+    mount_fs(curr_path, "proc", "proc", Some(mig_info))?;
 
     let curr_path = takeover_dir.join("tmp");
-    mount_fs(&curr_path, "tmpfs", "tmpfs", mig_info)?;
+    mount_fs(&curr_path, "tmpfs", "tmpfs", Some(mig_info))?;
 
     let curr_path = takeover_dir.join("sys");
-    mount_fs(&curr_path, "sys", "sysfs", mig_info)?;
+    mount_fs(&curr_path, "sys", "sysfs", Some(mig_info))?;
 
     if dir_exists(SYS_EFIVARS_DIR)? {
         let curr_path = path_append(&takeover_dir, SYS_EFIVARS_DIR);
         create_dir_all(&curr_path)?;
-        mount_fs(&curr_path, "efivarfs", "efivarfs", mig_info)?;
+        mount_fs(&curr_path, "efivarfs", "efivarfs", Some(mig_info))?;
         // TODO: copy stuff ?
     }
 
     let curr_path = takeover_dir.join("dev");
-    if mount_fs(&curr_path, "dev", "devtmpfs", mig_info).is_err() {
+    if mount_fs(&curr_path, "dev", "devtmpfs", Some(mig_info)).is_err() {
         warn!("Failed to mount devtmpfs on /dev, trying to copy device nodes");
-        mount_fs(&curr_path, "tmpfs", "tmpfs", mig_info)?;
+        mount_fs(&curr_path, "tmpfs", "tmpfs", Some(mig_info))?;
 
-        let cmd_res = call(
-            CP_CMD,
-            &["-a", "/dev/*", &*curr_path.to_string_lossy()],
-            true,
-        )?;
-        if !cmd_res.status.success() {
-            error!(
-                "Failed to copy /dev file system to '{}', error : '{}",
-                curr_path.display(),
-                cmd_res.stderr
-            );
-            return Err(Error::displayed());
-        }
+        copy_dir("/dev", &curr_path)?;
 
         let curr_path = takeover_dir.join("dev/pts");
         if curr_path.exists() {
@@ -258,7 +219,7 @@ fn mount_sys_filesystems(
     }
 
     let curr_path = takeover_dir.join("dev/pts");
-    mount_fs(&curr_path, "devpts", "devpts", mig_info)?;
+    mount_fs(&curr_path, "devpts", "devpts", Some(mig_info))?;
 
     Ok(())
 }
@@ -273,37 +234,36 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     // *********************************************************
     // calculate required memory
 
+    let mut req_space: u64 = 0;
+    let mut copy_commands = vec![DD_CMD];
+    if mig_info.is_x86() && !opts.is_no_fail_on_efi() && dir_exists(SYS_EFI_DIR)? {
+        copy_commands.push(EFIBOOTMGR_CMD)
+    }
+
+    let commands = match ExeCopy::new(copy_commands) {
+        Ok(commands) => {
+            let cmd_space = commands.get_req_space();
+            debug!(
+                "Space required for commands: {}",
+                format_size_with_unit(cmd_space)
+            );
+            req_space += cmd_space;
+            commands
+        }
+        Err(why) => {
+            return Err(Error::from_upstream_error(
+                Box::new(why),
+                "Failed to gather dependencies for copied commands",
+            ));
+        }
+    };
+
     let (mem_tot, mem_free) = get_mem_info()?;
     info!(
         "Found {} total, {} free memory",
         format_size_with_unit(mem_tot),
         format_size_with_unit(mem_free)
     );
-
-    let mut req_space = get_required_space(mig_info)?;
-
-    let efi_files = if mig_info.is_x86() && dir_exists(SYS_EFI_DIR)? {
-        match EfiFiles::new() {
-            Ok(efi_files) => {
-                req_space += efi_files.get_req_space();
-                Some(efi_files)
-            }
-            Err(why) => {
-                if opts.is_no_fail_on_efi() {
-                    warn!("Efi setup failed with error: {}", why);
-                    warn!("The device will not be able to boot in EFI mode");
-                    None
-                } else {
-                    return Err(Error::from_upstream_error(
-                        Box::new(why),
-                        "Failed to setup efi",
-                    ));
-                }
-            }
-        }
-    } else {
-        None
-    };
 
     // TODO: maybe kill some procs first
     if mem_free < req_space + S1_XTRA_FS_SIZE {
@@ -316,10 +276,49 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     // *********************************************************
     // make mountpoint for tmpfs
-    let takeover_dir = mktemp(true, Some("TO.XXXXXXXX"), Some("/"))?;
+    let takeover_dir = PathBuf::from(TAKEOVER_DIR);
+    match stat(&takeover_dir) {
+        Ok(stat) => {
+            if is_dir(&stat) {
+                let read_dir = read_dir(&takeover_dir).upstream_with_context(&format!(
+                    "Failed to read directory '{}'",
+                    takeover_dir.display()
+                ))?;
+                if read_dir.count() > 0 {
+                    error!(
+                        "Found a non-empty directory '{}' - please remove or rename this directory",
+                        takeover_dir.display()
+                    );
+                    return Err(Error::displayed());
+                } else {
+                    warn!(
+                        "Directory '{}' exists. Reusing directory",
+                        takeover_dir.display()
+                    );
+                }
+            } else {
+                error!(
+                    "Found a file '{}' - please remove or rename this file",
+                    takeover_dir.display()
+                );
+                return Err(Error::displayed());
+            }
+        }
+        Err(why) => {
+            if why.kind() == ErrorKind::FileNotFound {
+                mkdir(&takeover_dir, 0o755)?;
+            } else {
+                return Err(Error::from_upstream(
+                    Box::new(why),
+                    &format!("Failed to stat '{}'", takeover_dir.display()),
+                ));
+            }
+        }
+    }
+
     mig_info.set_to_dir(&takeover_dir);
 
-    info!("Created takeover directory in '{}'", takeover_dir.display());
+    info!("Using '{}' as takeover directory", takeover_dir.display());
 
     mount_sys_filesystems(&takeover_dir, mig_info, opts)?;
 
@@ -335,24 +334,19 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     info!("Created directory '{}'", curr_path.display());
 
-    if let Some(efi_files) = &efi_files {
-        efi_files.copy_files(&takeover_dir)?;
-    }
+    commands.copy_files(&takeover_dir)?;
 
-    copy_files(opts.get_work_dir(), mig_info, &takeover_dir)?;
+    prepare_configs(opts.get_work_dir(), mig_info)?;
 
     // *********************************************************
     // setup new init
 
-    let tty = read_link("/proc/self/fd/1")
-        .upstream_with_context("Failed to read link for /proc/self/fd/1")?;
-
     let old_init_path =
         read_link("/proc/1/exe").upstream_with_context("Failed to read link for /proc/1/exe")?;
-    let new_init_path = takeover_dir
-        .join("tmp")
-        .join(old_init_path.file_name().unwrap());
-    Assets::write_stage2_script(&takeover_dir, &new_init_path, &tty, opts.get_s2_log_level())?;
+
+    // TODO: make new_init_path point to /$takeover_dir/bin/takeover directly
+    let new_init_path = path_append(&takeover_dir, &format!("/bin/{}", env!("CARGO_PKG_NAME")));
+    // Assets::write_stage2_script(&takeover_dir, &new_init_path, &tty, opts.get_s2_log_level())?;
 
     let block_dev_info = BlockDeviceInfo::new()?;
 
@@ -386,6 +380,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     let s2_cfg = Stage2Config {
         log_dev: opts.get_log_to().clone(),
+        log_level: opts.get_s2_log_level().to_string(),
         flash_dev: flash_dev.get_dev_path().to_path_buf(),
         pretend: opts.is_pretend(),
         umount_parts: get_umount_parts(flash_dev, &block_dev_info)?,
@@ -399,11 +394,8 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         image_path: mig_info.get_image_path().to_path_buf(),
         config_path: mig_info.get_balena_cfg().get_path().to_path_buf(),
         backup_path: None,
-        efi_boot_mgr_path: if let Some(efi_files) = &efi_files {
-            Some(efi_files.get_exec_path().to_owned())
-        } else {
-            None
-        },
+        tty: read_link("/proc/self/fd/1")
+            .upstream_with_context("Failed to read tty from '/proc/self/fd/1'")?,
     };
 
     let s2_cfg_path = takeover_dir.join(STAGE2_CONFIG_NAME);
@@ -448,6 +440,8 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     info!("Bind-mounted new init as '{}'", new_init_path.display());
 
+    //return Ok(());
+
     debug!("calling '{} u'", TELINIT_CMD,);
     call_command!(
         TELINIT_CMD,
@@ -465,9 +459,15 @@ pub fn stage1(opts: &Options) -> Result<()> {
     Logger::set_brief_info(true);
     Logger::set_color(true);
 
-    if opts.is_build_num() {
-        println!("build: {}", Assets::get_build_num()?);
-        return Ok(());
+    /*    if opts.is_build_num() {
+            println!("build: {}", Assets::get_build_num()?);
+            return Ok(());
+        }
+    */
+    if opts.get_config().is_none() {
+        let mut clap = Options::clap();
+        let _res = clap.print_help();
+        return Err(Error::displayed());
     }
 
     if let Some(s1_log_path) = opts.get_log_file() {
@@ -487,7 +487,10 @@ pub fn stage1(opts: &Options) -> Result<()> {
             if why.kind() == ErrorKind::ImageDownloaded {
                 return Ok(());
             } else {
-                return Err(Error::from_upstream(why, "Failed to create migrate info"));
+                return Err(Error::from_upstream(
+                    Box::new(why),
+                    "Failed to create migrate info",
+                ));
             }
         }
     };
@@ -503,7 +506,7 @@ pub fn stage1(opts: &Options) -> Result<()> {
             let mut buffer = String::new();
             match std::io::stdin().read_line(&mut buffer) {
                 Ok(_) => match buffer.trim() {
-                    "Y" => {
+                    "Y" | "y" => {
                         break;
                     }
                     "n" => {
@@ -517,7 +520,7 @@ pub fn stage1(opts: &Options) -> Result<()> {
                 },
                 Err(why) => {
                     return Err(Error::from_upstream(
-                        From::from(why),
+                        Box::new(why),
                         "Failed to read line from stdin",
                     ))
                 }

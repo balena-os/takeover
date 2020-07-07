@@ -67,8 +67,6 @@ pub struct Options {
     pretend: bool,
     #[structopt(long, help = "Internal - stage2 invocation")]
     stage2: bool,
-    #[structopt(long, help = "Internal - init process invocation")]
-    init: bool,
     #[structopt(long, help = "Debug - do not cleanup after stage1 failure")]
     no_cleanup: bool,
     #[structopt(long, help = "Do not check if OS is supported")]
@@ -83,8 +81,6 @@ pub struct Options {
     no_nwmgr_check: bool,
     #[structopt(long, help = "Do not migrate host-name")]
     no_keep_name: bool,
-    #[structopt(long, help = "Debug - print build num and exit")]
-    build_num: bool,
     #[structopt(
         short,
         long,
@@ -139,10 +135,6 @@ impl Options {
         self.stage2
     }
 
-    pub fn is_init(&self) -> bool {
-        self.init
-    }
-
     pub fn get_work_dir(&self) -> PathBuf {
         if let Some(work_dir) = &self.work_dir {
             work_dir.clone()
@@ -177,10 +169,6 @@ impl Options {
 
     pub fn is_pretend(&self) -> bool {
         self.pretend
-    }
-
-    pub fn is_build_num(&self) -> bool {
-        self.build_num
     }
 
     pub fn get_log_file(&self) -> &Option<PathBuf> {

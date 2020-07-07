@@ -6,22 +6,19 @@ use std::time::Duration;
 
 use nix::errno::errno;
 use std::cmp::min;
-use std::ffi::{CString, OsStr, OsString};
+use std::ffi::{CString, OsStr};
 use std::io;
 use std::os::unix::ffi::OsStrExt;
-
-use std::os::raw::c_int;
 
 use crate::common::{
     defs::IoctlReq,
     error::{Error, ErrorKind, Result, ToError},
+    hex_dump, path_to_cstring,
+    system::fd::Fd,
 };
 use log::{debug, trace};
 
-use libc::{
-    self, close, ioctl, makedev, mknod, open, EAGAIN, ENODEV, ENOENT, ENXIO, O_CLOEXEC, O_RDWR,
-    S_IFBLK,
-};
+use libc::{self, ioctl, makedev, mknod, EAGAIN, ENXIO, O_CLOEXEC, O_RDWR, S_IFBLK};
 
 const MAX_LOOP: u32 = 1024;
 
@@ -31,28 +28,8 @@ const IOCTL_LOOP_CTL_GET_FREE: IoctlReq = 0x4c82;
 const IOCTL_LOOP_GET_STATUS_64: IoctlReq = 0x4c05;
 const IOCTL_LOOP_SET_STATUS_64: IoctlReq = 0x4c04;
 
-// from /usr/src/linux/loop.h
-
 const LO_NAME_SIZE: usize = 64;
 const LO_KEY_SIZE: usize = 32;
-
-/* prio to kernel 2.6
-#[repr(C)]
-pub struct LoopInfo {
-    lo_number: c_int,
-    lo_device: dev_t, // __kernel_old_dev_t
-    lo_inode: c_ulong,
-    lo_rdevice: dev_t, // __kernel_old_dev_t
-    lo_offset: c_int,
-    lo_encrypt_type: c_int,
-    lo_encrypt_key_size: c_int,
-    lo_flags: c_int,
-    lo_name: [c_char; LO_NAME_SIZE],
-    lo_encrypt_key: [c_uchar; LO_KEY_SIZE],
-    lo_init: [c_ulong; 2],
-    reserved: [c_char; 4],
-}
-*/
 
 #[repr(C)]
 pub struct LoopInfo64 {
@@ -134,7 +111,7 @@ impl LoopDevice {
                     Err(why) => {
                         if why.kind() != ErrorKind::DeviceNotFound {
                             return Err(Error::from_upstream(
-                                why,
+                                Box::new(why),
                                 &format!(
                                     "from_index: failed to retrieve loop info from device'{}'",
                                     loop_dev.path.display()
@@ -161,19 +138,19 @@ impl LoopDevice {
                             unset: auto_unset,
                         })
                     } else {
-                        Err(Error::with_context(
+                        Err(Error::with_all(
                             ErrorKind::Upstream,
                             &format!(
-                                "from_index: Failed to create device node '{}', error {}",
-                                path.display(),
-                                io::Error::last_os_error().to_string()
+                                "from_index: Failed to create device node '{}'",
+                                path.display()
                             ),
+                            Box::new(io::Error::last_os_error()),
                         ))
                     }
                 } else {
                     // some other error opening device
                     Err(Error::from_upstream(
-                        why,
+                        Box::new(why),
                         &format!("from_index: Failed to open device '{}'", path.display()),
                     ))
                 }
@@ -454,7 +431,7 @@ impl LoopDevice {
                             continue;
                         } else {
                             return Err(Error::from_upstream(
-                                why,
+                                Box::new(why),
                                 &format!(
                                     "get_loop_infos: Failed to open loop device for index {}",
                                     loop_idx
@@ -475,74 +452,6 @@ impl Drop for LoopDevice {
             let _res = self.unset();
         }
     }
-}
-
-struct Fd {
-    fd: c_int,
-}
-
-impl Fd {
-    fn get_fd(&self) -> c_int {
-        self.fd
-    }
-
-    fn open<P: AsRef<Path>>(file: P, mode: c_int) -> Result<Fd> {
-        let file_name = path_to_cstring(&file)?;
-        let fname_ptr = file_name.into_raw();
-        let fd = unsafe { open(fname_ptr, mode) };
-        let _file_name = unsafe { CString::from_raw(fname_ptr) };
-        if fd >= 0 {
-            debug!(
-                "Fd::open: opened path: '{}' as fd {}",
-                file.as_ref().display(),
-                fd
-            );
-            Ok(Fd { fd })
-        } else {
-            let err_no = errno();
-            debug!(
-                "Fd:open: failed to open file '{}', error {}, ",
-                file.as_ref().display(),
-                err_no,
-            );
-
-            if (err_no == ENOENT) || (err_no == ENODEV) {
-                Err(Error::with_context(
-                    ErrorKind::FileNotFound,
-                    &format!(
-                        "Fd::open: Failed to open file '{}', error {}",
-                        file.as_ref().display(),
-                        io::Error::last_os_error()
-                    ),
-                ))
-            } else {
-                Err(Error::with_context(
-                    ErrorKind::Upstream,
-                    &format!(
-                        "Fd::open: Failed to open file '{}', error {}",
-                        file.as_ref().display(),
-                        io::Error::last_os_error()
-                    ),
-                ))
-            }
-        }
-    }
-}
-
-impl Drop for Fd {
-    fn drop(&mut self) {
-        unsafe { close(self.fd) };
-    }
-}
-
-fn path_to_cstring<P: AsRef<Path>>(path: P) -> Result<CString> {
-    let temp: OsString = path.as_ref().into();
-    Ok(
-        CString::new(temp.as_bytes()).upstream_with_context(&format!(
-            "Failed to convert path to CString: '{}'",
-            path.as_ref().display()
-        ))?,
-    )
 }
 
 fn path_to_cbuffer<P: AsRef<Path>>(path: P, buffer: &mut [u8]) -> Result<()> {
@@ -593,24 +502,4 @@ pub(crate) fn key_to_string(key: &[u8], max_len: Option<usize>) -> String {
         res.push_str(&format!("{:02x}", val))
     }
     res
-}
-
-pub fn hex_dump(buffer: &[u8]) -> String {
-    let mut idx = 0;
-    let mut output = String::new();
-    while idx < buffer.len() {
-        output.push_str(&format!("0x{:08x}: ", idx));
-        for _ in 0..min(buffer.len() - idx, 16) {
-            let byte = buffer[idx];
-            let char: char = if (byte as u8).is_ascii_alphanumeric() {
-                char::from(byte as u8)
-            } else {
-                '.'
-            };
-            output.push_str(&format!("{:02x} {}  ", byte, char));
-            idx += 1;
-        }
-        output.push('\n');
-    }
-    output
 }

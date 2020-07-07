@@ -15,6 +15,9 @@ pub enum ErrorKind {
     ImageDownloaded,
     ExecProcess,
     CmdIo,
+    Permission,
+    FileExists,
+    NotPermitted,
     Displayed,
 }
 
@@ -31,6 +34,9 @@ impl Display for ErrorKind {
             Self::ImageDownloaded => "The image was downloaded successfully",
             Self::ExecProcess => "A spawned process returned an error code",
             Self::CmdIo => "A command IO stream operation failed",
+            Self::Permission => "Permission was denied",
+            Self::NotPermitted => "Operation is not permitted",
+            Self::FileExists => "The file exists",
             Self::Displayed => "The error was displayed upstream",
         };
         write!(f, "{}", output)
@@ -89,10 +95,13 @@ impl Error {
     }
 
     #[allow(clippy::wrong_self_convention)]
-    pub fn from_upstream(cause: Error, context: &str) -> Error {
+    pub fn from_upstream<E: error::Error + Send + Sync + 'static>(
+        cause: Box<E>,
+        context: &str,
+    ) -> Error {
         Error {
             kind: ErrorKind::Upstream,
-            cause: Some(Box::new(cause)),
+            cause: Some(cause),
             context: Some(context.to_owned()),
         }
     }

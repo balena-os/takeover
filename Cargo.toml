@@ -61,6 +61,12 @@ version = "0.7.0"
 [dependencies.lazy_static]
 version = "1.4.0"
 
+[dependencies.rand]
+version = "0.7.3"
+
+[dependencies.cfg-if]
+version = "0.1"
+
 [features]
 raspberrypi3 = []
 raspberrypi4-64 = []
