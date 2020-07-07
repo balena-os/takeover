@@ -21,7 +21,7 @@ pub(crate) fn check_os(supported: &[&str], opts: &Options, dev_type: &str) -> Re
     let os_supported = supported.iter().any(|&r| r == os_name);
 
     if !os_supported {
-        if opts.is_os_check() {
+        if opts.os_check() {
             error!(
                 "The OS '{}' has not been tested with {} for device type {}, to override this check use the no-os-check option on the command line",
                 os_name,

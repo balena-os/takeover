@@ -54,6 +54,7 @@ use crate::{
 
 use crate::common::defs::{DD_CMD, EFIBOOTMGR_CMD, TAKEOVER_DIR};
 use crate::common::dir_exists;
+use crate::common::stage2_config::LogDevice;
 use crate::common::system::{is_dir, mkdir, stat};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
@@ -211,11 +212,11 @@ fn mount_sys_filesystems(
         }
     }
 
-    if (opts.get_log_level() == Level::Debug) || (opts.get_log_level() == Level::Trace) {
+    if (opts.log_level() == Level::Debug) || (opts.log_level() == Level::Trace) {
         use crate::common::debug::check_loop_control;
         check_loop_control("After dev mount", &curr_path);
     } else {
-        debug!("(??)Log Level: {:?}", opts.get_log_level());
+        debug!("(??)Log Level: {:?}", opts.log_level());
     }
 
     let curr_path = takeover_dir.join("dev/pts");
@@ -236,7 +237,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     let mut req_space: u64 = 0;
     let mut copy_commands = vec![DD_CMD];
-    if mig_info.is_x86() && !opts.is_no_fail_on_efi() && dir_exists(SYS_EFI_DIR)? {
+    if mig_info.is_x86() && !opts.no_efi_setup() && dir_exists(SYS_EFI_DIR)? {
         copy_commands.push(EFIBOOTMGR_CMD)
     }
 
@@ -336,7 +337,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     commands.copy_files(&takeover_dir)?;
 
-    prepare_configs(opts.get_work_dir(), mig_info)?;
+    prepare_configs(opts.work_dir(), mig_info)?;
 
     // *********************************************************
     // setup new init
@@ -350,7 +351,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     let block_dev_info = BlockDeviceInfo::new()?;
 
-    let flash_dev = if let Some(flash_dev) = opts.get_flash_to() {
+    let flash_dev = if let Some(flash_dev) = opts.flash_to() {
         if let Some(flash_dev) = block_dev_info.get_devices().get(flash_dev) {
             flash_dev
         } else {
@@ -376,20 +377,71 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         ));
     }
 
+    let log_device = if let Some(log_dev_path) = opts.log_to() {
+        if let Some(log_dev) = block_dev_info.get_devices().get(log_dev_path) {
+            if let Some(partition_info) = log_dev.get_partition_info() {
+                if let Some(fs_type) = partition_info.fs_type() {
+                    const SUPPORTED_LOG_FS_TYPES: [&str; 3] = ["vfat", "ext3", "ext4"];
+                    if SUPPORTED_LOG_FS_TYPES.iter().any(|val| *val == fs_type) {
+                        Some(LogDevice {
+                            dev_name: log_dev_path.clone(),
+                            fs_type: fs_type.to_owned(),
+                        })
+                    } else {
+                        return Err(Error::with_context(
+                            ErrorKind::InvState,
+                            &format!(
+                                "Unsupported fs_type '{}' for log partition '{}'",
+                                fs_type,
+                                log_dev.get_dev_path().display()
+                            ),
+                        ));
+                    }
+                } else {
+                    return Err(Error::with_context(
+                        ErrorKind::InvState,
+                        &format!(
+                            "No fs_type detected for partition '{}'",
+                            log_dev.get_dev_path().display()
+                        ),
+                    ));
+                }
+            } else {
+                return Err(Error::with_context(
+                    ErrorKind::DeviceNotFound,
+                    &format!(
+                        "The device is not a partition: '{}'",
+                        log_dev.get_dev_path().display()
+                    ),
+                ));
+            }
+        } else {
+            return Err(Error::with_context(
+                ErrorKind::DeviceNotFound,
+                &format!(
+                    "The device could not be found: '{}'",
+                    log_dev_path.display()
+                ),
+            ));
+        }
+    } else {
+        None
+    };
+
     // collect partitions that need to be unmounted
 
     let s2_cfg = Stage2Config {
-        log_dev: opts.get_log_to().clone(),
-        log_level: opts.get_s2_log_level().to_string(),
+        log_dev: log_device,
+        log_level: opts.s2_log_level().to_string(),
         flash_dev: flash_dev.get_dev_path().to_path_buf(),
-        pretend: opts.is_pretend(),
+        pretend: opts.pretend(),
         umount_parts: get_umount_parts(flash_dev, &block_dev_info)?,
         work_dir: opts
-            .get_work_dir()
+            .work_dir()
             .canonicalize()
             .upstream_with_context(&format!(
                 "Failed to canonicalize work dir '{}'",
-                opts.get_work_dir().display()
+                opts.work_dir().display()
             ))?,
         image_path: mig_info.get_image_path().to_path_buf(),
         config_path: mig_info.get_balena_cfg().get_path().to_path_buf(),
@@ -455,7 +507,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 }
 
 pub fn stage1(opts: &Options) -> Result<()> {
-    Logger::set_default_level(opts.get_log_level());
+    Logger::set_default_level(opts.log_level());
     Logger::set_brief_info(true);
     Logger::set_color(true);
 
@@ -464,13 +516,13 @@ pub fn stage1(opts: &Options) -> Result<()> {
             return Ok(());
         }
     */
-    if opts.get_config().is_none() {
+    if opts.config().is_none() {
         let mut clap = Options::clap();
         let _res = clap.print_help();
         return Err(Error::displayed());
     }
 
-    if let Some(s1_log_path) = opts.get_log_file() {
+    if let Some(s1_log_path) = opts.log_file() {
         Logger::set_log_file(&LogDestination::StreamStderr, &s1_log_path, true)
             .upstream_with_context(&format!(
                 "Failed to set logging to '{}'",
@@ -500,7 +552,7 @@ pub fn stage1(opts: &Options) -> Result<()> {
         return Err(Error::displayed());
     }
 
-    if !opts.is_no_ack() {
+    if !opts.no_ack() {
         println!("{} will prepare your device for migration. Are you sure you want to migrate this device: [Y/n]", env!("CARGO_PKG_NAME"));
         loop {
             let mut buffer = String::new();
@@ -528,7 +580,7 @@ pub fn stage1(opts: &Options) -> Result<()> {
         }
     }
 
-    if opts.is_migrate() {
+    if opts.migrate() {
         match prepare(&opts, &mut mig_info) {
             Ok(_) => {
                 info!("Takeover initiated successfully, please wait for the device to be reflashed and reboot");
@@ -538,7 +590,7 @@ pub fn stage1(opts: &Options) -> Result<()> {
                 Ok(())
             }
             Err(why) => {
-                if opts.is_cleanup() {
+                if opts.cleanup() {
                     mig_info.umount_all();
                 }
                 Err(why)

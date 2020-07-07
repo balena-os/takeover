@@ -25,14 +25,12 @@ USAGE:
     takeover [FLAGS] [OPTIONS]
 
 FLAGS:
-        --build-num         Debug - print build num and exit
     -d, --download-only     Download image only, do not check device and migrate
     -h, --help              Prints help information
-        --init              Internal - init process invocation
         --no-ack            Scripted mode - no interactive acknoledgement of takeover
         --no-api-check      Do not check if balena API is available
         --no-cleanup        Debug - do not cleanup after stage1 failure
-        --no-fail-on-efi    Do not fail if EFI setup fails
+        --no-efi-setup      Do not setup EFI boot
         --no-keep-name      Do not migrate host-name
         --no-nwmgr-check    Do not check network manager files exist
         --no-os-check       Do not check if OS is supported

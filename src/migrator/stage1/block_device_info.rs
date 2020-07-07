@@ -244,11 +244,21 @@ impl BlockDeviceInfo {
         root_number: &DeviceNum,
         device_map: &mut DeviceMap,
     ) -> Result<()> {
+        trace!(
+            "read_partitions: device: {} dev_path: {}",
+            device.get_name(),
+            dev_path.as_ref().display()
+        );
+
         let dev_path = dev_path.as_ref();
         let dir_entries = read_dir(dev_path).upstream_with_context(&format!(
             "Failed to read directory '{}'",
             dev_path.display()
         ))?;
+
+        let regex_str = format!(r"^{}p?\d+$", device.get_name());
+        let part_regex = Regex::new(regex_str.as_str())
+            .upstream_with_context(&format!("Failed to create regex from '{}'", regex_str))?;
 
         for entry in dir_entries {
             match entry {
@@ -257,14 +267,14 @@ impl BlockDeviceInfo {
                     if entry
                         .metadata()
                         .upstream_with_context(&format!(
-                            "Failed toretrieve metadata for '{}'",
+                            "Failed to retrieve metadata for '{}'",
                             currdir.display()
                         ))?
                         .is_dir()
                     {
                         let part_name = BlockDeviceInfo::path_filename_as_string(&currdir)?;
 
-                        if !part_name.starts_with(&device.as_ref().get_name()) {
+                        if !part_regex.is_match(part_name.as_str()) {
                             trace!("Skipping folder '{}", currdir.display());
                             continue;
                         }
@@ -284,16 +294,17 @@ impl BlockDeviceInfo {
                             None
                         };
 
-                        let partition = Rc::new(Box::new(Partition {
-                            name: part_name,
-                            device_num: curr_number,
+                        let partition = Rc::new(Box::new(Partition::new(
+                            part_name.as_str(),
+                            curr_number,
                             mounted,
-                            parent: device.clone(),
-                        }) as Box<dyn BlockDevice>);
+                            device.clone(),
+                        )?)
+                            as Box<dyn BlockDevice>);
 
                         debug!(
                             "found  partition '{:?}' in '{}'",
-                            partition,
+                            partition.get_name(),
                             currdir.display(),
                         );
                         device_map.insert(dev_path, partition);

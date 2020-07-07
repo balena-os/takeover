@@ -20,6 +20,7 @@ use libc::{ioctl, LINUX_REBOOT_CMD_RESTART, MS_RDONLY, MS_REMOUNT, SIGKILL, SIGT
 use log::{debug, error, info, trace, warn, Level};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
+use crate::common::stage2_config::LogDevice;
 use crate::common::{
     call,
     defs::{
@@ -264,7 +265,7 @@ pub(crate) fn read_stage2_config<P: AsRef<Path>>(path_prefix: Option<P>) -> Resu
     }
 }
 
-fn setup_logging<P: AsRef<Path>>(log_dev: &Option<P>) {
+fn setup_logging(log_dev: Option<&LogDevice>) {
     if log_dev.is_some() {
         // Device should have been mounted by stage2-init
         match dir_exists("/mnt/log/") {
@@ -1027,7 +1028,7 @@ fn flash_external(target_path: &Path, image_path: &Path, dd_cmd: &str) -> FlashS
 
 #[allow(clippy::cognitive_complexity)]
 pub fn stage2(opts: &Options) -> ! {
-    Logger::set_default_level(opts.get_s2_log_level());
+    Logger::set_default_level(opts.s2_log_level());
     Logger::set_brief_info(false);
     Logger::set_color(true);
 
@@ -1049,9 +1050,9 @@ pub fn stage2(opts: &Options) -> ! {
 
     info!("Stage 2 config was read successfully");
 
-    setup_logging(&s2_config.log_dev);
+    setup_logging(s2_config.log_dev());
 
-    match kill_procs(opts.get_s2_log_level()) {
+    match kill_procs(opts.s2_log_level()) {
         Ok(_) => (),
         Err(why) => {
             error!("kill_procs failed, error {}", why);
@@ -1116,7 +1117,7 @@ pub fn stage2(opts: &Options) -> ! {
 
     sleep(Duration::from_secs(5));
 
-    if (opts.get_s2_log_level() == Level::Debug) || (opts.get_s2_log_level() == Level::Trace) {
+    if (opts.s2_log_level() == Level::Debug) || (opts.s2_log_level() == Level::Trace) {
         use crate::common::debug::check_loop_control;
         check_loop_control("Stage2 after flash", "/dev");
     }

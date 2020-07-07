@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use crate::stage1::block_device_info::mount::Mount;
+use crate::stage1::block_device_info::partition::PartitionInfo;
 use crate::stage1::block_device_info::DeviceNum;
 
 pub(crate) trait BlockDevice {
@@ -13,6 +14,7 @@ pub(crate) trait BlockDevice {
     fn get_parent(&self) -> Option<&Rc<Box<dyn BlockDevice>>>;
     fn is_partition(&self) -> bool;
     fn set_mountpoint(&mut self, mountpoint: Mount);
+    fn get_partition_info(&self) -> Option<&PartitionInfo>;
 }
 
 impl Debug for dyn BlockDevice {
