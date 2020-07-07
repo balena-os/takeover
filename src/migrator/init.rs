@@ -21,12 +21,12 @@ use std::fs::create_dir_all;
 use std::io;
 use std::mem::MaybeUninit;
 use std::os::raw::c_int;
-use std::path::Path;
 use std::process::Command;
 use std::str::FromStr;
 use std::thread::sleep;
 use std::time::Duration;
 
+use crate::common::stage2_config::LogDevice;
 use libc::{
     close, dup2, getpid, open, pipe, sigfillset, sigprocmask, sigset_t, wait, O_CREAT, O_TRUNC,
     O_WRONLY, SIG_BLOCK, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO,
@@ -34,15 +34,18 @@ use libc::{
 
 const INITIAL_LOG_LEVEL: Level = Level::Trace;
 
-fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<()> {
-    let log_dev = log_dev.as_ref();
-    trace!("setup_log entered with '{}'", log_dev.display());
-    if log_dev.exists() {
-        if let Some(mountpoint) = get_mountpoint(log_dev)? {
+fn setup_log(log_dev: &LogDevice) -> Result<()> {
+    trace!(
+        "setup_log entered with '{}', fs type: {}",
+        log_dev.dev_name.display(),
+        log_dev.fs_type
+    );
+    if log_dev.dev_name.exists() {
+        if let Some(mountpoint) = get_mountpoint(log_dev.dev_name.as_path())? {
             if let Err(why) = umount(&mountpoint) {
                 warn!(
                     "Failed to unmount log device '{}' from '{}', error: {:?}",
-                    log_dev.display(),
+                    log_dev.dev_name.display(),
                     mountpoint.display(),
                     why
                 );
@@ -59,21 +62,21 @@ fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<()> {
 
         // TODO: support other filesystem types
         mount(
-            Some(log_dev),
+            Some(&log_dev.dev_name),
             &mountpoint,
-            Some("vfat"),
+            Some(log_dev.fs_type.as_str()),
             MsFlags::empty(),
             NIX_NONE,
         )
         .upstream_with_context(&format!(
             "Failed to mount '{}' on '{}'",
-            log_dev.display(),
+            log_dev.dev_name.display(),
             mountpoint.display(),
         ))?;
 
         trace!(
             "Mounted '{}' to log mountpoint: '{}'",
-            log_dev.display(),
+            log_dev.dev_name.display(),
             mountpoint.display()
         );
         // TODO: remove this later
@@ -83,13 +86,16 @@ fn setup_log<P: AsRef<Path>>(log_dev: P) -> Result<()> {
         info!(
             "Now logging to '{}' on '{}'",
             logfile.display(),
-            log_dev.display()
+            log_dev.dev_name.display()
         );
         Ok(())
     } else {
         Err(Error::with_context(
             ErrorKind::InvParam,
-            &format!("The log device does not exist: '{}'", log_dev.display()),
+            &format!(
+                "The log device does not exist: '{}'",
+                log_dev.dev_name.display()
+            ),
         ))
     }
 }
@@ -251,7 +257,7 @@ pub fn init() -> ! {
     };
     info!("Stage 2 closed {} fd's", closed_fds);
 
-    let ext_log = if let Some(log_dev) = s2_config.get_log_dev() {
+    let ext_log = if let Some(log_dev) = s2_config.log_dev() {
         match setup_log(log_dev) {
             Ok(_) => true,
             Err(why) => {

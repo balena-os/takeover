@@ -12,10 +12,10 @@ use crate::{
     stage1::block_device_info::{block_device::BlockDevice, mount::Mount},
 };
 use lazy_static::lazy_static;
-use log::warn;
+use log::{debug, warn};
 use regex::Regex;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct PartitionInfo {
     uuid: Option<String>,
     block_size: Option<u32>,
@@ -27,8 +27,9 @@ pub(crate) struct PartitionInfo {
 impl PartitionInfo {
     pub fn new<P: AsRef<Path>>(device: P) -> Result<PartitionInfo> {
         lazy_static! {
-            static ref START_REGEX: Regex = Regex::new(r"([^:]+):\s+(.*)$").unwrap();
-            static ref NEXT_REGEX: Regex = Regex::new(r##"([^:]+):"([^"]*)"(\s+(.*))?$"##).unwrap();
+            static ref START_REGEX: Regex = Regex::new(r"^([^:]+):\s+(.+)$").unwrap();
+            static ref NEXT_REGEX: Regex =
+                Regex::new(r##"^([^=]+)="([^"]*)"(\s+(.+))?$"##).unwrap();
         }
 
         let cmd_res = call_command!(
@@ -38,7 +39,7 @@ impl PartitionInfo {
         )?;
 
         if let Some(captures) = START_REGEX.captures(cmd_res.as_str()) {
-            let mut next_params = captures.get(1);
+            let mut next_params = captures.get(2);
 
             let mut uuid: Option<String> = None;
             let mut block_size: Option<u32> = None;
@@ -50,6 +51,12 @@ impl PartitionInfo {
                 if let Some(captures) = NEXT_REGEX.captures(params.as_str()) {
                     let param_name = captures.get(1).unwrap().as_str();
                     let param_value = captures.get(2).unwrap().as_str();
+                    debug!(
+                        "PartitionInfo::new: {} got param name: {}, value: {}",
+                        device.as_ref().display(),
+                        param_name,
+                        param_value
+                    );
                     match param_name {
                         "UUID" => {
                             uuid = Some(param_value.to_owned());
@@ -73,16 +80,24 @@ impl PartitionInfo {
                         }
                     }
                     next_params = captures.get(4);
+                } else {
+                    break;
                 }
             }
 
-            Ok(PartitionInfo {
+            let part_info = PartitionInfo {
                 uuid,
                 block_size,
                 part_uuid,
                 fs_type,
                 label,
-            })
+            };
+            debug!(
+                "PartitionInfo::new: for {} got {:?}",
+                device.as_ref().display(),
+                part_info,
+            );
+            Ok(part_info)
         } else {
             Err(Error::with_context(
                 ErrorKind::InvParam,
@@ -120,7 +135,7 @@ impl Partition {
             device_num,
             mounted,
             parent,
-            partition_info: PartitionInfo::new(name)?,
+            partition_info: PartitionInfo::new(&format!("/dev/{}", name))?,
         })
     }
 }

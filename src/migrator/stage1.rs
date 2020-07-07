@@ -54,6 +54,7 @@ use crate::{
 
 use crate::common::defs::{DD_CMD, EFIBOOTMGR_CMD, TAKEOVER_DIR};
 use crate::common::dir_exists;
+use crate::common::stage2_config::LogDevice;
 use crate::common::system::{is_dir, mkdir, stat};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
@@ -376,13 +377,16 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         ));
     }
 
-    let log_fs_type = if let Some(log_dev) = opts.get_log_to() {
-        if let Some(log_dev) = block_dev_info.get_devices().get(log_dev) {
+    let log_device = if let Some(log_dev_path) = opts.get_log_to() {
+        if let Some(log_dev) = block_dev_info.get_devices().get(log_dev_path) {
             if let Some(partition_info) = log_dev.get_partition_info() {
                 if let Some(fs_type) = partition_info.fs_type() {
                     const SUPPORTED_LOG_FS_TYPES: [&str; 3] = ["vfat", "ext3", "ext4"];
                     if SUPPORTED_LOG_FS_TYPES.iter().any(|val| *val == fs_type) {
-                        fs_type.to_owned()
+                        Some(LogDevice {
+                            dev_name: log_dev_path.clone(),
+                            fs_type: fs_type.to_owned(),
+                        })
                     } else {
                         return Err(Error::with_context(
                             ErrorKind::InvState,
@@ -414,17 +418,20 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         } else {
             return Err(Error::with_context(
                 ErrorKind::DeviceNotFound,
-                &format!("The device could not be found: '{}'", log_dev.display()),
+                &format!(
+                    "The device could not be found: '{}'",
+                    log_dev_path.display()
+                ),
             ));
         }
     } else {
-        "".to_owned()
+        None
     };
 
     // collect partitions that need to be unmounted
 
     let s2_cfg = Stage2Config {
-        log_dev: opts.get_log_to().clone(),
+        log_dev: log_device,
         log_level: opts.get_s2_log_level().to_string(),
         flash_dev: flash_dev.get_dev_path().to_path_buf(),
         pretend: opts.is_pretend(),
