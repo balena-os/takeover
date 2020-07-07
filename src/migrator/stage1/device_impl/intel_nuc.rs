@@ -30,7 +30,7 @@ impl IntelNuc {
             "Manjaro Linux",
         ];
 
-        if opts.is_migrate() {
+        if opts.migrate() {
             if !check_os(SUPPORTED_OSSES, opts, "Generic x86_64/Intel Nuc")? {
                 return Err(Error::displayed());
             }

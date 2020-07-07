@@ -36,14 +36,14 @@ impl MigrateInfo {
         let device = get_device(opts)?;
         info!("Detected device type: {}", device.get_device_type());
 
-        let mut config = if let Some(balena_cfg) = opts.get_config() {
+        let mut config = if let Some(balena_cfg) = opts.config() {
             BalenaCfgJson::new(balena_cfg)?
         } else {
             error!("The required parameter --config/-c was not provided");
             return Err(Error::displayed());
         };
 
-        if opts.is_migrate() {
+        if opts.migrate() {
             config.check(opts, &*device)?;
         }
 
@@ -52,9 +52,9 @@ impl MigrateInfo {
             config.get_device_type()?
         );
 
-        let work_dir = opts.get_work_dir();
+        let work_dir = opts.work_dir();
 
-        let image_path = if let Some(image_path) = opts.get_image() {
+        let image_path = if let Some(image_path) = opts.image() {
             if file_exists(&image_path) {
                 image_path.canonicalize().upstream_with_context(&format!(
                     "Failed to canonicalize path '{}'",
@@ -72,7 +72,7 @@ impl MigrateInfo {
                 &config,
                 &work_dir,
                 config.get_device_type()?.as_str(),
-                opts.get_version(),
+                opts.version(),
             )?;
             image_path.canonicalize().upstream_with_context(&format!(
                 "Failed to canonicalize path '{}'",
@@ -80,7 +80,7 @@ impl MigrateInfo {
             ))?
         };
 
-        if !opts.is_migrate() {
+        if !opts.migrate() {
             return Err(Error::with_context(
                 ErrorKind::ImageDownloaded,
                 "Image downloaded successfully",
@@ -89,18 +89,18 @@ impl MigrateInfo {
 
         debug!("image path: '{}'", image_path.display());
 
-        let wifi_ssids = opts.get_wifis();
+        let wifi_ssids = opts.wifis();
 
-        let wifis: Vec<WifiConfig> = if !wifi_ssids.is_empty() || !opts.is_no_wifis() {
+        let wifis: Vec<WifiConfig> = if !wifi_ssids.is_empty() || !opts.no_wifis() {
             WifiConfig::scan(wifi_ssids)?
         } else {
             Vec::new()
         };
 
-        let nwmgr_files = Vec::from(opts.get_nwmgr_cfg());
+        let nwmgr_files = Vec::from(opts.nwmgr_cfg());
 
         if nwmgr_files.is_empty() && wifis.is_empty() {
-            if opts.is_no_nwmgr_check() {
+            if opts.no_nwmgr_check() {
                 warn!(
                     "No Network manager files were found, the device might not be able to come online"
                 );
@@ -112,7 +112,7 @@ impl MigrateInfo {
             }
         }
 
-        if opts.is_migrate_name() {
+        if opts.migrate_name() {
             let hostname = read_to_string("/proc/sys/kernel/hostname")
                 .upstream_with_context("Failed to read file '/proc/sys/kernel/hostname'")?
                 .trim()

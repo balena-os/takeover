@@ -121,7 +121,7 @@ pub(crate) struct BeagleboardXM {}
 impl BeagleboardXM {
     // this is used in stage1
     fn from_config(opts: &Options) -> Result<BeagleboardXM> {
-        if opts.is_migrate() && !check_os(&SUPPORTED_OSSES, opts, "Beagleboard XM")? {
+        if opts.migrate() && !check_os(&SUPPORTED_OSSES, opts, "Beagleboard XM")? {
             return Err(Error::displayed());
         }
 

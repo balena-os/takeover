@@ -69,7 +69,7 @@ pub(crate) struct RaspberryPi2;
 
 impl RaspberryPi2 {
     pub fn from_config(opts: &Options) -> Result<RaspberryPi2> {
-        if opts.is_migrate() && !check_os(&SUPPORTED_OSSES, opts, "Raspberry PI 2")? {
+        if opts.migrate() && !check_os(&SUPPORTED_OSSES, opts, "Raspberry PI 2")? {
             return Err(Error::displayed());
         }
 
@@ -91,7 +91,7 @@ pub(crate) struct RaspberryPi3;
 
 impl RaspberryPi3 {
     pub fn from_config(opts: &Options) -> Result<RaspberryPi3> {
-        if opts.is_migrate() && !check_os(&SUPPORTED_OSSES, opts, "Raspberry PI 3")? {
+        if opts.migrate() && !check_os(&SUPPORTED_OSSES, opts, "Raspberry PI 3")? {
             return Err(Error::displayed());
         }
 
@@ -113,7 +113,7 @@ pub(crate) struct RaspberryPi4_64;
 
 impl RaspberryPi4_64 {
     pub fn from_config(opts: &Options) -> Result<RaspberryPi4_64> {
-        if opts.is_migrate() && !check_os(&SUPPORTED_OSSES, opts, "Raspberry PI 4")? {
+        if opts.migrate() && !check_os(&SUPPORTED_OSSES, opts, "Raspberry PI 4")? {
             return Err(Error::displayed());
         }
 

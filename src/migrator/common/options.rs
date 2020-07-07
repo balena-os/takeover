@@ -75,8 +75,8 @@ pub struct Options {
     no_api_check: bool,
     #[structopt(long, help = "Do not check if balena VPN is available")]
     no_vpn_check: bool,
-    #[structopt(long, help = "Do not fail if EFI setup fails")]
-    no_fail_on_efi: bool,
+    #[structopt(long, help = "Do not setup EFI boot")]
+    no_efi_setup: bool,
     #[structopt(long, help = "Do not check network manager files exist")]
     no_nwmgr_check: bool,
     #[structopt(long, help = "Do not migrate host-name")]
@@ -131,11 +131,11 @@ pub struct Options {
 }
 
 impl Options {
-    pub fn is_stage2(&self) -> bool {
+    pub fn stage2(&self) -> bool {
         self.stage2
     }
 
-    pub fn get_work_dir(&self) -> PathBuf {
+    pub fn work_dir(&self) -> PathBuf {
         if let Some(work_dir) = &self.work_dir {
             work_dir.clone()
         } else {
@@ -143,11 +143,11 @@ impl Options {
         }
     }
 
-    pub fn get_image(&self) -> &Option<PathBuf> {
+    pub fn image(&self) -> &Option<PathBuf> {
         &self.image
     }
 
-    pub fn get_version(&self) -> &str {
+    pub fn version(&self) -> &str {
         if let Some(ref version) = self.version {
             version.as_str()
         } else {
@@ -155,31 +155,31 @@ impl Options {
         }
     }
 
-    pub fn is_no_ack(&self) -> bool {
+    pub fn no_ack(&self) -> bool {
         self.no_ack
     }
 
-    pub fn is_migrate(&self) -> bool {
+    pub fn migrate(&self) -> bool {
         !self.download_only
     }
 
-    pub fn get_config(&self) -> &Option<PathBuf> {
+    pub fn config(&self) -> &Option<PathBuf> {
         &self.config
     }
 
-    pub fn is_pretend(&self) -> bool {
+    pub fn pretend(&self) -> bool {
         self.pretend
     }
 
-    pub fn get_log_file(&self) -> &Option<PathBuf> {
+    pub fn log_file(&self) -> &Option<PathBuf> {
         &self.log_file
     }
 
-    pub fn get_log_level(&self) -> Level {
+    pub fn log_level(&self) -> Level {
         self.log_level
     }
 
-    pub fn get_s2_log_level(&self) -> Level {
+    pub fn s2_log_level(&self) -> Level {
         if let Some(level) = self.s2_log_level {
             level
         } else {
@@ -187,31 +187,31 @@ impl Options {
         }
     }
 
-    pub fn is_os_check(&self) -> bool {
+    pub fn os_check(&self) -> bool {
         !self.no_os_check
     }
 
-    pub fn is_no_fail_on_efi(&self) -> bool {
-        self.no_fail_on_efi
+    pub fn no_efi_setup(&self) -> bool {
+        self.no_efi_setup
     }
 
-    pub fn is_api_check(&self) -> bool {
+    pub fn api_check(&self) -> bool {
         !self.no_api_check
     }
 
-    pub fn is_vpn_check(&self) -> bool {
+    pub fn vpn_check(&self) -> bool {
         !self.no_vpn_check
     }
 
-    pub fn get_log_to(&self) -> &Option<PathBuf> {
+    pub fn log_to(&self) -> &Option<PathBuf> {
         &self.log_to
     }
 
-    pub fn get_flash_to(&self) -> &Option<PathBuf> {
+    pub fn flash_to(&self) -> &Option<PathBuf> {
         &self.flash_to
     }
 
-    pub fn get_check_timeout(&self) -> u64 {
+    pub fn check_timeout(&self) -> u64 {
         if let Some(timeout) = self.check_timeout {
             timeout
         } else {
@@ -219,11 +219,11 @@ impl Options {
         }
     }
 
-    pub fn is_no_wifis(&self) -> bool {
+    pub fn no_wifis(&self) -> bool {
         self.no_wifis
     }
 
-    pub fn get_wifis(&self) -> &[String] {
+    pub fn wifis(&self) -> &[String] {
         const NO_WIFIS: [String; 0] = [];
         if let Some(wifis) = &self.wifi {
             wifis.as_slice()
@@ -232,7 +232,7 @@ impl Options {
         }
     }
 
-    pub fn get_nwmgr_cfg(&self) -> &[PathBuf] {
+    pub fn nwmgr_cfg(&self) -> &[PathBuf] {
         if let Some(nwmgr_cfgs) = &self.nwmgr_cfg {
             nwmgr_cfgs.as_slice()
         } else {
@@ -241,15 +241,15 @@ impl Options {
         }
     }
 
-    pub fn is_no_nwmgr_check(&self) -> bool {
+    pub fn no_nwmgr_check(&self) -> bool {
         self.no_nwmgr_check
     }
 
-    pub fn is_migrate_name(&self) -> bool {
+    pub fn migrate_name(&self) -> bool {
         !self.no_keep_name
     }
 
-    pub fn is_cleanup(&self) -> bool {
+    pub fn cleanup(&self) -> bool {
         !self.no_cleanup
     }
 }

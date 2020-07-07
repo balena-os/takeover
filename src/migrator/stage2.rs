@@ -1028,7 +1028,7 @@ fn flash_external(target_path: &Path, image_path: &Path, dd_cmd: &str) -> FlashS
 
 #[allow(clippy::cognitive_complexity)]
 pub fn stage2(opts: &Options) -> ! {
-    Logger::set_default_level(opts.get_s2_log_level());
+    Logger::set_default_level(opts.s2_log_level());
     Logger::set_brief_info(false);
     Logger::set_color(true);
 
@@ -1052,7 +1052,7 @@ pub fn stage2(opts: &Options) -> ! {
 
     setup_logging(s2_config.log_dev());
 
-    match kill_procs(opts.get_s2_log_level()) {
+    match kill_procs(opts.s2_log_level()) {
         Ok(_) => (),
         Err(why) => {
             error!("kill_procs failed, error {}", why);
@@ -1117,7 +1117,7 @@ pub fn stage2(opts: &Options) -> ! {
 
     sleep(Duration::from_secs(5));
 
-    if (opts.get_s2_log_level() == Level::Debug) || (opts.get_s2_log_level() == Level::Trace) {
+    if (opts.s2_log_level() == Level::Debug) || (opts.s2_log_level() == Level::Trace) {
         use crate::common::debug::check_loop_control;
         check_loop_control("Stage2 after flash", "/dev");
     }

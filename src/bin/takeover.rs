@@ -20,7 +20,7 @@ fn main() {
     } else {
         let opts = Options::from_args();
 
-        if opts.is_stage2() {
+        if opts.stage2() {
             stage2(&opts);
         } else if let Err(why) = stage1(&opts) {
             exit_code = 1;
