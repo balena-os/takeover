@@ -263,201 +263,198 @@ impl<'a> Iterator for PartitionIterator<'a> {
             ToMbr(Box<MasterBootRecord>),
         }
 
-        let (res, mbr) = if let Some(ref mbr) = self.mbr {
-            if self.offset == 0 {
-                debug!(
-                    "PartitionIterator::next: offset: {}, index: {}, part_idx: {}, mbr: present",
-                    self.offset, self.index, self.part_idx
-                );
-                // we are on the first partition table
-                if self.index > 3 {
-                    // end of regular partition table reached
-                    (None, SetMbr::Leave)
+        loop {
+            let (res, mbr, skip) = if let Some(ref mbr) = self.mbr {
+                if self.offset == 0 {
+                    debug!(
+                        "PartitionIterator::next: offset: {}, index: {}, part_idx: {}, mbr: present",
+                        self.offset, self.index, self.part_idx
+                    );
+                    // we are on the first partition table
+                    if self.index > 3 {
+                        // end of regular partition table reached
+                        (None, SetMbr::Leave, false)
+                    } else {
+                        // read regular partition
+                        let part = &mbr.part_tbl[self.index];
+                        match PartitionType::from_ptype(part.ptype) {
+                            PartitionType::Empty =>
+                            // empty partition - Assume End of Table
+                            {
+                                (None, SetMbr::Leave, false)
+                            }
+                            PartitionType::Container => {
+                                // extended / container
+                                // return extended partition
+                                self.offset = u64::from(part.first_lba);
+                                // self.mbr = None; // we are done with this mbr
+
+                                (None, SetMbr::ToNone, true)
+                            }
+                            PartitionType::Fat | PartitionType::Linux => {
+                                // return regular partition
+                                self.index += 1;
+                                self.part_idx += 1;
+
+                                (
+                                    Some(PartInfo {
+                                        index: self.part_idx,
+                                        ptype: part.ptype,
+                                        status: part.status,
+                                        start_lba: u64::from(part.first_lba),
+                                        num_sectors: u64::from(part.num_sectors),
+                                    }),
+                                    SetMbr::Leave,
+                                    false,
+                                )
+                            }
+                            _ => {
+                                error!("Unsupported partition type encountered: {:x}", part.ptype);
+                                (None, SetMbr::Leave, false)
+                            }
+                        }
+                    }
                 } else {
-                    // read regular partition
-                    let part = &mbr.part_tbl[self.index];
-                    match PartitionType::from_ptype(part.ptype) {
-                        PartitionType::Empty =>
-                        // empty partition - Assume End of Table
-                        {
-                            (None, SetMbr::Leave)
-                        }
-                        PartitionType::Container => {
-                            // extended / container
-                            // return extended partition
-                            self.offset = u64::from(part.first_lba);
-                            // self.mbr = None; // we are done with this mbr
-                            self.part_idx += 1;
+                    // we are on an extended partitions table
+                    if self.index != 1 {
+                        error!("Unexpected index into extended partition {}", self.index);
+                        (None, SetMbr::Leave, false)
+                    } else {
+                        // Extended partition tables should have only 2 entries. The actual partition
+                        // which has already been reported (see None = self.mbr and below) and a pointer
+                        // to the next extended partition which we would be looking at here
 
-                            (
-                                Some(PartInfo {
-                                    index: self.part_idx,
-                                    ptype: part.ptype,
-                                    status: part.status,
-                                    start_lba: u64::from(part.first_lba),
-                                    num_sectors: u64::from(part.num_sectors),
-                                }),
-                                SetMbr::ToNone,
-                            )
-                        }
-                        PartitionType::Fat | PartitionType::Linux => {
-                            // return regular partition
-                            self.index += 1;
-                            self.part_idx += 1;
-
-                            (
-                                Some(PartInfo {
-                                    index: self.part_idx,
-                                    ptype: part.ptype,
-                                    status: part.status,
-                                    start_lba: u64::from(part.first_lba),
-                                    num_sectors: u64::from(part.num_sectors),
-                                }),
-                                SetMbr::Leave,
-                            )
-                        }
-                        _ => {
-                            error!("Unsupported partition type encountered: {:x}", part.ptype);
-                            (None, SetMbr::Leave)
+                        let part = &mbr.part_tbl[self.index];
+                        match PartitionType::from_ptype(part.ptype) {
+                            PartitionType::Empty => {
+                                // regular end  of extended partitions
+                                // // warn!("Empty partition on index 1 of extended partition is unexpected");
+                                (None, SetMbr::Leave, false)
+                            } // weird though
+                            PartitionType::Container => {
+                                // we are expecting a container partition here
+                                self.offset += u64::from(part.first_lba);
+                                match self.disk.read_mbr(self.offset) {
+                                    Ok(mbr) => {
+                                        let part = &mbr.part_tbl[0];
+                                        // self.mbr = Some(mbr)
+                                        match PartitionType::from_ptype(part.ptype) {
+                                            PartitionType::Linux | PartitionType::Fat => {
+                                                self.index = 1;
+                                                self.part_idx += 1;
+                                                (
+                                                    Some(PartInfo {
+                                                        index: self.part_idx,
+                                                        ptype: part.ptype,
+                                                        status: part.status,
+                                                        start_lba: self.offset
+                                                            + u64::from(part.first_lba),
+                                                        num_sectors: u64::from(part.num_sectors),
+                                                    }),
+                                                    SetMbr::ToMbr(Box::new(mbr)),
+                                                    false,
+                                                )
+                                            }
+                                            _ => {
+                                                error!("Unexpected partition type {:x} on index 0 of extended partition", part.ptype);
+                                                (None, SetMbr::Leave, false)
+                                            }
+                                        }
+                                    }
+                                    Err(why) => {
+                                        error!("Failed to read mbr, error:{:?}", why);
+                                        (None, SetMbr::Leave, false)
+                                    }
+                                }
+                            }
+                            _ => {
+                                error!(
+                                    "Unexpected partition type {:x} on index 1 of extended partition",
+                                    part.ptype
+                                );
+                                (None, SetMbr::Leave, false)
+                            }
                         }
                     }
                 }
             } else {
-                // we are on an extended partitions table
-                if self.index != 1 {
-                    error!("Unexpected index into extended partition {}", self.index);
-                    (None, SetMbr::Leave)
-                } else {
-                    // Extended partition tables should have only 2 entries. The actual partition
-                    // which has already been reported (see None = self.mbr and below) and a pointer
-                    // to the next extended partition which we would be looking at here
+                // this only happens after the first extended partition has been reported
+                debug!(
+                    "PartitionIterator::next: offset: {}, index: {}, part_idx: {}, mbr: absent",
+                    self.offset, self.index, self.part_idx
+                );
+                match self.disk.read_mbr(self.offset) {
+                    Ok(mbr) => {
+                        debug!("PartitionIterator::next: got mbr");
+                        let part = &mbr.part_tbl[0];
+                        // self.mbr = Some(mbr);
+                        let part_type = PartitionType::from_ptype(part.ptype);
+                        debug!(
+                            "PartitionIterator::next: got partition type: {:?}",
+                            part_type
+                        );
+                        match part_type {
+                            PartitionType::Empty => {
+                                debug!("PartitionIterator::next: got empty partition");
+                                // looks like the extended partition is empty
+                                (None, SetMbr::ToMbr(Box::new(mbr)), false)
+                            }
+                            PartitionType::Fat | PartitionType::Linux => {
+                                debug!("PartitionIterator::next: got partition data partition");
+                                self.index = 1;
+                                self.part_idx += 1;
 
-                    let part = &mbr.part_tbl[self.index];
-                    match PartitionType::from_ptype(part.ptype) {
-                        PartitionType::Empty => {
-                            // regular end  of extended partitions
-                            // // warn!("Empty partition on index 1 of extended partition is unexpected");
-                            (None, SetMbr::Leave)
-                        } // weird though
-                        PartitionType::Container => {
-                            // we are expecting a container partition here
-                            self.offset += u64::from(part.first_lba);
-                            match self.disk.read_mbr(self.offset) {
-                                Ok(mbr) => {
-                                    let part = &mbr.part_tbl[0];
-                                    // self.mbr = Some(mbr)
-                                    match PartitionType::from_ptype(part.ptype) {
-                                        PartitionType::Linux | PartitionType::Fat => {
-                                            self.index = 1;
-                                            self.part_idx += 1;
-                                            (
-                                                Some(PartInfo {
-                                                    index: self.part_idx,
-                                                    ptype: part.ptype,
-                                                    status: part.status,
-                                                    start_lba: self.offset
-                                                        + u64::from(part.first_lba),
-                                                    num_sectors: u64::from(part.num_sectors),
-                                                }),
-                                                SetMbr::ToMbr(Box::new(mbr)),
-                                            )
-                                        }
-                                        _ => {
-                                            error!("Unexpected partition type {:x} on index 0 of extended partition", part.ptype);
-                                            (None, SetMbr::Leave)
-                                        }
-                                    }
-                                }
-                                Err(why) => {
-                                    error!("Failed to read mbr, error:{:?}", why);
-                                    (None, SetMbr::Leave)
-                                }
+                                (
+                                    Some(PartInfo {
+                                        index: self.part_idx,
+                                        ptype: part.ptype,
+                                        status: part.status,
+                                        start_lba: self.offset + u64::from(part.first_lba),
+                                        num_sectors: u64::from(part.num_sectors),
+                                    }),
+                                    SetMbr::ToMbr(Box::new(mbr)),
+                                    false,
+                                )
+                            }
+                            _ => {
+                                error!(
+                                    "Unexpected partition type {:x} on index 0 of extended partition",
+                                    part.ptype
+                                );
+                                (None, SetMbr::Leave, false)
                             }
                         }
-                        _ => {
-                            error!(
-                                "Unexpected partition type {:x} on index 1 of extended partition",
-                                part.ptype
-                            );
-                            (None, SetMbr::Leave)
-                        }
+                    }
+                    Err(why) => {
+                        error!("Failed to read mbr, error:{:?}", why);
+                        (None, SetMbr::Leave, false)
                     }
                 }
-            }
-        } else {
-            // this only happens after the first extended partition has been reported
+            };
+
             debug!(
-                "PartitionIterator::next: offset: {}, index: {}, part_idx: {}, mbr: absent",
-                self.offset, self.index, self.part_idx
+                "PartitionIterator::next Res: {}",
+                if res.is_some() { "some" } else { "none" }
             );
-            match self.disk.read_mbr(self.offset) {
-                Ok(mbr) => {
-                    debug!("PartitionIterator::next: got mbr");
-                    let part = &mbr.part_tbl[0];
-                    // self.mbr = Some(mbr);
-                    let part_type = PartitionType::from_ptype(part.ptype);
-                    debug!(
-                        "PartitionIterator::next: got partition type: {:?}",
-                        part_type
-                    );
-                    match part_type {
-                        PartitionType::Empty => {
-                            debug!("PartitionIterator::next: got empty partition");
-                            // looks like the extended partition is empty
-                            (None, SetMbr::ToMbr(Box::new(mbr)))
-                        }
-                        PartitionType::Fat | PartitionType::Linux => {
-                            debug!("PartitionIterator::next: got partition data partition");
-                            self.index = 1;
-                            self.part_idx += 1;
 
-                            (
-                                Some(PartInfo {
-                                    index: self.part_idx,
-                                    ptype: part.ptype,
-                                    status: part.status,
-                                    start_lba: self.offset + u64::from(part.first_lba),
-                                    num_sectors: u64::from(part.num_sectors),
-                                }),
-                                SetMbr::ToMbr(Box::new(mbr)),
-                            )
-                        }
-                        _ => {
-                            error!(
-                                "Unexpected partition type {:x} on index 0 of extended partition",
-                                part.ptype
-                            );
-                            (None, SetMbr::Leave)
-                        }
-                    }
+            match mbr {
+                SetMbr::ToMbr(mbr) => {
+                    debug!("PartitionIterator::next set mbr");
+                    self.mbr = Some(*mbr);
                 }
-                Err(why) => {
-                    error!("Failed to read mbr, error:{:?}", why);
-                    (None, SetMbr::Leave)
+                SetMbr::Leave => {
+                    debug!("PartitionIterator::next leave mbr");
+                }
+                SetMbr::ToNone => {
+                    debug!("PartitionIterator::next reset mbr");
+                    self.mbr = None;
                 }
             }
-        };
 
-        debug!(
-            "PartitionIterator::next Res: {}",
-            if res.is_some() { "some" } else { "none" }
-        );
-
-        match mbr {
-            SetMbr::ToMbr(mbr) => {
-                debug!("PartitionIterator::next set mbr");
-                self.mbr = Some(*mbr);
-            }
-            SetMbr::Leave => {
-                debug!("PartitionIterator::next leave mbr");
-            }
-            SetMbr::ToNone => {
-                debug!("PartitionIterator::next reset mbr");
-                self.mbr = None;
+            if !skip {
+                return res;
             }
         }
-
-        res
     }
 }
 

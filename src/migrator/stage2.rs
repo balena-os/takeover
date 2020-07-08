@@ -632,8 +632,6 @@ fn efi_setup(device: &Path) -> Result<()> {
 fn raw_mount_balena(device: &Path) -> Result<()> {
     debug!("raw_mount_balena called");
 
-    let backup_path = path_append(TRANSFER_DIR, BACKUP_ARCH_NAME);
-
     if !dir_exists(BALENA_PART_MP)? {
         create_dir(BALENA_PART_MP).upstream_with_context(&format!(
             "Failed to create balena partition mountpoint: '{}'",
@@ -695,6 +693,8 @@ fn raw_mount_balena(device: &Path) -> Result<()> {
 
     info!("Unmounted boot partition from {}", BALENA_PART_MP);
 
+    let backup_path = path_append(TRANSFER_DIR, BACKUP_ARCH_NAME);
+
     if file_exists(&backup_path) {
         let byte_offset = data_part.start_lba * DEF_BLOCK_SIZE as u64;
         let size_limit = data_part.num_sectors * DEF_BLOCK_SIZE as u64;
@@ -730,12 +730,18 @@ fn raw_mount_balena(device: &Path) -> Result<()> {
 
         // TODO: copy files
 
-        let target_path = path_append(BALENA_PART_MP, BACKUP_ARCH_NAME);
+        let target_path = path_append(BALENA_PART_MP, "backup1.tgz");
         copy(&backup_path, &target_path).upstream_with_context(&format!(
             "Failed to copy '{}' to '{}'",
             backup_path.display(),
             target_path.display()
         ))?;
+
+        info!(
+            "copied '{}' to '{}'",
+            backup_path.display(),
+            target_path.display()
+        );
 
         sync();
 

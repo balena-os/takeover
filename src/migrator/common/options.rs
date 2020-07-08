@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use log::Level;
 use structopt::StructOpt;
@@ -53,6 +53,13 @@ pub struct Options {
         help = "Set stage1 log file name"
     )]
     log_file: Option<PathBuf>,
+    #[structopt(
+        long,
+        value_name = "BACKUP-CONFIG",
+        parse(from_os_str),
+        help = "Backup configuration file"
+    )]
+    backup_cfg: Option<PathBuf>,
     #[structopt(
         long,
         help = "Set stage2 log level, one of [error,warn,info,debug,trace]"
@@ -131,6 +138,14 @@ pub struct Options {
 }
 
 impl Options {
+    pub fn backup_config(&self) -> Option<&Path> {
+        if let Some(backup_cfg) = &self.backup_cfg {
+            Some(backup_cfg.as_path())
+        } else {
+            None
+        }
+    }
+
     pub fn stage2(&self) -> bool {
         self.stage2
     }

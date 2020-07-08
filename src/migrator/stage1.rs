@@ -1,3 +1,5 @@
+mod backup;
+
 use std::env::set_current_dir;
 use std::fs::{copy, create_dir, create_dir_all, read_dir, read_link, remove_dir_all, OpenOptions};
 use std::io::Write;
@@ -89,7 +91,7 @@ fn prepare_configs<P1: AsRef<Path>>(
         nwmgr_path.display()
     ))?;
 
-    for source_file in mig_info.get_nwmgr_files() {
+    for source_file in mig_info.nwmgr_files() {
         nwmgr_cfgs += 1;
         let target_file = path_append(&nwmgr_path, &format!("balena-{:02}", nwmgr_cfgs));
         copy(&source_file, &target_file).upstream_with_context(&format!(
@@ -104,7 +106,7 @@ fn prepare_configs<P1: AsRef<Path>>(
         );
     }
 
-    for wifi_config in mig_info.get_wifis() {
+    for wifi_config in mig_info.wifis() {
         wifi_config.create_nwmgr_file(&nwmgr_path, nwmgr_cfgs)?;
     }
 
@@ -443,9 +445,13 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
                 "Failed to canonicalize work dir '{}'",
                 opts.work_dir().display()
             ))?,
-        image_path: mig_info.get_image_path().to_path_buf(),
-        config_path: mig_info.get_balena_cfg().get_path().to_path_buf(),
-        backup_path: None,
+        image_path: mig_info.image_path().to_path_buf(),
+        config_path: mig_info.balena_cfg().get_path().to_path_buf(),
+        backup_path: if let Some(backup_path) = mig_info.backup() {
+            Some(backup_path.to_owned())
+        } else {
+            None
+        },
         tty: read_link("/proc/self/fd/1")
             .upstream_with_context("Failed to read tty from '/proc/self/fd/1'")?,
     };

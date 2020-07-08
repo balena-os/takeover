@@ -67,6 +67,9 @@ version = "0.7.3"
 [dependencies.cfg-if]
 version = "0.1"
 
+[dependencies.tar]
+version = "0.4"
+
 [features]
 raspberrypi3 = []
 raspberrypi4-64 = []

@@ -1,0 +1,32 @@
+# sample backup definition file
+# follows basic yaml syntax
+# define a volume to restore files to in balenaOS:
+#   - volume: 'volume-name'
+# define an item inside a volume
+# items consist of:
+#   a source - can be a directory or a file
+#   a target - the target directory or file name within the volume - can be empty / left out
+#              if ommitted the file / directory will be created in the volume root
+#   a filter - a regular expression to filter files by - only applicable to directory type source
+#              if ommitted no filter is applied
+
+- volume: "test volume 1"
+  items:
+    - item:
+      source: /home/thomas/develop/balena.io/support
+      target: "target dir 1.1"
+    - item:
+      source: "/home/thomas/develop/balena.io/customer/sonder/unitdata/UnitData files"
+      target: "target dir 1.2"
+- volume: "test volume 2"
+    - item:
+      source: "/home/thomas/develop/balena.io/migrate/migratecfg/balena-migrate"
+      target: "target file 2.1"
+    - item:
+      source: "/home/thomas/develop/balena.io/migrate/migratecfg/init-scripts"
+      target: "target dir 2.2"
+      filter: 'balena-.*'
+- volume: "test_volume_3"
+    - item:
+      source: "/home/thomas/develop/balena.io/migrate/migratecfg/init-scripts"
+      filter: 'balena-.*'
