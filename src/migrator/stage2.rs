@@ -534,8 +534,8 @@ fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo)> {
             1 => {
                 boot_part = Some(partition);
             }
-            2..=4 => debug!("Skipping partition {}", partition.index),
-            5 => {
+            2..=5 => debug!("Skipping partition {}", partition.index),
+            6 => {
                 data_part = Some(partition);
                 break;
             }
@@ -730,7 +730,7 @@ fn raw_mount_balena(device: &Path) -> Result<()> {
 
         // TODO: copy files
 
-        let target_path = path_append(BALENA_PART_MP, "backup1.tgz");
+        let target_path = path_append(BALENA_PART_MP, BACKUP_ARCH_NAME);
         copy(&backup_path, &target_path).upstream_with_context(&format!(
             "Failed to copy '{}' to '{}'",
             backup_path.display(),
