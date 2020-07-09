@@ -4,13 +4,17 @@ use std::path::{Path, PathBuf};
 use log::{debug, error, info, warn};
 use nix::mount::umount;
 
+use crate::common::defs::BACKUP_ARCH_NAME;
+use crate::common::path_append;
+use crate::stage1::backup::{create, create_ext};
 use crate::stage1::defs::DEV_TYPE_GEN_X86_64;
 use crate::stage1::utils::mktemp;
 use crate::{
     common::{file_exists, get_os_name, options::Options, Error, ErrorKind, Result, ToError},
     stage1::{
-        device::Device, device_impl::get_device, image_retrieval::download_image,
-        migrate_info::balena_cfg_json::BalenaCfgJson, wifi_config::WifiConfig,
+        backup::config::backup_cfg_from_file, device::Device, device_impl::get_device,
+        image_retrieval::download_image, migrate_info::balena_cfg_json::BalenaCfgJson,
+        wifi_config::WifiConfig,
     },
 };
 
@@ -28,6 +32,7 @@ pub(crate) struct MigrateInfo {
     work_dir: PathBuf,
     wifis: Vec<WifiConfig>,
     nwmgr_files: Vec<PathBuf>,
+    backup: Option<PathBuf>,
 }
 
 #[allow(dead_code)]
@@ -52,7 +57,13 @@ impl MigrateInfo {
             config.get_device_type()?
         );
 
-        let work_dir = opts.work_dir();
+        let work_dir = opts
+            .work_dir()
+            .canonicalize()
+            .upstream_with_context(&format!(
+                "Failed to canonicalize path to work_dir: '{}'",
+                opts.work_dir().display()
+            ))?;
 
         let image_path = if let Some(image_path) = opts.image() {
             if file_exists(&image_path) {
@@ -112,6 +123,22 @@ impl MigrateInfo {
             }
         }
 
+        let backup = if let Some(backup_cfg) = opts.backup_config() {
+            let backup_path = path_append(&work_dir, BACKUP_ARCH_NAME);
+            let created = if opts.tar_internal() {
+                create(backup_path.as_path(), backup_cfg_from_file(backup_cfg)?)?
+            } else {
+                create_ext(backup_path.as_path(), backup_cfg_from_file(backup_cfg)?)?
+            };
+            if created {
+                Some(backup_path)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         if opts.migrate_name() {
             let hostname = read_to_string("/proc/sys/kernel/hostname")
                 .upstream_with_context("Failed to read file '/proc/sys/kernel/hostname'")?
@@ -133,6 +160,7 @@ impl MigrateInfo {
             work_dir,
             wifis,
             nwmgr_files,
+            backup,
         })
     }
 
@@ -145,27 +173,31 @@ impl MigrateInfo {
         Ok(())
     }
 
-    pub fn is_x86(&self) -> bool {
-        self.device.supports_device_type(DEV_TYPE_GEN_X86_64)
-    }
-
-    /*    pub fn get_assets(&self) -> &Assets {
-            &self.assets
-        }
-    */
     pub fn set_to_dir(&mut self, to_dir: &PathBuf) {
         self.to_dir = Some(to_dir.clone())
     }
 
-    pub fn get_to_dir(&self) -> &Option<PathBuf> {
+    pub fn to_dir(&self) -> &Option<PathBuf> {
         &self.to_dir
     }
 
-    pub fn get_image_path(&self) -> &Path {
+    pub fn is_x86(&self) -> bool {
+        self.device.supports_device_type(DEV_TYPE_GEN_X86_64)
+    }
+
+    pub fn backup(&self) -> Option<&Path> {
+        if let Some(backup) = &self.backup {
+            Some(backup.as_path())
+        } else {
+            None
+        }
+    }
+
+    pub fn image_path(&self) -> &Path {
         self.image_path.as_path()
     }
 
-    pub fn get_balena_cfg(&self) -> &BalenaCfgJson {
+    pub fn balena_cfg(&self) -> &BalenaCfgJson {
         &self.config
     }
 
@@ -173,15 +205,15 @@ impl MigrateInfo {
         self.mounts.push(mount.as_ref().to_path_buf())
     }
 
-    pub fn get_mounts(&self) -> &Vec<PathBuf> {
+    pub fn mounts(&self) -> &Vec<PathBuf> {
         &self.mounts
     }
 
-    pub fn get_nwmgr_files(&self) -> &Vec<PathBuf> {
+    pub fn nwmgr_files(&self) -> &Vec<PathBuf> {
         &self.nwmgr_files
     }
 
-    pub fn get_wifis(&self) -> &Vec<WifiConfig> {
+    pub fn wifis(&self) -> &Vec<WifiConfig> {
         &self.wifis
     }
 

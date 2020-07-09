@@ -11,6 +11,8 @@ pub(crate) const BLKID_CMD: &str = "blkid";
 pub(crate) const EFIBOOTMGR_CMD: &str = "efibootmgr";
 pub(crate) const DD_CMD: &str = "dd";
 
+pub(crate) const TAR_CMD: &str = "tar";
+
 pub(crate) const TAKEOVER_DIR: &str = "/balena-takeover";
 pub(crate) const STAGE2_CONFIG_NAME: &str = "stage2-config.yml";
 
