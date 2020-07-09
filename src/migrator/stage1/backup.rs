@@ -112,9 +112,15 @@ fn archive_dir<'a>(
 #[allow(dead_code)]
 pub(crate) fn create_ext(file: &Path, config: Vec<VolumeConfig>) -> Result<bool> {
     if !config.is_empty() {
-        debug!("creating new backup in '{}", file.display());
+        info!("creating new backup in '{}", file.display());
         let mut archiver = ExtTarArchiver::new(file)?;
-        create_int(&mut archiver, config)
+        if create_int(&mut archiver, config)? {
+            info!("The backup was created successfully");
+            Ok(true)
+        } else {
+            info!("No backup was created");
+            Ok(false)
+        }
     } else {
         info!("The backup configuration was empty - nothing backed up");
         Ok(false)
@@ -123,9 +129,15 @@ pub(crate) fn create_ext(file: &Path, config: Vec<VolumeConfig>) -> Result<bool>
 
 pub(crate) fn create<P: AsRef<Path>>(file: P, config: Vec<VolumeConfig>) -> Result<bool> {
     if !config.is_empty() {
-        debug!("creating new backup in '{}", file.as_ref().display());
+        info!("creating new backup in '{}", file.as_ref().display());
         let mut archiver = RustTarArchiver::new(file)?;
-        create_int(&mut archiver, config)
+        if create_int(&mut archiver, config)? {
+            info!("The backup was created successfully");
+            Ok(true)
+        } else {
+            info!("No backup was created");
+            Ok(false)
+        }
     } else {
         info!("The backup configuration was empty - nothing backed up");
         Ok(false)

@@ -6,7 +6,7 @@ use nix::mount::umount;
 
 use crate::common::defs::BACKUP_ARCH_NAME;
 use crate::common::path_append;
-use crate::stage1::backup::create;
+use crate::stage1::backup::{create, create_ext};
 use crate::stage1::defs::DEV_TYPE_GEN_X86_64;
 use crate::stage1::utils::mktemp;
 use crate::{
@@ -125,7 +125,12 @@ impl MigrateInfo {
 
         let backup = if let Some(backup_cfg) = opts.backup_config() {
             let backup_path = path_append(&work_dir, BACKUP_ARCH_NAME);
-            if create(backup_path.as_path(), backup_cfg_from_file(backup_cfg)?)? {
+            let created = if opts.tar_internal() {
+                create(backup_path.as_path(), backup_cfg_from_file(backup_cfg)?)?
+            } else {
+                create_ext(backup_path.as_path(), backup_cfg_from_file(backup_cfg)?)?
+            };
+            if created {
                 Some(backup_path)
             } else {
                 None

@@ -390,41 +390,26 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
                             fs_type: fs_type.to_owned(),
                         })
                     } else {
-                        return Err(Error::with_context(
-                            ErrorKind::InvState,
-                            &format!(
-                                "Unsupported fs_type '{}' for log partition '{}'",
+                        warn!("The log device's ('{}') files system type '{}' is not in the list of supported file systems: {:?}. Your device will not be able to write stage2 logs",
+                              log_dev_path.display(),
                                 fs_type,
-                                log_dev.get_dev_path().display()
-                            ),
-                        ));
+                            SUPPORTED_LOG_FS_TYPES);
+                        None
                     }
                 } else {
-                    return Err(Error::with_context(
-                        ErrorKind::InvState,
-                        &format!(
-                            "No fs_type detected for partition '{}'",
-                            log_dev.get_dev_path().display()
-                        ),
-                    ));
+                    warn!("We could not detect the filesystemm type for the log device '{}'. Your device will not be able to write stage2 logs",
+                          log_dev_path.display());
+                    None
                 }
             } else {
-                return Err(Error::with_context(
-                    ErrorKind::DeviceNotFound,
-                    &format!(
-                        "The device is not a partition: '{}'",
-                        log_dev.get_dev_path().display()
-                    ),
-                ));
+                warn!("The log device '{}' is not a partition. Your device will not be able to write stage2 logs",
+                      log_dev_path.display());
+                None
             }
         } else {
-            return Err(Error::with_context(
-                ErrorKind::DeviceNotFound,
-                &format!(
-                    "The device could not be found: '{}'",
-                    log_dev_path.display()
-                ),
-            ));
+            warn!("The log device '{}' could not be found. Your device will not be able to write stage2 logs",
+                  log_dev_path.display());
+            None
         }
     } else {
         None
@@ -517,11 +502,6 @@ pub fn stage1(opts: &Options) -> Result<()> {
     Logger::set_brief_info(true);
     Logger::set_color(true);
 
-    /*    if opts.is_build_num() {
-            println!("build: {}", Assets::get_build_num()?);
-            return Ok(());
-        }
-    */
     if opts.config().is_none() {
         let mut clap = Options::clap();
         let _res = clap.print_help();

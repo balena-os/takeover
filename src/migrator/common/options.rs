@@ -74,6 +74,8 @@ pub struct Options {
     pretend: bool,
     #[structopt(long, help = "Internal - stage2 invocation")]
     stage2: bool,
+    #[structopt(long, help = "Use internal tar instead of external command")]
+    tar_internal: bool,
     #[structopt(long, help = "Debug - do not cleanup after stage1 failure")]
     no_cleanup: bool,
     #[structopt(long, help = "Do not check if OS is supported")]
@@ -148,6 +150,10 @@ impl Options {
 
     pub fn stage2(&self) -> bool {
         self.stage2
+    }
+
+    pub fn tar_internal(&self) -> bool {
+        self.tar_internal
     }
 
     pub fn work_dir(&self) -> PathBuf {
