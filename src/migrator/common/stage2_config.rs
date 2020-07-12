@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use serde_yaml;
 
 use crate::common::error::{Result, ToError};
 

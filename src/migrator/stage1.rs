@@ -114,7 +114,7 @@ fn prepare_configs<P1: AsRef<Path>>(
 }
 
 fn get_umount_parts(
-    flash_dev: &Rc<Box<dyn BlockDevice>>,
+    flash_dev: &Rc<dyn BlockDevice>,
     block_dev_info: &BlockDeviceInfo,
 ) -> Result<Vec<UmountPart>> {
     let mut umount_parts: Vec<UmountPart> = Vec::new();
@@ -420,7 +420,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     let s2_cfg = Stage2Config {
         log_dev: log_device,
         log_level: opts.s2_log_level().to_string(),
-        flash_dev: flash_dev.get_dev_path().to_path_buf(),
+        flash_dev: flash_dev.get_dev_path(),
         pretend: opts.pretend(),
         umount_parts: get_umount_parts(flash_dev, &block_dev_info)?,
         work_dir: opts

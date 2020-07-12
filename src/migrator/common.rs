@@ -7,7 +7,6 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 
-use libc;
 use log::{debug, error, trace, warn};
 
 use regex::Regex;
