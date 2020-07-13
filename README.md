@@ -10,7 +10,7 @@ migration except for the actual flashing of the image, rebooting your system in 
 
 ## Howto 
 
-Takeover consists of a single executable that contains or allows download of all assets required for migration. 
+Takeover consists of a single executable that supports automatic download of all assets required for migration. 
 All that is needed to migrate a device to balena-os is a valid config.json typically obtained from the dashboard of your 
 balena application. 
 
@@ -38,8 +38,10 @@ FLAGS:
         --no-wifis          Do not create network manager configurations for configured wifis
         --pretend           Pretend mode, do not flash device
         --stage2            Internal - stage2 invocation
+        --tar-internal      Use internal tar instead of external command
 
 OPTIONS:
+        --backup-cfg <BACKUP-CONFIG>     Backup configuration file
         --check-timeout <TIMEOUT>        API/VPN check timeout in seconds.
     -c, --config <CONFIG_JSON>           Path to balena config.json
     -f, --flash-to <INSTALL_DEVICE>      Use INSTALL_DEVICE to flash balena to
@@ -51,7 +53,7 @@ OPTIONS:
         --s2-log-level <s2-log-level>    Set stage2 log level, one of [error,warn,info,debug,trace]
     -v, --version <VERSION>              Version of balena-os image to download
         --wifi <SSID>...                 Create a network manager configuation for configured wifi with SSID
-    -w, --work-dir <DIRECTORY>           Path to working directory
+    -w, --work-dir <DIRECTORY>           Path to working directory%                                                                              
 ```   
 
 
@@ -100,7 +102,7 @@ All you need to do is use a config.json for a raspberry PI and the ```-d``` opti
 
 Example - Dowload only of a balena OS image: 
 ```shell script
-sudo ./takeover -d --version --version 2.50.1+rev1.dev -c config.json 
+sudo ./takeover -d --version 2.50.1+rev1.dev -c config.json 
 ```
  
 
@@ -136,9 +138,9 @@ migrating a configuration that will not be able to come online. This check can b
 By default *takeover* will migrate the devices hostname. This can be disabled using the ```--no-keep-name``` option. 
 
 ### Logging
-By default *takeover* runs at *info* log level. It will log to the console and to a logfile in the current directory 
-called ```stage1.log```. You can modify the stage1 log-level by using the ```--log-level``` option. Available log levels 
-are *error*, *warn*, *info*, *debug*, and *trace*.
+By default *takeover* runs at *info* log level. It will log to the console. 
+You can modify the stage1 log-level by using the ```--log-level``` option. Available log levels 
+are *error*, *warn*, *info*, *debug*, and *trace*. 
 Stage1 is the first part of migration - mainly the preparation of the migration process. Everything happening in stage1 
 can be logged to the console.
  
@@ -148,7 +150,7 @@ ssh-sessions will usually be disconnected.
 Logging to the harddisk does not make sense, as that device will be overwritten with balena-os during the migration process. 
 For this reason you can specify a log device using the ```-l / --log-to``` option. 
 You should use a device that is independant from the disk that balena will be installed on. Usually a secondary disk 
-or a USB stick works well. The log device should be formatted with a *FAT32* or *ext4* file system.
+or a USB stick works well. The log device should be formatted with a *vfat*, *ext3* or *ext4* file system.
 It also makes sense to adapt the stage2 log level to see a maximum of information. This can be done using the 
 ```-s / --s2-log-level``` option. Log levels are as given above. 
 
@@ -156,27 +158,79 @@ Example, writing a stage2 log to /dev/sda1 with stage2 log level *debug*:
 ```shell script
 sudo ./takeover -c config.json -l /dev/sda1 --s2-log-level debug -i balena-cloud-intel-nuc-2.50.1+rev1.dev.img.gz 
 ```
+
+### Configuring a Backup
+
+*takeover* can be configured to create a backup that will automatically be converted to volumes once 
+balena-os is running on the device. The backup is configured using a file in YAML syntax which is 
+made available to takeover using the ```--backup-cfg``` comand line option.
+
+**Warning**: Plaese be aware that the backup file will be stored in RAMFS together with the balena-os image and some other 
+files at some point of stage2 takeover processing. 
+For this reason the backup size should be restricted to a size that fits into the devices ram leaving ample space. 
+*takeover* will fail in stage2 if unsufficient ram is found to transfer all files.    
+ 
+     
+The backup is grouped into volumes. 
+Each volume can be configured to contain a complex directory structure. Volumes correspond to application container 
+volumes of the application that is loaded on the device once balena OS is running. 
+The balena-supervisor will scan the created backup for volumes declared in the application containers and automatically 
+restore the backed up data to the appropriate container volumes. 
+The supervisor will delete the backup once this process is terminated. Backup directories with no corresponding volumes 
+are not retained. 
+
+Backup volume definitions can contain one or more ```items```. An Item consists of a mandatory ```source``` source path definition
+and the following optionial fields: 
+- ```target``` - an alternative target directory name - if not present the files will be copied to the root of the volume.
+- ```filter``` - a regular expression that will be applied to the source path. Only files matching the filter will be copied. 
+If no filter is given, all files will be copied.      
+
+*Backup configuration example:*
+
+```yaml
+## create a volume test volume 1
+- volume: "test volume 1"
+ items:
+ ## backup all from source and store in target inside the volume  
+ - source: /home/thomas/develop/balena.io/support
+   target: "target dir 1.1"
+ - source: "/home/thomas/develop/balena.io/customer/"
+   target: "target dir 1.2"
+## create another volume 
+- volume: "test volume 2"
+ items:
+ ## store all files from source that match the filter in target
+ - source: "/home/thomas/develop/balena.io/migrate"
+   target: "target dir 2.2"
+   filter: 'balena-.*'
+## store all files from source that match the filter
+## in the root of the volume directory
+- volume: "test_volume_3"
+ items:
+  - source: "/home/thomas/develop/balena.io/migrate/migratecfg/init-scripts"
+    filter: 'balena-.*'
+```
+
     
 ## Compiling takeover
 
 *takeover* needs to be compiled for the target platform. For Raspberry PI & beaglebone devices that is *armv7* and 
 for *intel-nuc* and *Generic X86-64* that is the X86-64 platform. 
 
-In stage2 *takeover* runs in a self created root file 
-system running on RAMFS. To minimize the amount of data that needs to be copied to this filesystem, this part 
-of *takeover* uses a busybox cmd environment and no system libraries are copied. To be self-contained *takeover* has to 
-be statically linked against  *libmusl*. 
-
-This can be done using the  [rust-embedded cross](https://github.com/rust-embedded/cross) cross compilation tools.  
-After installing cross and the *x86_64-unknown-linux-musl* and *armv7-unknown-linux-musleabihf* targets *takeover* 
+Cross compiling takeover is easiest done using the  [rust-embedded cross](https://github.com/rust-embedded/cross) 
+cross compilation tools.  
+After installing cross and the appropriate targets for the target platform *takeover* 
 can be cross-compiled using
 ```shell script
-cross build --target=armv7-unknown-linux-musleabihf --release 
+cross build --target <target-tripple> --release 
 ```   
-for the armv7 platform or 
-```shell script
-cross build --target=x86_64-unknown-linux-musl --release 
-```   
-for the X86-64 platform. 
+For arm v7 devices this could be 
+```
+cross build --release --target "armv7-unknown-linux-gnueabihf"
+```
+or 
+```
+cross build --release --target "armv7-unknown-linux-musleabihf"
+```
 
    

@@ -1,4 +1,3 @@
-use libc;
 use log::error;
 use std::process::exit;
 

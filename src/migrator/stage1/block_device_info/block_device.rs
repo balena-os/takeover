@@ -11,7 +11,7 @@ pub(crate) trait BlockDevice {
     fn get_mountpoint(&self) -> &Option<Mount>;
     fn get_name(&self) -> &str;
     fn get_dev_path(&self) -> PathBuf;
-    fn get_parent(&self) -> Option<&Rc<Box<dyn BlockDevice>>>;
+    fn get_parent(&self) -> Option<&Rc<dyn BlockDevice>>;
     fn is_partition(&self) -> bool;
     fn set_mountpoint(&mut self, mountpoint: Mount);
     fn get_partition_info(&self) -> Option<&PartitionInfo>;

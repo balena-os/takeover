@@ -32,7 +32,7 @@ impl BlockDevice for Device {
         path_append("/dev", &self.name)
     }
 
-    fn get_parent(&self) -> Option<&Rc<Box<dyn BlockDevice>>> {
+    fn get_parent(&self) -> Option<&Rc<dyn BlockDevice>> {
         None
     }
 

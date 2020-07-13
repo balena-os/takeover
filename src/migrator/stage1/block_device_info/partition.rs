@@ -119,7 +119,7 @@ pub(crate) struct Partition {
     name: String,
     device_num: DeviceNum,
     mounted: Option<Mount>,
-    parent: Rc<Box<dyn BlockDevice>>,
+    parent: Rc<dyn BlockDevice>,
     partition_info: PartitionInfo,
 }
 
@@ -128,7 +128,7 @@ impl Partition {
         name: &str,
         device_num: DeviceNum,
         mounted: Option<Mount>,
-        parent: Rc<Box<dyn BlockDevice>>,
+        parent: Rc<dyn BlockDevice>,
     ) -> Result<Partition> {
         Ok(Partition {
             name: name.to_owned(),
@@ -157,7 +157,7 @@ impl BlockDevice for Partition {
         path_append("/dev", &self.name)
     }
 
-    fn get_parent(&self) -> Option<&Rc<Box<dyn BlockDevice>>> {
+    fn get_parent(&self) -> Option<&Rc<dyn BlockDevice>> {
         Some(&self.parent)
     }
 

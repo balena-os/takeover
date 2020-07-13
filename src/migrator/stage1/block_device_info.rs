@@ -32,7 +32,7 @@ const BLOC_DEV_SUPP_MAJ_NUMBERS: [u64; 45] = [
     70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 179, 180, 259,
 ];
 
-type DeviceMap = HashMap<PathBuf, Rc<Box<dyn BlockDevice>>>;
+type DeviceMap = HashMap<PathBuf, Rc<dyn BlockDevice>>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DeviceNum {
@@ -106,8 +106,8 @@ impl FromStr for DeviceNum {
 
 #[derive(Clone)]
 pub(crate) struct BlockDeviceInfo {
-    root_device: Rc<Box<dyn BlockDevice>>,
-    root_partition: Option<Rc<Box<dyn BlockDevice>>>,
+    root_device: Rc<dyn BlockDevice>,
+    root_partition: Option<Rc<dyn BlockDevice>>,
     devices: DeviceMap,
 }
 
@@ -174,11 +174,11 @@ impl BlockDeviceInfo {
                         None
                     };
 
-                    let device = Rc::new(Box::new(Device {
+                    let device = Rc::new(Device {
                         name: curr_dev,
                         device_num: curr_number,
                         mounted,
-                    }) as Box<dyn BlockDevice>);
+                    }) as Rc<dyn BlockDevice>;
 
                     BlockDeviceInfo::read_partitions(
                         &device,
@@ -204,8 +204,8 @@ impl BlockDeviceInfo {
             }
         }
 
-        let mut root_device: Option<Rc<Box<dyn BlockDevice>>> = None;
-        let mut root_partition: Option<Rc<Box<dyn BlockDevice>>> = None;
+        let mut root_device: Option<Rc<dyn BlockDevice>> = None;
+        let mut root_partition: Option<Rc<dyn BlockDevice>> = None;
 
         for device_rc in device_map.values_mut() {
             let device = device_rc.as_ref();
@@ -238,7 +238,7 @@ impl BlockDeviceInfo {
     }
 
     fn read_partitions<P: AsRef<Path>>(
-        device: &Rc<Box<dyn BlockDevice>>,
+        device: &Rc<dyn BlockDevice>,
         mounts: &MountTab,
         dev_path: P,
         root_number: &DeviceNum,
@@ -294,13 +294,12 @@ impl BlockDeviceInfo {
                             None
                         };
 
-                        let partition = Rc::new(Box::new(Partition::new(
+                        let partition = Rc::new(Partition::new(
                             part_name.as_str(),
                             curr_number,
                             mounted,
                             device.clone(),
-                        )?)
-                            as Box<dyn BlockDevice>);
+                        )?) as Rc<dyn BlockDevice>;
 
                         debug!(
                             "found  partition '{:?}' in '{}'",
@@ -326,12 +325,12 @@ impl BlockDeviceInfo {
         Ok(())
     }
 
-    pub fn get_root_device(&self) -> &Rc<Box<dyn BlockDevice>> {
+    pub fn get_root_device(&self) -> &Rc<dyn BlockDevice> {
         &self.root_device
     }
 
     #[allow(dead_code)]
-    pub fn get_root_partition(&self) -> &Option<Rc<Box<dyn BlockDevice>>> {
+    pub fn get_root_partition(&self) -> &Option<Rc<dyn BlockDevice>> {
         &self.root_partition
     }
 

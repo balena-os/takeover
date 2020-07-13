@@ -42,7 +42,6 @@ pub const BACKUP_ARCH_NAME: &str = "backup.tgz";
 
 pub const NIX_NONE: Option<&'static [u8]> = None;
 
-use cfg_if;
 cfg_if::cfg_if! {
     if #[cfg(target_env = "musl")] {
         pub(crate) type IoctlReq = i32;

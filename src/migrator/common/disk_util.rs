@@ -232,7 +232,7 @@ impl<'a> PartitionIterator<'a> {
 
         Ok(PartitionIterator {
             disk,
-            mbr: mbr,
+            mbr,
             offset,
             index: 0,
             part_idx: 0,
@@ -251,52 +251,50 @@ impl<'a> PartitionIterator<'a> {
         if self.done {
             debug!("get_regular_partition: iterator is done");
             Ok(None)
-        } else {
-            if self.index < 4 {
-                debug!("get_regular_partition: index: {}", self.index);
-                // read regular partition
-                let part = &self.mbr.part_tbl[self.index];
-                debug!(
-                    "get_regular_partition: index: {} part type: {:?}",
-                    self.index, part.ptype
-                );
-                match PartitionType::from_ptype(part.ptype) {
-                    PartitionType::Empty => {
-                        // empty partition - regular end of partition table
-                        debug!("get_regular_partition: iterator is done");
-                        self.done = true;
-                        Ok(None)
-                    }
-                    PartitionType::Container => {
-                        // extended / container
-                        // return extended partition
-                        self.offset = part.first_lba as u64;
-                        self.mbr = self.disk.read_mbr(self.offset)?;
-                        self.part_idx = 4;
-                        self.get_extended_partition()
-                    }
-                    PartitionType::Fat | PartitionType::Linux => {
-                        // return regular partition
-                        self.index += 1;
-                        self.part_idx += 1;
-
-                        Ok(Some(PartInfo {
-                            index: self.part_idx,
-                            ptype: part.ptype,
-                            status: part.status,
-                            start_lba: u64::from(part.first_lba),
-                            num_sectors: u64::from(part.num_sectors),
-                        }))
-                    }
-                    _ => Err(Error::with_context(
-                        ErrorKind::InvState,
-                        &format!("Unsupported partition type encountered: {:x}", part.ptype),
-                    )),
+        } else if self.index < 4 {
+            debug!("get_regular_partition: index: {}", self.index);
+            // read regular partition
+            let part = &self.mbr.part_tbl[self.index];
+            debug!(
+                "get_regular_partition: index: {} part type: {:?}",
+                self.index, part.ptype
+            );
+            match PartitionType::from_ptype(part.ptype) {
+                PartitionType::Empty => {
+                    // empty partition - regular end of partition table
+                    debug!("get_regular_partition: iterator is done");
+                    self.done = true;
+                    Ok(None)
                 }
-            } else {
-                // end of regular partition table reached
-                Ok(None)
+                PartitionType::Container => {
+                    // extended / container
+                    // return extended partition
+                    self.offset = part.first_lba as u64;
+                    self.mbr = self.disk.read_mbr(self.offset)?;
+                    self.part_idx = 4;
+                    self.get_extended_partition()
+                }
+                PartitionType::Fat | PartitionType::Linux => {
+                    // return regular partition
+                    self.index += 1;
+                    self.part_idx += 1;
+
+                    Ok(Some(PartInfo {
+                        index: self.part_idx,
+                        ptype: part.ptype,
+                        status: part.status,
+                        start_lba: u64::from(part.first_lba),
+                        num_sectors: u64::from(part.num_sectors),
+                    }))
+                }
+                _ => Err(Error::with_context(
+                    ErrorKind::InvState,
+                    &format!("Unsupported partition type encountered: {:x}", part.ptype),
+                )),
             }
+        } else {
+            // end of regular partition table reached
+            Ok(None)
         }
     }
 
@@ -485,11 +483,7 @@ mod test {
 
         ancestors.iter().rev().find(|dir| {
             test_path = test_path.parent().unwrap();
-            if &*dir.to_string_lossy() == "src" {
-                true
-            } else {
-                false
-            }
+            &*dir.to_string_lossy() == "src"
         });
 
         test_path = test_path.parent().unwrap();
