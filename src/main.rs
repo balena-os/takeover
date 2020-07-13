@@ -1,10 +1,22 @@
+#[macro_use]
+mod macros;
+mod common;
+mod init;
+mod stage1;
+mod stage2;
+
 use log::error;
 use std::process::exit;
 
 use mod_logger::Logger;
 use structopt::StructOpt;
 
-use takeover::{init, stage1, stage2, ErrorKind, Options};
+use crate::{
+    common::{error::ErrorKind, Options},
+    init::init,
+    stage1::stage1,
+    stage2::stage2,
+};
 
 fn is_init() -> bool {
     let pid = unsafe { libc::getpid() };
