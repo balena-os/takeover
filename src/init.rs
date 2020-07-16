@@ -79,7 +79,7 @@ fn setup_log(log_dev: &LogDevice) -> Result<()> {
             log_dev.dev_name.display(),
             mountpoint.display()
         );
-        // TODO: remove this later
+
         let logfile = path_append(&mountpoint, "stage2-init.log");
         Logger::set_log_file(&LogDestination::Stderr, &logfile, false)
             .upstream_with_context(&format!("Failed set log file to  '{}'", logfile.display()))?;

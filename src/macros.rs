@@ -1,9 +1,4 @@
 #[macro_export]
-macro_rules! upstream_context {
-    (  $x:expr  ) => {{
-        MigErrCtx::from_remark(ErrorKind::Upstream, $x)
-    }};
-}
 
 macro_rules! call_command {
     (  $cmd:expr, $args:expr , $errmsg:expr ) => {
@@ -35,15 +30,5 @@ macro_rules! call_command {
             }
             Err(why) => Err(why),
         }
-    };
-}
-
-#[allow(unused_macros)]
-macro_rules! call_busybox {
-    (  $args:expr , $errmsg:expr ) => {
-        call_command!(BUSYBOX_CMD, $args, $errmsg)
-    };
-    (  $args:expr ) => {
-        call_command!(BUSYBOX_CMD, $args)
     };
 }
