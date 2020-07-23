@@ -4,6 +4,7 @@ pub const DEV_TYPE_INTEL_NUC: &str = "intel-nuc";
 pub const DEV_TYPE_GEN_X86_64: &str = "genericx86-64-ext";
 pub const DEV_TYPE_RPI3: &str = "raspberrypi3";
 pub const DEV_TYPE_RPI2: &str = "raspberry-pi2";
+pub const DEV_TYPE_RPI1: &str = "raspberry-pi";
 pub const DEV_TYPE_RPI4_64: &str = "raspberrypi4-64";
 pub const DEV_TYPE_BBG: &str = "beaglebone-green";
 pub const DEV_TYPE_BBB: &str = "beaglebone-black";
@@ -15,6 +16,7 @@ pub(crate) enum DeviceType {
     BeagleboneBlack,
     BeagleboardXM,
     IntelNuc,
+    RaspberryPi1,
     RaspberryPi2,
     RaspberryPi3,
     RaspberryPi4,
@@ -30,6 +32,7 @@ impl Display for DeviceType {
                 Self::BeagleboneGreen => "Beaglebone Green",
                 Self::BeagleboneBlack => "Beaglebone Black",
                 Self::BeagleboardXM => "Beagleboard XM",
+                Self::RaspberryPi1 => "Raspberry Pi 1/Zero",
                 Self::RaspberryPi2 => "Raspberry Pi 2",
                 Self::RaspberryPi3 => "Raspberry Pi 3",
                 Self::RaspberryPi4 => "Raspberry Pi 4",
