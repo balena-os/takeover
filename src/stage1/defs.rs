@@ -46,8 +46,8 @@ pub(crate) enum OSArch {
     AMD64,
     ARMHF,
     I386,
+    ARM64,
     /*
-        ARM64,
         ARMEL,
         MIPS,
         MIPSEL,

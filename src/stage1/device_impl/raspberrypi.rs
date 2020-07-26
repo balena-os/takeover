@@ -21,10 +21,11 @@ const RPI2_SLUGS: [&str; 1] = [DEV_TYPE_RPI2];
 const RPI3_SLUGS: [&str; 1] = [DEV_TYPE_RPI3];
 const RPI4_64_SLUGS: [&str; 1] = [DEV_TYPE_RPI4_64];
 
-const SUPPORTED_OSSES: [&str; 3] = [
+const SUPPORTED_OSSES: [&str; 4] = [
     "Raspbian GNU/Linux 8 (jessie)",
     "Raspbian GNU/Linux 9 (stretch)",
     "Raspbian GNU/Linux 10 (buster)",
+    "Ubuntu 20.04 LTS"
 ];
 
 pub(crate) fn is_rpi(opts: &Options, model_string: &str) -> Result<Option<Box<dyn Device>>> {

@@ -49,5 +49,7 @@ cfg_if::cfg_if! {
         pub(crate) type IoctlReq = u64;
     } else if #[cfg(target_arch = "arm")] {
         pub(crate) type IoctlReq = u32;
+    } else if #[cfg(target_arch = "aarch64")]{
+        pub(crate) type IoctlReq = u64;
     }
 }
