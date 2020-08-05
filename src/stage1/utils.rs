@@ -1,10 +1,11 @@
+use libc::S_IFREG;
+use log::info;
 use nix::mount::{mount, MsFlags};
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
+use std::cmp::min;
+use std::io;
 use std::path::{Path, PathBuf};
-
-use libc::S_IFREG;
-use log::info;
 
 use crate::{
     common::{
@@ -24,6 +25,7 @@ use crate::common::path_append;
 use crate::stage1::migrate_info::MigrateInfo;
 
 use std::fs::create_dir_all;
+use std::io::Read;
 
 pub(crate) fn get_os_arch() -> Result<OSArch> {
     trace!("get_os_arch: entered");
@@ -206,4 +208,46 @@ pub(crate) fn mount_fs<P: AsRef<Path>>(
     info!("Mounted {} file system on '{}'", fs, mount_dir.display());
 
     Ok(())
+}
+
+pub(crate) struct ReadBuffer<'a> {
+    buffer: &'a [u8],
+    read_pos: usize,
+}
+
+impl<'a> ReadBuffer<'a> {
+    pub fn new(buffer: &'a [u8]) -> ReadBuffer {
+        ReadBuffer {
+            buffer,
+            read_pos: 0,
+        }
+    }
+}
+
+impl<'a> Read for ReadBuffer<'a> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.read_pos >= self.buffer.len() {
+            Ok(0)
+        } else {
+            let bytes = min(buf.len(), self.buffer.len() - self.read_pos);
+            buf[0..bytes].copy_from_slice(&self.buffer[self.read_pos..self.read_pos + bytes]);
+            self.read_pos += bytes;
+            Ok(bytes)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::copy;
+
+    #[test]
+    fn test_read_buffer() {
+        const BUFFER: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+        let mut read_buffer = ReadBuffer::new(&BUFFER[..]);
+        let mut buffer: Vec<u8> = Vec::with_capacity(16);
+        copy(&mut read_buffer, &mut buffer).unwrap();
+        assert_eq!(&BUFFER[..], buffer.as_slice());
+    }
 }

@@ -1,22 +1,32 @@
-use std::fs::{read_to_string, remove_dir_all};
-use std::path::{Path, PathBuf};
-
 use log::{debug, error, info, warn};
 use nix::mount::umount;
+use std::fs::{read_to_string, remove_dir_all, OpenOptions};
+use std::path::{Path, PathBuf};
+use std::ptr::read_volatile;
 
 use crate::common::defs::BACKUP_ARCH_NAME;
 use crate::common::path_append;
-use crate::stage1::backup::{create, create_ext};
-use crate::stage1::defs::DEV_TYPE_GEN_X86_64;
-use crate::stage1::utils::mktemp;
 use crate::{
     common::{file_exists, get_os_name, options::Options, Error, ErrorKind, Result, ToError},
     stage1::{
-        backup::config::backup_cfg_from_file, device::Device, device_impl::get_device,
-        image_retrieval::download_image, migrate_info::balena_cfg_json::BalenaCfgJson,
+        backup::config::backup_cfg_from_file,
+        backup::{create, create_ext},
+        defs::{DEV_TYPE_GEN_X86_64, GZIP_MAGIC_COOKIE, MAX_CONFIG_JSON},
+        device::Device,
+        device_impl::get_device,
+        image_retrieval::download_image,
+        migrate_info::balena_cfg_json::BalenaCfgJson,
+        utils::mktemp,
         wifi_config::WifiConfig,
     },
 };
+
+use crate::stage1::utils::ReadBuffer;
+use flate2::read::GzDecoder;
+use std::io::copy;
+
+#[link_section = ".config_json_section"]
+static CONFIG_JSON: [u8; MAX_CONFIG_JSON] = [0; MAX_CONFIG_JSON];
 
 pub(crate) mod balena_cfg_json;
 
@@ -44,8 +54,17 @@ impl MigrateInfo {
         let mut config = if let Some(balena_cfg) = opts.config() {
             BalenaCfgJson::new(balena_cfg)?
         } else {
-            error!("The required parameter --config/-c was not provided");
-            return Err(Error::displayed());
+            match MigrateInfo::get_internal_cfg_json(&opts.work_dir()) {
+                Ok(balena_cfg_json) => balena_cfg_json,
+                Err(why) => {
+                    if why.kind() == ErrorKind::NotFound {
+                        error!("The required parameter --config/-c was not provided and no internal config.json was found");
+                        return Err(Error::displayed());
+                    } else {
+                        return Err(why);
+                    }
+                }
+            }
         };
 
         if opts.migrate() {
@@ -236,6 +255,52 @@ impl MigrateInfo {
                     why
                 );
             }
+        }
+    }
+
+    fn get_internal_cfg_json(work_dir: &Path) -> Result<BalenaCfgJson> {
+        let mut len: usize = MAX_CONFIG_JSON;
+        let byte_ptr = &CONFIG_JSON as *const u8;
+
+        // use of read_volatile makes sure CONFIG_JSON is not removed from ELF image
+        for index in 0..CONFIG_JSON.len() {
+            if unsafe { read_volatile(byte_ptr.offset(index as isize)) == 0 } {
+                len = index as usize;
+                break;
+            }
+        }
+
+        if len > 0 {
+            let target_path = mktemp(false, Some("config."), Some(".json"), Some(work_dir))?;
+
+            {
+                let mut file = OpenOptions::new()
+                    .append(true)
+                    .write(true)
+                    .open(&target_path)
+                    .upstream_with_context(&format!(
+                        "Failed to open config.json for writing: '{}",
+                        target_path.display()
+                    ))?;
+
+                let mut read_buffer = ReadBuffer::new(&CONFIG_JSON[0..len]);
+                if CONFIG_JSON[0..2] == GZIP_MAGIC_COOKIE[..] {
+                    let mut decoder = GzDecoder::new(read_buffer);
+                    copy(&mut decoder, &mut file).upstream_with_context(&format!(
+                        "Failed to uncompress/write config.json to: '{}",
+                        target_path.display()
+                    ))?;
+                } else {
+                    copy(&mut read_buffer, &mut file).upstream_with_context(&format!(
+                        "Failed to write config.json to: '{}",
+                        target_path.display()
+                    ))?;
+                }
+            }
+
+            Ok(BalenaCfgJson::new(&target_path)?)
+        } else {
+            Err(Error::new(ErrorKind::NotFound))
         }
     }
 }
