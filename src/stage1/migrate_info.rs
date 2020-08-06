@@ -259,18 +259,31 @@ impl MigrateInfo {
     }
 
     fn get_internal_cfg_json(work_dir: &Path) -> Result<BalenaCfgJson> {
-        let mut len: usize = MAX_CONFIG_JSON;
+        const SIZE_LEN: usize = std::mem::size_of::<u32>();
+        const COOKIE_LEN: usize = std::mem::size_of::<u16>();
+
         let byte_ptr = &CONFIG_JSON as *const u8;
-
         // use of read_volatile makes sure CONFIG_JSON is not removed from ELF image
-        for index in 0..CONFIG_JSON.len() {
-            if unsafe { read_volatile(byte_ptr.offset(index as isize)) == 0 } {
-                len = index as usize;
-                break;
-            }
+        let mut size_buf: [u8; SIZE_LEN] = [0; SIZE_LEN];
+        for (idx, dest) in size_buf.iter_mut().enumerate() {
+            *dest = unsafe { read_volatile(byte_ptr.add(idx)) };
         }
+        let size = u32::from_ne_bytes(size_buf) as usize;
 
-        if len > 0 {
+        let mut cookie_buf: [u8; COOKIE_LEN] = [0; COOKIE_LEN];
+        for (idx, dest) in cookie_buf.iter_mut().enumerate() {
+            *dest = unsafe { read_volatile(byte_ptr.add(idx + SIZE_LEN)) };
+        }
+        let cookie = u16::from_be_bytes(cookie_buf);
+
+        debug!(
+            "Internal config_json size: {}, cookie: 0x{:04x}",
+            size, cookie
+        );
+
+        if size == 0 {
+            Err(Error::new(ErrorKind::NotFound))
+        } else if size < CONFIG_JSON.len() - SIZE_LEN {
             let target_path = mktemp(false, Some("config."), Some(".json"), Some(work_dir))?;
 
             {
@@ -283,14 +296,23 @@ impl MigrateInfo {
                         target_path.display()
                     ))?;
 
-                let mut read_buffer = ReadBuffer::new(&CONFIG_JSON[0..len]);
-                if CONFIG_JSON[0..2] == GZIP_MAGIC_COOKIE[..] {
+                let mut read_buffer = ReadBuffer::new(&CONFIG_JSON[SIZE_LEN..size + SIZE_LEN]);
+
+                if cookie == GZIP_MAGIC_COOKIE {
+                    debug!(
+                        "get_internal_cfg_json: decompressing internal config.json to '{}'",
+                        target_path.display()
+                    );
                     let mut decoder = GzDecoder::new(read_buffer);
                     copy(&mut decoder, &mut file).upstream_with_context(&format!(
                         "Failed to uncompress/write config.json to: '{}",
                         target_path.display()
                     ))?;
                 } else {
+                    debug!(
+                        "get_internal_cfg_json: writing internal config.json to '{}'",
+                        target_path.display()
+                    );
                     copy(&mut read_buffer, &mut file).upstream_with_context(&format!(
                         "Failed to write config.json to: '{}",
                         target_path.display()
@@ -300,7 +322,14 @@ impl MigrateInfo {
 
             Ok(BalenaCfgJson::new(&target_path)?)
         } else {
-            Err(Error::new(ErrorKind::NotFound))
+            Err(Error::with_context(
+                ErrorKind::InvParam,
+                &format!(
+                    "Invalid size found for internal config.json: {} > {}",
+                    size,
+                    CONFIG_JSON.len() - 4
+                ),
+            ))
         }
     }
 }

@@ -11,7 +11,7 @@ pub const DEV_TYPE_BBB: &str = "beaglebone-black";
 pub const DEV_TYPE_BBXM: &str = "beagleboard-xm";
 
 pub const MAX_CONFIG_JSON: usize = 2048;
-pub const GZIP_MAGIC_COOKIE: [u8; 2] = [0x1f, 0x8b];
+pub const GZIP_MAGIC_COOKIE: u16 = 0x1f8b;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum DeviceType {

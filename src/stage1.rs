@@ -9,8 +9,6 @@ use std::rc::Rc;
 use std::thread::sleep;
 use std::time::Duration;
 
-use structopt::StructOpt;
-
 use nix::{
     mount::{mount, MsFlags},
     unistd::sync,
@@ -68,17 +66,6 @@ fn prepare_configs<P1: AsRef<Path>>(
     // takeover_dir: P2,
 ) -> Result<()> {
     let work_dir = work_dir.as_ref();
-    // let takeover_dir = takeover_dir.as_ref();
-
-    // *********************************************************
-    // write busybox executable to tmpfs
-
-    //let busybox = mig_info.get_assets().write_to(&takeover_dir)?;
-
-    // info!("Copied busybox executable to '{}'", busybox.display());
-
-    // *********************************************************
-    // write config.json to tmpfs
 
     mig_info.update_config()?;
 
@@ -502,11 +489,13 @@ pub fn stage1(opts: &Options) -> Result<()> {
     Logger::set_brief_info(true);
     Logger::set_color(true);
 
-    if opts.config().is_none() {
-        let mut clap = Options::clap();
-        let _res = clap.print_help();
-        return Err(Error::displayed());
-    }
+    /*
+        if opts.config().is_none() {
+            let mut clap = Options::clap();
+            let _res = clap.print_help();
+            return Err(Error::displayed());
+        }
+    */
 
     if let Some(s1_log_path) = opts.log_file() {
         Logger::set_log_file(&LogDestination::StreamStderr, &s1_log_path, true)
