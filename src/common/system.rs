@@ -441,11 +441,13 @@ pub(crate) fn lstat<P: AsRef<Path>>(path: P) -> Result<libc::stat> {
     let mut file_stat: libc::stat = unsafe { MaybeUninit::zeroed().assume_init() };
 
     let c_path = path_to_cstring(&path)?;
-    #[cfg(target_arch = "arm")]
-    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;
-
-    #[cfg(target_arch = "x86_64")]
-    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+    cfg_if::cfg_if! {
+         if #[cfg(target_arch = "x86_64")] {
+            let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+         } else {
+            let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;
+         }
+    }
 
     let res = unsafe { libc::lstat(c_path_ptr, &mut file_stat) };
     if res == 0 {
@@ -462,11 +464,14 @@ pub(crate) fn stat<P: AsRef<Path>>(path: P) -> Result<libc::stat> {
     let mut file_stat: libc::stat = unsafe { MaybeUninit::zeroed().assume_init() };
 
     let c_path = path_to_cstring(&path)?;
-    #[cfg(target_arch = "arm")]
-    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;
 
-    #[cfg(target_arch = "x86_64")]
-    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+    cfg_if::cfg_if! {
+         if #[cfg(target_arch = "x86_64")] {
+            let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+         } else {
+            let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;
+         }
+    }
 
     let res = unsafe { libc::stat(c_path_ptr, &mut file_stat) };
     if res == 0 {
@@ -481,11 +486,13 @@ pub(crate) fn stat<P: AsRef<Path>>(path: P) -> Result<libc::stat> {
 
 pub(crate) fn mkfifo<P: AsRef<Path>>(path: P, mode: u32) -> Result<()> {
     let c_path = path_to_cstring(&path)?;
-    #[cfg(target_arch = "arm")]
-    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;
-
-    #[cfg(target_arch = "x86_64")]
-    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+    cfg_if::cfg_if! {
+         if #[cfg(target_arch = "x86_64")] {
+            let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+         } else {
+            let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;
+         }
+    }
 
     let res = unsafe { libc::mkfifo(c_path_ptr, mode) };
     if res == 0 {
@@ -500,11 +507,14 @@ pub(crate) fn mkfifo<P: AsRef<Path>>(path: P, mode: u32) -> Result<()> {
 
 pub(crate) fn mknod<P: AsRef<Path>>(path: P, mode: u32, dev_id: u64) -> Result<()> {
     let c_path = path_to_cstring(&path)?;
-    #[cfg(target_arch = "arm")]
-    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;
 
-    #[cfg(target_arch = "x86_64")]
-    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+    cfg_if::cfg_if! {
+         if #[cfg(target_arch = "x86_64")] {
+            let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+         } else {
+            let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;
+         }
+    }
 
     let res = unsafe { libc::mknod(c_path_ptr, mode, dev_id) };
     if res == 0 {
@@ -519,16 +529,18 @@ pub(crate) fn mknod<P: AsRef<Path>>(path: P, mode: u32, dev_id: u64) -> Result<(
 
 pub(crate) fn link<P1: AsRef<Path>, P2: AsRef<Path>>(old_file: P1, new_file: P2) -> Result<()> {
     let old_c_path = path_to_cstring(&old_file)?;
-    #[cfg(target_arch = "arm")]
-    let old_c_path_ptr = old_c_path.as_bytes_with_nul() as *const [u8] as *const u8;
-    #[cfg(target_arch = "x86_64")]
-    let old_c_path_ptr = old_c_path.as_bytes_with_nul() as *const [u8] as *const i8;
 
     let new_c_path = path_to_cstring(&new_file)?;
-    #[cfg(target_arch = "arm")]
-    let new_c_path_ptr = new_c_path.as_bytes_with_nul() as *const [u8] as *const u8;
-    #[cfg(target_arch = "x86_64")]
-    let new_c_path_ptr = new_c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+
+    cfg_if::cfg_if! {
+         if #[cfg(target_arch = "x86_64")] {
+            let old_c_path_ptr = old_c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+            let new_c_path_ptr = new_c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+         } else {
+            let old_c_path_ptr = old_c_path.as_bytes_with_nul() as *const [u8] as *const u8;
+            let new_c_path_ptr = new_c_path.as_bytes_with_nul() as *const [u8] as *const u8;
+         }
+    }
 
     let res = unsafe { libc::link(old_c_path_ptr, new_c_path_ptr) };
     if res == 0 {
@@ -543,17 +555,19 @@ pub(crate) fn link<P1: AsRef<Path>, P2: AsRef<Path>>(old_file: P1, new_file: P2)
 }
 
 pub(crate) fn symlink<P1: AsRef<Path>, P2: AsRef<Path>>(source: P1, dest: P2) -> Result<()> {
-    let src_c_path = path_to_cstring(&source)?;
-    #[cfg(target_arch = "arm")]
-    let src_c_path_ptr = src_c_path.as_bytes_with_nul() as *const [u8] as *const u8;
-    #[cfg(target_arch = "x86_64")]
-    let src_c_path_ptr = src_c_path.as_bytes_with_nul() as *const [u8] as *const i8;
 
+    let src_c_path = path_to_cstring(&source)?;
     let dest_c_path = path_to_cstring(&dest)?;
-    #[cfg(target_arch = "arm")]
-    let dest_c_path_ptr = dest_c_path.as_bytes_with_nul() as *const [u8] as *const u8;
-    #[cfg(target_arch = "x86_64")]
-    let dest_c_path_ptr = dest_c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+
+    cfg_if::cfg_if! {
+         if #[cfg(target_arch = "x86_64")] {
+            let src_c_path_ptr = src_c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+            let dest_c_path_ptr = dest_c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+         } else {
+            let src_c_path_ptr = src_c_path.as_bytes_with_nul() as *const [u8] as *const u8;
+            let dest_c_path_ptr = dest_c_path.as_bytes_with_nul() as *const [u8] as *const u8;
+         }
+    }
 
     let res = unsafe { libc::symlink(src_c_path_ptr, dest_c_path_ptr) };
     if res == 0 {
@@ -570,10 +584,13 @@ pub(crate) fn symlink<P1: AsRef<Path>, P2: AsRef<Path>>(source: P1, dest: P2) ->
 pub(crate) fn mkdir<P: AsRef<Path>>(path: P, mode: u32) -> Result<()> {
     debug!("mkdir: '{}'", path.as_ref().display());
     let c_path = path_to_cstring(&path)?;
-    #[cfg(target_arch = "arm")]
-    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;
-    #[cfg(target_arch = "x86_64")]
-    let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+    cfg_if::cfg_if! {
+         if #[cfg(target_arch = "x86_64")] {
+            let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
+         } else {
+            let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;
+         }
+    }
 
     let res = unsafe { libc::mkdir(c_path_ptr, mode) };
     if res == 0 {

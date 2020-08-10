@@ -330,43 +330,46 @@ pub(crate) fn hex_dump(buffer: &[u8]) -> String {
     unsafe { hex_dump_ptr_u8(buffer as *const [u8] as *const u8, buffer.len() as isize) }
 }
 
-#[cfg(target_arch = "arm")]
-pub(crate) fn string_from_c_string(c_string: &[u8]) -> Result<String> {
-    let mut len: Option<usize> = None;
-    for (idx, char) in c_string.iter().enumerate() {
-        if *char == 0 {
-            len = Some(idx);
-            break;
-        }
-    }
-    if let Some(len) = len {
-        let u8_str = &c_string[0..=len] as *const [u8] as *const CStr;
-        unsafe { Ok(String::from(&*(*u8_str).to_string_lossy())) }
-    } else {
-        Err(Error::with_context(
-            ErrorKind::InvParam,
-            "Not a nul terminated C string",
-        ))
-    }
-}
 
-#[cfg(target_arch = "x86_64")]
-pub(crate) fn string_from_c_string(c_string: &[i8]) -> Result<String> {
-    let mut len: Option<usize> = None;
-    for (idx, char) in c_string.iter().enumerate() {
-        if *char == 0 {
-            len = Some(idx);
-            break;
+cfg_if::cfg_if! {
+    if #[cfg(target_arch = "x86_64")] {
+        pub(crate) fn string_from_c_string(c_string: &[i8]) -> Result<String> {
+            let mut len: Option<usize> = None;
+            for (idx, char) in c_string.iter().enumerate() {
+                if *char == 0 {
+                    len = Some(idx);
+                    break;
+                }
+            }
+            if let Some(len) = len {
+                let u8_str = &c_string[0..=len] as *const [i8] as *const [u8] as *const CStr;
+                unsafe { Ok(String::from(&*(*u8_str).to_string_lossy())) }
+            } else {
+                Err(Error::with_context(
+                    ErrorKind::InvParam,
+                    "Not a nul terminated C string",
+                ))
+            }
         }
-    }
-    if let Some(len) = len {
-        let u8_str = &c_string[0..=len] as *const [i8] as *const [u8] as *const CStr;
-        unsafe { Ok(String::from(&*(*u8_str).to_string_lossy())) }
     } else {
-        Err(Error::with_context(
-            ErrorKind::InvParam,
-            "Not a nul terminated C string",
-        ))
+        pub(crate) fn string_from_c_string(c_string: &[u8]) -> Result<String> {
+            let mut len: Option<usize> = None;
+            for (idx, char) in c_string.iter().enumerate() {
+                if *char == 0 {
+                    len = Some(idx);
+                    break;
+                }
+            }
+            if let Some(len) = len {
+                let u8_str = &c_string[0..=len] as *const [u8] as *const CStr;
+                unsafe { Ok(String::from(&*(*u8_str).to_string_lossy())) }
+            } else {
+                Err(Error::with_context(
+                    ErrorKind::InvParam,
+                    "Not a nul terminated C string",
+                ))
+            }
+        }
     }
 }
 
