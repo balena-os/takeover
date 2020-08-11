@@ -489,14 +489,6 @@ pub fn stage1(opts: &Options) -> Result<()> {
     Logger::set_brief_info(true);
     Logger::set_color(true);
 
-    /*
-        if opts.config().is_none() {
-            let mut clap = Options::clap();
-            let _res = clap.print_help();
-            return Err(Error::displayed());
-        }
-    */
-
     if let Some(s1_log_path) = opts.log_file() {
         Logger::set_log_file(&LogDestination::StreamStderr, &s1_log_path, true)
             .upstream_with_context(&format!(

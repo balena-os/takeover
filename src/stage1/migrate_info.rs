@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::ptr::read_volatile;
 
 use crate::common::defs::BACKUP_ARCH_NAME;
-use crate::common::path_append;
+use crate::common::{is_admin, path_append};
 use crate::{
     common::{file_exists, get_os_name, options::Options, Error, ErrorKind, Result, ToError},
     stage1::{
@@ -115,6 +115,11 @@ impl MigrateInfo {
                 ErrorKind::ImageDownloaded,
                 "Image downloaded successfully",
             ));
+        }
+
+        if !is_admin()? {
+            error!("please run this program as root");
+            return Err(Error::displayed());
         }
 
         debug!("image path: '{}'", image_path.display());
