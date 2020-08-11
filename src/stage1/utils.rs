@@ -36,10 +36,11 @@ pub(crate) fn get_os_arch() -> Result<OSArch> {
         "x86_64" => Ok(OSArch::AMD64),
         "i386" => Ok(OSArch::I386),
         "armv7l" => Ok(OSArch::ARMHF),
+        "armv6l" => Ok(OSArch::ARMHF),
         "aarch64" => Ok(OSArch::ARM64),
         _ => Err(Error::with_context(
             ErrorKind::InvParam,
-            &format!("get_os_arch: unsupported architectute '{}'", machine),
+            &format!("get_os_arch: unsupported architecture '{}'", machine),
         )),
     }
 }

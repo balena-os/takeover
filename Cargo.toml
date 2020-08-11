@@ -72,3 +72,6 @@ raspberrypi3 = []
 raspberrypi4-64 = []
 intel-nuc = []
 
+[dependencies.openssl]
+version = "0.10"
+features = ["vendored"]

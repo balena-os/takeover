@@ -14,7 +14,7 @@ use crate::{
 // Balena Fin: "Raspberry Pi Compute Module 3 Plus Rev 1.0"
 // RPI 4:      "Raspberry Pi 4 Model B Rev 1.1"
 // RPI 2:      "Raspberry Pi 2 Model B Rev 1.1"
-
+// RPI Zero W: "Raspberry Pi Zero W Rev 1.1"
 const RPI_MODEL_REGEX: &str = r#"^Raspberry\s+Pi\s+(1|2|3|4|Compute Module 3|Zero)\s+(Model\s+(\S+)|W|Plus)\s+(Rev\s+(\S+))$"#;
 const RPI1_SLUGS: [&str; 1] = [DEV_TYPE_RPI1];
 const RPI2_SLUGS: [&str; 1] = [DEV_TYPE_RPI2];
@@ -25,7 +25,7 @@ const SUPPORTED_OSSES: [&str; 4] = [
     "Raspbian GNU/Linux 8 (jessie)",
     "Raspbian GNU/Linux 9 (stretch)",
     "Raspbian GNU/Linux 10 (buster)",
-    "Ubuntu 20.04 LTS"
+    "Ubuntu 20.04 LTS",
 ];
 
 pub(crate) fn is_rpi(opts: &Options, model_string: &str) -> Result<Option<Box<dyn Device>>> {
@@ -36,11 +36,16 @@ pub(crate) fn is_rpi(opts: &Options, model_string: &str) -> Result<Option<Box<dy
 
     if let Some(captures) = Regex::new(RPI_MODEL_REGEX).unwrap().captures(model_string) {
         let pitype = captures.get(1).unwrap().as_str();
-        let model = captures
-            .get(3)
-            .unwrap()
-            .as_str()
-            .trim_matches(char::from(0));
+        let model = if let Some(model) = captures.get(3) {
+            model.as_str().trim_matches(char::from(0))
+        } else {
+            captures
+                .get(2)
+                .unwrap()
+                .as_str()
+                .trim_matches(char::from(0))
+        };
+
         let revision = captures
             .get(5)
             .unwrap()
@@ -53,7 +58,7 @@ pub(crate) fn is_rpi(opts: &Options, model_string: &str) -> Result<Option<Box<dy
         );
 
         match pitype {
-            "1" | "zero" => {
+            "1" | "Zero" => {
                 info!("Identified RaspberryPi 1/Zero",);
                 Ok(Some(Box::new(RaspberryPi1::from_config(opts)?)))
             }
@@ -70,6 +75,7 @@ pub(crate) fn is_rpi(opts: &Options, model_string: &str) -> Result<Option<Box<dy
                 Ok(Some(Box::new(RaspberryPi4_64::from_config(opts)?)))
             }
             _ => {
+                debug!("unknown PI type: '{}'", pitype);
                 let message = format!("The raspberry pi type reported by your device ('{} {} rev {}') is not supported by balena-migrate", pitype, model, revision);
                 error!("{}", message);
                 Err(Error::with_context(ErrorKind::InvParam, &message))

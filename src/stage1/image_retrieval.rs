@@ -19,8 +19,8 @@ use crate::{
     stage1::{
         api_calls::{get_os_image, get_os_versions, Versions},
         defs::{
-            DEV_TYPE_BBB, DEV_TYPE_BBG, DEV_TYPE_GEN_X86_64, DEV_TYPE_INTEL_NUC, DEV_TYPE_RPI2,
-            DEV_TYPE_RPI3, DEV_TYPE_RPI4_64,
+            DEV_TYPE_BBB, DEV_TYPE_BBG, DEV_TYPE_GEN_X86_64, DEV_TYPE_INTEL_NUC, DEV_TYPE_RPI1,
+            DEV_TYPE_RPI2, DEV_TYPE_RPI3, DEV_TYPE_RPI4_64,
         },
         migrate_info::balena_cfg_json::BalenaCfgJson,
     },
@@ -36,10 +36,11 @@ const FLASHER_DEVICES: [&str; 4] = [
     DEV_TYPE_BBG,
     DEV_TYPE_BBB,
 ];
-const SUPPORTED_DEVICES: [&str; 7] = [
+const SUPPORTED_DEVICES: [&str; 8] = [
     DEV_TYPE_RPI3,
     DEV_TYPE_RPI2,
     DEV_TYPE_RPI4_64,
+    DEV_TYPE_RPI1,
     DEV_TYPE_INTEL_NUC,
     DEV_TYPE_GEN_X86_64,
     DEV_TYPE_BBG,
@@ -325,7 +326,7 @@ pub(crate) fn download_image(
         return Err(Error::with_context(
             ErrorKind::InvParam,
             &format!(
-                "OS download is not supported for device type {}",
+                "OS download is not supported for device type '{}'",
                 device_type
             ),
         ));

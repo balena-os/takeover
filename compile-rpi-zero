@@ -1,0 +1,8 @@
+#!/bin/bash
+docker build -t cross-pi-zero .
+docker run --rm \
+	-it \
+	-v $(pwd):/build \
+	-v rust-cache:/cargo-home \
+	cross-pi-zero \
+	cargo build --release --target arm-unknown-linux-gnueabihf

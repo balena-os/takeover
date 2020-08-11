@@ -44,7 +44,7 @@ pub(crate) fn get_device(opts: &Options) -> Result<Box<dyn Device>> {
     info!("Detected OS Architecture is {:?}", os_arch);
 
     match os_arch {
-        OSArch::ARMHF|OSArch::ARM64 => {
+        OSArch::ARMHF | OSArch::ARM64 => {
             let dev_tree_model = String::from(
                 read_to_string(DEVICE_TREE_MODEL)
                     .upstream_with_context(&format!(
