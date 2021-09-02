@@ -330,7 +330,6 @@ pub(crate) fn hex_dump(buffer: &[u8]) -> String {
     unsafe { hex_dump_ptr_u8(buffer as *const [u8] as *const u8, buffer.len() as isize) }
 }
 
-
 cfg_if::cfg_if! {
     if #[cfg(target_arch = "x86_64")] {
         pub(crate) fn string_from_c_string(c_string: &[i8]) -> Result<String> {
