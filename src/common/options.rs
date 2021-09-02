@@ -78,8 +78,6 @@ pub struct Options {
     tar_internal: bool,
     #[structopt(long, help = "Debug - do not cleanup after stage1 failure")]
     no_cleanup: bool,
-    #[structopt(long, help = "Do not check if OS is supported")]
-    no_os_check: bool,
     #[structopt(long, help = "Do not check if balena API is available")]
     no_api_check: bool,
     #[structopt(long, help = "Do not check if balena VPN is available")]
@@ -206,10 +204,6 @@ impl Options {
         } else {
             self.log_level
         }
-    }
-
-    pub fn os_check(&self) -> bool {
-        !self.no_os_check
     }
 
     pub fn no_efi_setup(&self) -> bool {

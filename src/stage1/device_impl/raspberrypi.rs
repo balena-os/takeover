@@ -1,7 +1,6 @@
 use log::{debug, error, info};
 use regex::Regex;
 
-use crate::stage1::device_impl::check_os;
 use crate::{
     common::{options::Options, Error, ErrorKind, Result},
     stage1::{
@@ -20,13 +19,6 @@ const RPI1_SLUGS: [&str; 1] = [DEV_TYPE_RPI1];
 const RPI2_SLUGS: [&str; 1] = [DEV_TYPE_RPI2];
 const RPI3_SLUGS: [&str; 1] = [DEV_TYPE_RPI3];
 const RPI4_64_SLUGS: [&str; 1] = [DEV_TYPE_RPI4_64];
-
-const SUPPORTED_OSSES: [&str; 4] = [
-    "Raspbian GNU/Linux 8 (jessie)",
-    "Raspbian GNU/Linux 9 (stretch)",
-    "Raspbian GNU/Linux 10 (buster)",
-    "Ubuntu 20.04 LTS",
-];
 
 pub(crate) fn is_rpi(opts: &Options, model_string: &str) -> Result<Option<Box<dyn Device>>> {
     debug!(
@@ -89,11 +81,7 @@ pub(crate) fn is_rpi(opts: &Options, model_string: &str) -> Result<Option<Box<dy
 
 pub(crate) struct RaspberryPi1;
 impl RaspberryPi1 {
-    pub fn from_config(opts: &Options) -> Result<RaspberryPi1> {
-        if opts.migrate() && !check_os(&SUPPORTED_OSSES, opts, "Raspberry PI 1")? {
-            return Err(Error::displayed());
-        }
-
+    pub fn from_config(_opts: &Options) -> Result<RaspberryPi1> {
         Ok(RaspberryPi1 {})
     }
 }
@@ -110,11 +98,7 @@ impl Device for RaspberryPi1 {
 
 pub(crate) struct RaspberryPi2;
 impl RaspberryPi2 {
-    pub fn from_config(opts: &Options) -> Result<RaspberryPi2> {
-        if opts.migrate() && !check_os(&SUPPORTED_OSSES, opts, "Raspberry PI 2")? {
-            return Err(Error::displayed());
-        }
-
+    pub fn from_config(_opts: &Options) -> Result<RaspberryPi2> {
         Ok(RaspberryPi2 {})
     }
 }
@@ -132,11 +116,7 @@ impl Device for RaspberryPi2 {
 pub(crate) struct RaspberryPi3;
 
 impl RaspberryPi3 {
-    pub fn from_config(opts: &Options) -> Result<RaspberryPi3> {
-        if opts.migrate() && !check_os(&SUPPORTED_OSSES, opts, "Raspberry PI 3")? {
-            return Err(Error::displayed());
-        }
-
+    pub fn from_config(_opts: &Options) -> Result<RaspberryPi3> {
         Ok(RaspberryPi3)
     }
 }
@@ -154,11 +134,7 @@ impl Device for RaspberryPi3 {
 pub(crate) struct RaspberryPi4_64;
 
 impl RaspberryPi4_64 {
-    pub fn from_config(opts: &Options) -> Result<RaspberryPi4_64> {
-        if opts.migrate() && !check_os(&SUPPORTED_OSSES, opts, "Raspberry PI 4")? {
-            return Err(Error::displayed());
-        }
-
+    pub fn from_config(_opts: &Options) -> Result<RaspberryPi4_64> {
         Ok(RaspberryPi4_64)
     }
 }

@@ -1,6 +1,5 @@
 use log::{error, info};
 
-use crate::stage1::device_impl::check_os;
 use crate::{
     common::{Error, Options, Result},
     // linux_common::is_secure_boot,
@@ -17,24 +16,7 @@ pub(crate) struct IntelNuc;
 
 impl IntelNuc {
     pub fn from_config(opts: &Options) -> Result<IntelNuc> {
-        const SUPPORTED_OSSES: &[&str] = &[
-            "Ubuntu 20.04 LTS",
-            "Ubuntu 18.04.4 LTS",
-            "Ubuntu 18.04.3 LTS",
-            "Ubuntu 18.04.2 LTS",
-            "Ubuntu 16.04.2 LTS",
-            "Ubuntu 16.04.6 LTS",
-            "Ubuntu 14.04.2 LTS",
-            "Ubuntu 14.04.5 LTS",
-            "Ubuntu 14.04.6 LTS",
-            "Manjaro Linux",
-        ];
-
         if opts.migrate() {
-            if !check_os(SUPPORTED_OSSES, opts, "Generic x86_64/Intel Nuc")? {
-                return Err(Error::displayed());
-            }
-
             // **********************************************************************
             // ** AMD64 specific initialisation/checks
             // **********************************************************************

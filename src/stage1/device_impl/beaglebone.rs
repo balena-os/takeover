@@ -6,16 +6,8 @@ use crate::{
     stage1::{
         defs::{DeviceType, DEV_TYPE_BBB, DEV_TYPE_BBG, DEV_TYPE_BBXM},
         device::Device,
-        device_impl::check_os,
     },
 };
-
-const SUPPORTED_OSSES: [&str; 4] = [
-    "Ubuntu 18.04.2 LTS",
-    "Ubuntu 14.04.1 LTS",
-    "Debian GNU/Linux 9 (stretch)",
-    "Debian GNU/Linux 7 (wheezy)",
-];
 
 // Supported models
 // TI OMAP3 BeagleBoard xM
@@ -74,11 +66,7 @@ pub(crate) struct BeagleboneGreen {}
 
 impl BeagleboneGreen {
     // this is used in stage1
-    fn from_config(opts: &Options) -> Result<BeagleboneGreen> {
-        if !check_os(&SUPPORTED_OSSES, opts, "Beaglebone Green")? {
-            return Err(Error::displayed());
-        }
-
+    fn from_config(_opts: &Options) -> Result<BeagleboneGreen> {
         Ok(BeagleboneGreen {})
     }
 }
@@ -97,11 +85,7 @@ pub(crate) struct BeagleboneBlack {}
 
 impl BeagleboneBlack {
     // this is used in stage1
-    fn from_config(opts: &Options) -> Result<BeagleboneBlack> {
-        if !check_os(&SUPPORTED_OSSES, opts, "Beaglebone Black")? {
-            return Err(Error::displayed());
-        }
-
+    fn from_config(_opts: &Options) -> Result<BeagleboneBlack> {
         Ok(BeagleboneBlack {})
     }
 }
@@ -120,11 +104,7 @@ pub(crate) struct BeagleboardXM {}
 
 impl BeagleboardXM {
     // this is used in stage1
-    fn from_config(opts: &Options) -> Result<BeagleboardXM> {
-        if opts.migrate() && !check_os(&SUPPORTED_OSSES, opts, "Beagleboard XM")? {
-            return Err(Error::displayed());
-        }
-
+    fn from_config(_opts: &Options) -> Result<BeagleboardXM> {
         Ok(BeagleboardXM {})
     }
 }

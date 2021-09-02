@@ -1,9 +1,9 @@
-use log::{error, info, warn};
+use log::{error, info};
 use std::fs::read_to_string;
 
 use crate::common::ToError;
 use crate::{
-    common::{get_os_name, Error, ErrorKind, Options, Result},
+    common::{Error, ErrorKind, Options, Result},
     stage1::{defs::OSArch, device::Device, utils::get_os_arch},
 };
 
@@ -13,31 +13,6 @@ mod intel_nuc;
 mod raspberrypi;
 
 const DEVICE_TREE_MODEL: &str = "/proc/device-tree/model";
-
-pub(crate) fn check_os(supported: &[&str], opts: &Options, dev_type: &str) -> Result<bool> {
-    let os_name = get_os_name()?;
-    info!("Detected OS name is {}", os_name);
-
-    let os_supported = supported.iter().any(|&r| r == os_name);
-
-    if !os_supported {
-        if opts.os_check() {
-            error!(
-                "The OS '{}' has not been tested with {} for device type {}, to override this check use the no-os-check option on the command line",
-                os_name,
-                dev_type,
-                env!("CARGO_PKG_NAME")
-            );
-            Ok(false)
-        } else {
-            warn!(
-                "The OS '{}' has not been tested with {} for device type IntelNuc, prodeeding due to no-os-check option", os_name, env!("CARGO_PKG_NAME"));
-            Ok(true)
-        }
-    } else {
-        Ok(true)
-    }
-}
 
 pub(crate) fn get_device(opts: &Options) -> Result<Box<dyn Device>> {
     let os_arch = get_os_arch()?;
