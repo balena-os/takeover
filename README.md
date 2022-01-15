@@ -132,8 +132,8 @@ You can also specify your own NetworkManager configuration file using the ```--n
 
 If no network configurations are found *takeover* will print an error message and abort to keep you from accidentally 
 migrating a configuration that will not be able to come online. This check can be overridden by specifying the 
-```--np-nwmgr-check``` option. 
-   
+```--no-nwmgr-check``` option.
+
 By default *takeover* will migrate the devices hostname. This can be disabled using the ```--no-keep-name``` option. 
 
 ### Logging
