@@ -2,6 +2,8 @@
 
 Brownfield device migration using *takeover* strategy.
 
+**PLEASE NOTE**: This repo is currenly deprecated and under limited maintenance. We are working on a new migrator for Linux and potentially Windows devices. If you have a usecase for the migrator and need support or have additional questions, please contact solutions@balena.io.  
+
 **Warning**: The *takeover* command will attempt to install balena-os over your existing operating system. 
 Make sure you do not accidentally call the command on the wrong host and test your setup before migrating a host.
 
