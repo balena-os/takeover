@@ -86,7 +86,7 @@ of ~x.y.z and ^x.y.z requirements as defined at [semver](https://www.npmjs.com/p
  (eg. ```--version ~2.48```).
  Example: 
  ```shell script
-./sudo takeover -c config.json --version 2.50.1+rev1.dev
+sudo ./takeover -c config.json --version 2.50.1+rev1.dev
 ```
    
 When downloading images,  certain platforms (mainly intel-nuc, Generic-x86_64, beaglebone) require unpacking the image and 
