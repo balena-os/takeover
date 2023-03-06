@@ -1098,7 +1098,7 @@ pub fn stage2(opts: &Options) -> ! {
     if let Err(why) = raw_mount_balena(&s2_config.flash_dev) {
         error!("Failed to transfer files to balena OS, error: {:?}", why);
     } else {
-        info!("Migration succeded successfully");
+        info!("Migration completed successfully");
     }
 
     sync();
