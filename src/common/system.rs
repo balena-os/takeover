@@ -555,7 +555,6 @@ pub(crate) fn link<P1: AsRef<Path>, P2: AsRef<Path>>(old_file: P1, new_file: P2)
 }
 
 pub(crate) fn symlink<P1: AsRef<Path>, P2: AsRef<Path>>(source: P1, dest: P2) -> Result<()> {
-
     let src_c_path = path_to_cstring(&source)?;
     let dest_c_path = path_to_cstring(&dest)?;
 
