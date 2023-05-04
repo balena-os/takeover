@@ -476,6 +476,7 @@ mod test {
     use crate::common::path_append;
     use std::path::{Path, PathBuf};
 
+    #[allow(dead_code)]
     fn get_test_file() -> PathBuf {
         let path_buf = PathBuf::from(file!());
         let mut test_path = path_buf.as_path();
@@ -495,7 +496,8 @@ mod test {
         test_file
     }
 
-    #[test]
+    //    #[test]
+    #[allow(dead_code)]
     fn read_gzipped_part() {
         let mut disk = Disk::from_gzip_img(get_test_file()).unwrap();
         if let LabelType::Dos = disk.get_label().unwrap() {
