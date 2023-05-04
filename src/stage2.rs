@@ -71,7 +71,7 @@ fn get_required_space(s2_cfg: &Stage2Config) -> Result<u64> {
             "Failed to retrieve imagesize for '{}'",
             curr_file.display()
         ))?
-        .len() as u64;
+        .len();
 
     let curr_file = path_append(OLD_ROOT_MP, &s2_cfg.config_path);
     req_size += curr_file
@@ -80,7 +80,7 @@ fn get_required_space(s2_cfg: &Stage2Config) -> Result<u64> {
             "Failed to retrieve file size for '{}'",
             curr_file.display()
         ))?
-        .len() as u64;
+        .len();
 
     if let Some(ref backup_path) = s2_cfg.backup_path {
         let curr_file = path_append(OLD_ROOT_MP, backup_path);
@@ -90,7 +90,7 @@ fn get_required_space(s2_cfg: &Stage2Config) -> Result<u64> {
                 "Failed to retrieve file size for '{}'",
                 curr_file.display()
             ))?
-            .len() as u64;
+            .len();
     }
 
     let nwmgr_path = path_append(
@@ -654,7 +654,7 @@ fn raw_mount_balena(device: &Path) -> Result<()> {
         loop_device.get_path().display()
     );
 
-    loop_device.setup(&device, Some(byte_offset), Some(size_limit))?;
+    loop_device.setup(device, Some(byte_offset), Some(size_limit))?;
     info!(
         "Setup device '{}' with offset {}, sizelimit {} on '{}'",
         device.display(),
@@ -860,7 +860,7 @@ fn fill_buffer<I: Read>(buffer: &mut [u8], input: &mut I) -> Result<usize> {
 fn validate(target_path: &Path, image_path: &Path) -> Result<bool> {
     debug!("Validate: opening: '{}'", image_path.display());
 
-    let mut decoder = GzDecoder::new(File::open(&image_path).upstream_with_context(&format!(
+    let mut decoder = GzDecoder::new(File::open(image_path).upstream_with_context(&format!(
         "Validate: Failed to open image file '{}'",
         image_path.display(),
     ))?);
@@ -870,7 +870,7 @@ fn validate(target_path: &Path, image_path: &Path) -> Result<bool> {
         .write(false)
         .read(true)
         .create(false)
-        .open(&target_path)
+        .open(target_path)
         .upstream_with_context(&format!(
             "Validate: Failed to open output file '{}'",
             target_path.display(),
@@ -928,7 +928,7 @@ fn validate(target_path: &Path, image_path: &Path) -> Result<bool> {
 fn flash_external(target_path: &Path, image_path: &Path, dd_cmd: &str) -> FlashState {
     let mut fail_res = FlashState::FailRecoverable;
 
-    let mut decoder = GzDecoder::new(match File::open(&image_path) {
+    let mut decoder = GzDecoder::new(match File::open(image_path) {
         Ok(file) => file,
         Err(why) => {
             error!(
@@ -942,7 +942,7 @@ fn flash_external(target_path: &Path, image_path: &Path, dd_cmd: &str) -> FlashS
 
     debug!("invoking dd");
     match Command::new(dd_cmd)
-        .args(&[
+        .args([
             &format!("of={}", &target_path.to_string_lossy()),
             &format!("bs={}", DD_BLOCK_SIZE),
         ])

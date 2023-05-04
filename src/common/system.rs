@@ -121,7 +121,7 @@ impl Iterator for ProcessIterator {
                 match dir_entry {
                     Ok(dir_entry) => {
                         let curr_path = dir_entry.path();
-                        if let Some(captures) = DIR_REGEX.captures(&*curr_path.to_string_lossy()) {
+                        if let Some(captures) = DIR_REGEX.captures(&curr_path.to_string_lossy()) {
                             let pid_str = captures.get(1).unwrap().as_str();
                             match pid_str.parse::<i32>() {
                                 Ok(pid) => return Some(Ok((pid, curr_path))),
@@ -217,7 +217,7 @@ pub(crate) fn get_process_info_for(pid: i32, directory: Option<&Path>) -> Result
         &proc_dir
     };
 
-    let exec_path = path_append(&directory, "exe");
+    let exec_path = path_append(directory, "exe");
     let executable = match read_link(&exec_path) {
         Ok(link_path) => Some(link_path),
         Err(why) => {
@@ -234,8 +234,8 @@ pub(crate) fn get_process_info_for(pid: i32, directory: Option<&Path>) -> Result
             }
         }
     };
-    let root_path = path_append(&directory, "root");
-    let root = match read_link(&root_path) {
+    let root_path = path_append(directory, "root");
+    let root = match read_link(root_path) {
         Ok(link_path) => link_path,
         Err(why) => {
             return Err(Error::from_upstream(
@@ -250,7 +250,7 @@ pub(crate) fn get_process_info_for(pid: i32, directory: Option<&Path>) -> Result
 
     Ok(ProcessInfo {
         process_id: pid,
-        status: parse_status(&directory)?,
+        status: parse_status(directory)?,
         executable,
         root,
     })
@@ -312,8 +312,7 @@ pub(crate) fn fuser<P: AsRef<Path>>(
                     match dir_entry {
                         Ok(dir_entry) => {
                             let curr_path = dir_entry.path();
-                            if let Some(captures) =
-                                DIR_REGEX.captures(&*curr_path.to_string_lossy())
+                            if let Some(captures) = DIR_REGEX.captures(&curr_path.to_string_lossy())
                             {
                                 let curr_fd = captures
                                     .get(1)

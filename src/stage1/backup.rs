@@ -23,10 +23,10 @@ use crate::{
     },
 };
 
-fn archive_dir<'a>(
+fn archive_dir(
     dir_path: &Path,
     target_path: &Path,
-    archiver: &'a mut impl Archiver,
+    archiver: &mut impl Archiver,
     filter: &Option<Regex>,
 ) -> Result<bool> {
     trace!(
@@ -54,15 +54,15 @@ fn archive_dir<'a>(
                 if metadata.is_dir() {
                     if archive_dir(
                         &source_path,
-                        &path_append(&target_path, &source_file),
+                        &path_append(target_path, source_file),
                         archiver,
-                        &filter,
+                        filter,
                     )? {
                         written = true;
                     }
                 } else if let Some(filter) = filter {
                     if filter.is_match(&source_path.to_string_lossy()) {
-                        let target = path_append(target_path, &source_file);
+                        let target = path_append(target_path, source_file);
                         archiver
                             .add_file(target.as_path(), source_path.as_path())
                             .upstream_with_context(&format!(
@@ -80,7 +80,7 @@ fn archive_dir<'a>(
                         debug!("No match on file: '{}'", &source_path.display());
                     }
                 } else {
-                    let target = path_append(target_path, &source_file);
+                    let target = path_append(target_path, source_file);
                     archiver
                         .add_file(target.as_path(), source_path.as_path())
                         .upstream_with_context(&format!(
@@ -99,7 +99,7 @@ fn archive_dir<'a>(
             Err(why) => {
                 return Err(Error::with_all(
                     ErrorKind::Upstream,
-                    &"Failed to read entry from ".to_string(),
+                    "Failed to read entry from ",
                     Box::new(why),
                 ));
             }
@@ -144,7 +144,7 @@ pub(crate) fn create<P: AsRef<Path>>(file: P, config: Vec<VolumeConfig>) -> Resu
     }
 }
 
-fn create_int<'a>(archiver: &'a mut impl Archiver, config: Vec<VolumeConfig>) -> Result<bool> {
+fn create_int(archiver: &mut impl Archiver, config: Vec<VolumeConfig>) -> Result<bool> {
     // TODO: stop selected services, containers, add this to backup config
 
     trace!("create_int entered with: {:?}", config);
@@ -186,10 +186,7 @@ fn create_int<'a>(archiver: &'a mut impl Archiver, config: Vec<VolumeConfig>) ->
                     let target = if let Some(ref target) = item.target {
                         path_append(PathBuf::from(&volume.volume), target)
                     } else {
-                        path_append(
-                            PathBuf::from(&volume.volume),
-                            &item_src.file_name().unwrap(),
-                        )
+                        path_append(PathBuf::from(&volume.volume), item_src.file_name().unwrap())
                     };
 
                     debug!("target: '{}'", target.display());

@@ -149,7 +149,7 @@ pub(crate) fn get_mem_info() -> Result<(u64, u64)> {
     let mut s_info: libc::sysinfo = unsafe { MaybeUninit::<libc::sysinfo>::zeroed().assume_init() };
     let res = unsafe { libc::sysinfo(&mut s_info) };
     if res == 0 {
-        Ok((s_info.totalram as u64, s_info.freeram as u64))
+        Ok((s_info.totalram, s_info.freeram))
     } else {
         Err(Error::new(ErrorKind::NotImpl))
     }
@@ -253,7 +253,7 @@ pub fn get_mountpoint<P: AsRef<Path>>(device: P) -> Result<Option<PathBuf>> {
     let mtab = read_to_string("/etc/mtab").upstream_with_context("Failed to read /etc/mtab")?;
     for line in mtab.lines() {
         let words: Vec<&str> = line.split_whitespace().collect();
-        if let Some(device) = words.get(0) {
+        if let Some(device) = words.first() {
             if device == &device_str {
                 if let Some(mountpoint) = words.get(1) {
                     return Ok(Some(PathBuf::from(mountpoint)));
@@ -290,12 +290,10 @@ pub(crate) fn path_append<P1: AsRef<Path>, P2: AsRef<Path>>(base: P1, append: P2
 
 pub(crate) fn path_to_cstring<P: AsRef<Path>>(path: P) -> Result<CString> {
     let temp: OsString = path.as_ref().into();
-    Ok(
-        CString::new(temp.as_bytes()).upstream_with_context(&format!(
-            "Failed to convert path to CString: '{}'",
-            path.as_ref().display()
-        ))?,
-    )
+    CString::new(temp.as_bytes()).upstream_with_context(&format!(
+        "Failed to convert path to CString: '{}'",
+        path.as_ref().display()
+    ))
 }
 
 #[allow(dead_code)]
@@ -310,14 +308,12 @@ pub(crate) unsafe fn hex_dump_ptr_u8(buffer: *const u8, length: isize) -> String
         output.push_str(&format!("0x{:08x}: ", idx));
         for _ in 0..min(length - idx, 16) {
             let byte: u8 = *buffer.offset(idx);
-            let char: char = if (byte as u8).is_ascii_alphanumeric()
-                || (byte as u8).is_ascii_punctuation()
-                || (byte as u8) == 32
-            {
-                char::from(byte as u8)
-            } else {
-                '.'
-            };
+            let char: char =
+                if byte.is_ascii_alphanumeric() || byte.is_ascii_punctuation() || byte == 32 {
+                    char::from(byte)
+                } else {
+                    '.'
+                };
             output.push_str(&format!("{:02x} {}  ", byte, char));
             idx += 1;
         }
@@ -383,7 +379,7 @@ pub(crate) fn log(text: &str) {
     } else {
         PathBuf::from("/balena-takeover.log")
     };
-    if let Ok(mut log_file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+    if let Ok(mut log_file) = OpenOptions::new().create(true).append(true).open(log_path) {
         let _res = writeln!(log_file, "{}", text);
         let _res = log_file.flush();
         sync()

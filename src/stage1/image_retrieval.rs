@@ -83,7 +83,7 @@ fn determine_version(ver_str: &str, versions: &Versions) -> Result<Version> {
         }
         "default" => {
             let mut found: Option<Version> = None;
-            for cmp_ver in parse_versions(&versions) {
+            for cmp_ver in parse_versions(versions) {
                 debug!("Looking at version {}", cmp_ver);
                 if cmp_ver.is_prerelease() {
                     continue;
@@ -113,7 +113,7 @@ fn determine_version(ver_str: &str, versions: &Versions) -> Result<Version> {
                     ver_str
                 ))?;
                 let mut found: Option<Version> = None;
-                for cmp_ver in parse_versions(&versions) {
+                for cmp_ver in parse_versions(versions) {
                     if ver_req.matches(&cmp_ver)
                         && !cmp_ver.is_prerelease()
                         && cmp_ver
@@ -140,7 +140,7 @@ fn determine_version(ver_str: &str, versions: &Versions) -> Result<Version> {
                 ))?;
 
                 let mut found: Option<Version> = None;
-                for cmp_ver in parse_versions(&versions) {
+                for cmp_ver in parse_versions(versions) {
                     if ver_req == cmp_ver
                         && !cmp_ver.is_prerelease()
                         && (cmp_ver.build == ver_req.build
@@ -355,11 +355,7 @@ pub(crate) fn download_image(
 
     let img_file_name = path_append(
         work_dir,
-        &format!(
-            "balena-cloud-{}-{}.img.gz",
-            device_type,
-            version.to_string()
-        ),
+        format!("balena-cloud-{}-{}.img.gz", device_type, version),
     );
 
     if FLASHER_DEVICES.contains(&device_type) {

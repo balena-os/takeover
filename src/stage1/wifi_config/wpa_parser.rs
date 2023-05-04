@@ -112,7 +112,7 @@ impl<'a> WpaParser<'a> {
     }
 
     fn in_init_state(&mut self, line: &str) {
-        if self.skip_re.is_match(&line) {
+        if self.skip_re.is_match(line) {
             debug!("skipping line: '{}'", line);
             return;
         }
@@ -125,7 +125,7 @@ impl<'a> WpaParser<'a> {
     }
 
     fn in_network_state(&mut self, line: &str, wifis: &mut Vec<WifiConfig>) {
-        if self.skip_re.is_match(&line) {
+        if self.skip_re.is_match(line) {
             debug!("skipping line: '{}'", line);
             return;
         }
@@ -135,9 +135,9 @@ impl<'a> WpaParser<'a> {
             return;
         }
 
-        let mut captures = self.net_param1_re.captures(&line);
+        let mut captures = self.net_param1_re.captures(line);
         if captures.is_none() {
-            captures = self.net_param2_re.captures(&line)
+            captures = self.net_param2_re.captures(line)
         }
 
         if let Some(captures) = captures {

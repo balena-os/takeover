@@ -27,6 +27,7 @@ pub(crate) use plain_file::PlainFile;
 
 pub(crate) const DEF_BLOCK_SIZE: usize = 512;
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug)]
 pub(crate) enum LabelType {
     GPT,
@@ -38,10 +39,11 @@ impl LabelType {
     pub fn from_device<P: AsRef<Path>>(device_path: P) -> Result<LabelType> {
         let device_path = device_path.as_ref();
         // TODO: provide propper device block size
-        Ok(Disk::from_drive_file(device_path, None)?.get_label()?)
+        Disk::from_drive_file(device_path, None)?.get_label()
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug)]
 pub(crate) enum PartitionType {
     Container,
@@ -116,6 +118,7 @@ impl MasterBootRecord {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct PartInfo {
     pub index: usize,
@@ -487,7 +490,7 @@ mod test {
         });
 
         test_path = test_path.parent().unwrap();
-        let test_file = path_append(path_append(&test_path, "test_data"), "part.img.gz");
+        let test_file = path_append(path_append(test_path, "test_data"), "part.img.gz");
         println!("using found test data path {}", test_file.display());
         test_file
     }

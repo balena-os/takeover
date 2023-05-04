@@ -95,7 +95,7 @@ impl<'a> WifiConfig {
         index: u64,
     ) -> Result<u64> {
         let base_path = base_path.as_ref();
-        let path = path_append(base_path, &format!("resin-wifi-{}", index));
+        let path = path_append(base_path, format!("resin-wifi-{}", index));
 
         info!("Creating NetworkManager file in '{}'", path.display());
         let mut nwmgr_file = File::create(&path)

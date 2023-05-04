@@ -318,7 +318,7 @@ pub fn init() -> ! {
     }
 
     let _child_pid = match Command::new(&format!("/bin/{}", env!("CARGO_PKG_NAME")))
-        .args(&["--stage2", "--s2-log-level", &s2_config.log_level])
+        .args(["--stage2", "--s2-log-level", &s2_config.log_level])
         .spawn()
     {
         Ok(cmd_res) => cmd_res.id(),

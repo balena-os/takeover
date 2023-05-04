@@ -42,13 +42,11 @@ impl Stage2Config {
     }
 
     pub fn serialize(&self) -> Result<String> {
-        Ok(serde_yaml::to_string(self)
-            .upstream_with_context("Failed to deserialize stage2 config")?)
+        serde_yaml::to_string(self).upstream_with_context("Failed to deserialize stage2 config")
     }
 
     pub fn deserialze(config_str: &str) -> Result<Stage2Config> {
-        Ok(serde_yaml::from_str(&config_str)
-            .upstream_with_context("Failed to parse stage2 config")?)
+        serde_yaml::from_str(config_str).upstream_with_context("Failed to parse stage2 config")
     }
 
     pub fn flash_dev(&self) -> &PathBuf {
