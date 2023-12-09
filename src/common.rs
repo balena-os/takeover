@@ -2,7 +2,6 @@ use std::cmp::min;
 use std::ffi::{CStr, CString, OsString};
 use std::fs::{read_to_string, OpenOptions};
 use std::io::Write;
-use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
@@ -10,6 +9,8 @@ use std::process::{Command, ExitStatus, Stdio};
 use log::{debug, error, trace, warn};
 
 use regex::Regex;
+
+use sys_info;
 
 pub(crate) mod stage2_config;
 
@@ -146,12 +147,13 @@ pub(crate) fn pidof(proc_name: &str) -> Result<Vec<u32>> {
 pub(crate) fn get_mem_info() -> Result<(u64, u64)> {
     trace!("get_mem_info: entered");
     // TODO: could add loads, uptime if needed
-    let mut s_info: libc::sysinfo = unsafe { MaybeUninit::<libc::sysinfo>::zeroed().assume_init() };
-    let res = unsafe { libc::sysinfo(&mut s_info) };
-    if res == 0 {
-        Ok((s_info.totalram as u64, s_info.freeram as u64))
-    } else {
-        Err(Error::new(ErrorKind::NotImpl))
+    match sys_info::mem_info() {
+        Ok(info) => {
+            Ok((info.total, info.avail))
+        }
+        Err(_err) => {
+            Err(Error::new(ErrorKind::NotImpl))
+        }
     }
 }
 

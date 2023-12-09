@@ -67,6 +67,9 @@ version = "0.1"
 [dependencies.tar]
 version = "0.4"
 
+[dependencies.sys-info]
+version = "0.9.1"
+
 [features]
 raspberrypi3 = []
 raspberrypi4-64 = []
