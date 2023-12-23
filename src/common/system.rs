@@ -324,40 +324,46 @@ pub(crate) fn fuser<P: AsRef<Path>>(
                                         curr_path.display()
                                     ))?;
 
-                                let stat_info = lstat(curr_path.as_path())?;
-                                if is_lnk(&stat_info) {
-                                    let link_data = read_link(curr_path.as_path())
-                                        .upstream_with_context(&format!(
-                                            "Failed to read link '{}'",
-                                            curr_path.display()
-                                        ))?;
-                                    debug!(
-                                        "looking at pid: {}, fd {}, file: '{}' -> '{}'",
-                                        curr_pid,
-                                        curr_fd,
-                                        curr_path.display(),
-                                        link_data.display()
-                                    );
-
-                                    if link_data.starts_with(path.as_ref()) {
-                                        debug!("sending signal {} to {}", signal, curr_pid,);
-                                        if unsafe { libc::kill(curr_pid, signal) } != 0 {
-                                            warn!(
-                                                "Failed to send signal {} to pid {}, error: {}",
-                                                signal,
+                                match lstat(curr_path.as_path()) {
+                                    Ok(stat_info) => {
+                                        if is_lnk(&stat_info) {
+                                            let link_data = read_link(curr_path.as_path())
+                                                .upstream_with_context(&format!(
+                                                    "Failed to read link '{}'",
+                                                    curr_path.display()
+                                                ))?;
+                                            debug!(
+                                                "looking at pid: {}, fd {}, file: '{}' -> '{}'",
                                                 curr_pid,
-                                                io::Error::last_os_error()
+                                                curr_fd,
+                                                curr_path.display(),
+                                                link_data.display()
                                             );
+
+                                            if link_data.starts_with(path.as_ref()) {
+                                                debug!("sending signal {} to {}", signal, curr_pid,);
+                                                if unsafe { libc::kill(curr_pid, signal) } != 0 {
+                                                    warn!(
+                                                        "Failed to send signal {} to pid {}, error: {}",
+                                                        signal,
+                                                        curr_pid,
+                                                        io::Error::last_os_error()
+                                                    );
+                                                } else {
+                                                    sent_signals.push(curr_pid);
+                                                }
+                                                break;
+                                            }
                                         } else {
-                                            sent_signals.push(curr_pid);
+                                            return Err(Error::with_context(
+                                                ErrorKind::InvState,
+                                                &format!("file '{}' is not a link", curr_path.display()),
+                                            ));
                                         }
-                                        break;
                                     }
-                                } else {
-                                    return Err(Error::with_context(
-                                        ErrorKind::InvState,
-                                        &format!("file '{}' is not a link", curr_path.display()),
-                                    ));
+                                    Err(_) => {
+                                        debug!("continue after lstat error");
+                                    }
                                 }
                             }
                         }

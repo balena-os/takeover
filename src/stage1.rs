@@ -40,7 +40,7 @@ use crate::{
             SYS_EFIVARS_DIR, SYS_EFI_DIR, TELINIT_CMD,
         },
         error::{Error, ErrorKind, Result, ToError},
-        file_exists, format_size_with_unit, get_mem_info, is_admin,
+        file_exists, format_size_with_unit, get_mem_info, is_admin, get_os_name,
         options::Options,
         path_append,
         stage2_config::{Stage2Config, UmountPart},
@@ -266,7 +266,17 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     // *********************************************************
     // make mountpoint for tmpfs
-    let takeover_dir = PathBuf::from(TAKEOVER_DIR);
+    let mut takeover_dir = PathBuf::from("");
+    if get_os_name()?.starts_with("balenaOS") {
+        // base directory for mountpoint must be writeable
+        takeover_dir.push("/mnt/boot");
+    }
+    if TAKEOVER_DIR.starts_with("/") {
+        takeover_dir.push(TAKEOVER_DIR[1..].to_string());
+    } else {
+        takeover_dir.push(TAKEOVER_DIR);
+    }
+
     match stat(&takeover_dir) {
         Ok(stat) => {
             if is_dir(&stat) {
@@ -338,7 +348,12 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     let new_init_path = path_append(&takeover_dir, format!("/bin/{}", env!("CARGO_PKG_NAME")));
     // Assets::write_stage2_script(&takeover_dir, &new_init_path, &tty, opts.get_s2_log_level())?;
 
-    let block_dev_info = BlockDeviceInfo::new()?;
+    let block_dev_info = if get_os_name()?.starts_with("balenaOS") {
+        // can't use default root dir due to overlayfs
+        BlockDeviceInfo::new_for_dir("/mnt/boot")?
+    } else {
+        BlockDeviceInfo::new()?
+    };
 
     let flash_dev = if let Some(flash_dev) = opts.flash_to() {
         if let Some(flash_dev) = block_dev_info.get_devices().get(flash_dev) {
