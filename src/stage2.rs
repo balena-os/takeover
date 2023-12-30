@@ -30,7 +30,7 @@ use crate::common::{
         OLD_ROOT_MP, STAGE2_CONFIG_NAME, SYSTEM_CONNECTIONS_DIR, SYS_EFI_DIR,
     },
     dir_exists,
-    disk_util::{Disk, PartInfo, PartitionIterator, DEF_BLOCK_SIZE},
+    disk_util::{Disk, LabelType, PartInfo, PartitionIterator, DEF_BLOCK_SIZE},
     error::{Error, ErrorKind, Result, ToError},
     file_exists, format_size_with_unit, get_mem_info,
     loop_device::LoopDevice,
@@ -487,30 +487,87 @@ fn transfer_boot_files<P: AsRef<Path>>(dev_root: P) -> Result<()> {
 
 fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo)> {
     let mut disk = Disk::from_drive_file(device, None)?;
-    let part_iterator = PartitionIterator::new(&mut disk)?;
+
     let mut boot_part: Option<PartInfo> = None;
     let mut data_part: Option<PartInfo> = None;
 
-    for partition in part_iterator {
-        debug!(
-            "partition: {}, start: {}, sectors: {}",
-            partition.index, partition.start_lba, partition.num_sectors
-        );
+    // GPT provides a 'protective MBR' at LBA 0 to identify itself in a backward
+    // compatible way. So, read the GPT header if so.
+    let is_gpt = disk.get_label()? == LabelType::GPT;
 
-        match partition.index {
-            1 => {
-                boot_part = Some(partition);
+    if !is_gpt {
+        let part_iterator = PartitionIterator::new(&mut disk)?;
+        for partition in part_iterator {
+            debug!(
+                "partition: {}, start: {}, sectors: {}",
+                partition.index, partition.start_lba, partition.num_sectors
+            );
+
+            match partition.index {
+                1 => {
+                    boot_part = Some(partition);
+                }
+                2..=5 => debug!("Skipping partition {}", partition.index),
+                6 => {
+                    data_part = Some(partition);
+                    break;
+                }
+                _ => {
+                    return Err(Error::with_context(
+                        ErrorKind::InvParam,
+                        &format!("Invalid partition index encountered: {}", partition.index),
+                    ));
+                }
             }
-            2..=5 => debug!("Skipping partition {}", partition.index),
-            6 => {
-                data_part = Some(partition);
-                break;
-            }
-            _ => {
+        }
+    } else {
+        // Use the iterator built into gptman and populate the PartInfo structs
+        // for the boot and data partitions as best we can.
+        let gpt = match disk.read_gpt() {
+            Ok(gpt_res) => gpt_res,
+            Err(e) => {
                 return Err(Error::with_context(
-                    ErrorKind::InvParam,
-                    &format!("Invalid partition index encountered: {}", partition.index),
-                ));
+                    ErrorKind::InvState,
+                    &format!("Failed to read GPT header, error: {} ", e)));
+            }
+        };
+        for (i, p) in gpt.iter() {
+            if p.is_used() {
+                debug!("Partition #{}: type = {:?}, size = {} bytes, starting lba = {}, name = {}",
+                    i,
+                    p.partition_type_guid,
+                    p.size().unwrap() * gpt.sector_size,
+                    p.starting_lba,
+                    p.partition_name.as_str());
+                match i {
+                    1 => {
+                        boot_part = Some(PartInfo {
+                            index: i as usize,
+                            ptype: 0x83,  // MBR Linux byte; really this is the EFI system
+                                          // partition, but MBR doesn't define this type.
+                            status: 0,    // Not clear what this should be
+                            start_lba: p.starting_lba,
+                            num_sectors: p.size().unwrap()
+                        })
+                    }
+                    2..=4 => debug!("Skipping partition {}", i),
+                    5 => {
+                        data_part = Some(PartInfo {
+                            index: i as usize,
+                            ptype: 0x83,  // MBR Linux byte
+                            status: 0,    // not clear what this should be
+                            start_lba: p.starting_lba,
+                            num_sectors: p.size().unwrap()
+                        });
+                        break;
+                    }
+                    _ => {
+                        return Err(Error::with_context(
+                            ErrorKind::InvParam,
+                            &format!("Invalid partition index encountered: {}", i),
+                        ));
+                    }
+                }
             }
         }
     }
