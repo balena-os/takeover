@@ -76,3 +76,13 @@ intel-nuc = []
 [dependencies.openssl]
 version = "0.10.63"
 features = ["vendored"]
+
+[dependencies.gptman]
+version = "1.0.2"
+
+# Required to get past "ambiguous name" errors in pin-project-internal v0.4.17.
+# See https://github.com/taiki-e/pin-project/issues/337
+# Problem was triggered by addition of gptman.
+# This package seems foundational and important to keep updated.
+[dependencies.futures]
+version = "0.3.30"
