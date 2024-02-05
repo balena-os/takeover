@@ -22,8 +22,6 @@ jobs:
       )
     secrets: inherit
     with:
-      repo_config: true
-      repo_description: Migrate arbitrary devices to balena
       rust_binaries: true
       rust_toolchain: 1.67
       cargo_targets: |
