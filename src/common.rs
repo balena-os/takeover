@@ -332,7 +332,7 @@ pub(crate) fn hex_dump(buffer: &[u8]) -> String {
 }
 
 cfg_if::cfg_if! {
-    if #[cfg(target_arch = "x86_64")] {
+    if #[cfg(any(target_arch = "x86_64", target_arch = "x86"))] {
         pub(crate) fn string_from_c_string(c_string: &[i8]) -> Result<String> {
             let mut len: Option<usize> = None;
             for (idx, char) in c_string.iter().enumerate() {
