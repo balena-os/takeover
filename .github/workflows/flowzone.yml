@@ -25,7 +25,8 @@ jobs:
       repo_config: true
       repo_description: Migrate arbitrary devices to balena
       rust_binaries: true
-      rust_toolchain: 1.67
+      # rust_toolchain: 1.67
+      rust_toolchain: stable
       cargo_targets: |
         aarch64-unknown-linux-musl,
         armv7-unknown-linux-musleabihf,
