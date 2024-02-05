@@ -149,7 +149,12 @@ pub(crate) fn get_mem_info() -> Result<(u64, u64)> {
     let mut s_info: libc::sysinfo = unsafe { MaybeUninit::<libc::sysinfo>::zeroed().assume_init() };
     let res = unsafe { libc::sysinfo(&mut s_info) };
     if res == 0 {
-        Ok((s_info.totalram, s_info.freeram))
+        // Fields `totalram` and `freeram` are typed either as `u32` or `u64`
+        // depending on the platform. We need the conversion for 32-bit
+        // architectures, but clippy would complain about it in 64-bit ones.
+        // Therefore, we suppress the warning.
+        #[allow(clippy::useless_conversion)]
+        Ok((s_info.totalram.into(), s_info.freeram.into()))
     } else {
         Err(Error::new(ErrorKind::NotImpl))
     }
