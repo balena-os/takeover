@@ -44,6 +44,7 @@ impl Display for DeviceType {
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone)]
 pub(crate) enum OSArch {
     AMD64,

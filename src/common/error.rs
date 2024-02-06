@@ -3,6 +3,7 @@ use std::fmt::{self, Display, Formatter};
 use std::io;
 use std::result;
 
+#[allow(dead_code)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum ErrorKind {
     Upstream,
@@ -124,7 +125,7 @@ impl Error {
 
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.kind.to_string())?;
+        write!(f, "{}", self.kind)?;
         match &self.context {
             Some(context) => {
                 write!(f, ", context: {}", context)?;

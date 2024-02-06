@@ -121,7 +121,7 @@ impl Iterator for ProcessIterator {
                 match dir_entry {
                     Ok(dir_entry) => {
                         let curr_path = dir_entry.path();
-                        if let Some(captures) = DIR_REGEX.captures(&*curr_path.to_string_lossy()) {
+                        if let Some(captures) = DIR_REGEX.captures(&curr_path.to_string_lossy()) {
                             let pid_str = captures.get(1).unwrap().as_str();
                             match pid_str.parse::<i32>() {
                                 Ok(pid) => return Some(Ok((pid, curr_path))),
@@ -217,7 +217,7 @@ pub(crate) fn get_process_info_for(pid: i32, directory: Option<&Path>) -> Result
         &proc_dir
     };
 
-    let exec_path = path_append(&directory, "exe");
+    let exec_path = path_append(directory, "exe");
     let executable = match read_link(&exec_path) {
         Ok(link_path) => Some(link_path),
         Err(why) => {
@@ -234,8 +234,8 @@ pub(crate) fn get_process_info_for(pid: i32, directory: Option<&Path>) -> Result
             }
         }
     };
-    let root_path = path_append(&directory, "root");
-    let root = match read_link(&root_path) {
+    let root_path = path_append(directory, "root");
+    let root = match read_link(root_path) {
         Ok(link_path) => link_path,
         Err(why) => {
             return Err(Error::from_upstream(
@@ -250,7 +250,7 @@ pub(crate) fn get_process_info_for(pid: i32, directory: Option<&Path>) -> Result
 
     Ok(ProcessInfo {
         process_id: pid,
-        status: parse_status(&directory)?,
+        status: parse_status(directory)?,
         executable,
         root,
     })
@@ -312,8 +312,7 @@ pub(crate) fn fuser<P: AsRef<Path>>(
                     match dir_entry {
                         Ok(dir_entry) => {
                             let curr_path = dir_entry.path();
-                            if let Some(captures) =
-                                DIR_REGEX.captures(&*curr_path.to_string_lossy())
+                            if let Some(captures) = DIR_REGEX.captures(&curr_path.to_string_lossy())
                             {
                                 let curr_fd = captures
                                     .get(1)
@@ -442,7 +441,7 @@ pub(crate) fn lstat<P: AsRef<Path>>(path: P) -> Result<libc::stat> {
 
     let c_path = path_to_cstring(&path)?;
     cfg_if::cfg_if! {
-         if #[cfg(target_arch = "x86_64")] {
+         if #[cfg(any(target_arch = "x86_64", target_arch = "x86"))] {
             let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
          } else {
             let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;
@@ -466,7 +465,7 @@ pub(crate) fn stat<P: AsRef<Path>>(path: P) -> Result<libc::stat> {
     let c_path = path_to_cstring(&path)?;
 
     cfg_if::cfg_if! {
-         if #[cfg(target_arch = "x86_64")] {
+         if #[cfg(any(target_arch = "x86_64", target_arch = "x86"))] {
             let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
          } else {
             let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;
@@ -487,7 +486,7 @@ pub(crate) fn stat<P: AsRef<Path>>(path: P) -> Result<libc::stat> {
 pub(crate) fn mkfifo<P: AsRef<Path>>(path: P, mode: u32) -> Result<()> {
     let c_path = path_to_cstring(&path)?;
     cfg_if::cfg_if! {
-         if #[cfg(target_arch = "x86_64")] {
+         if #[cfg(any(target_arch = "x86_64", target_arch = "x86"))] {
             let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
          } else {
             let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;
@@ -509,7 +508,7 @@ pub(crate) fn mknod<P: AsRef<Path>>(path: P, mode: u32, dev_id: u64) -> Result<(
     let c_path = path_to_cstring(&path)?;
 
     cfg_if::cfg_if! {
-         if #[cfg(target_arch = "x86_64")] {
+         if #[cfg(any(target_arch = "x86_64", target_arch = "x86"))] {
             let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
          } else {
             let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;
@@ -533,7 +532,7 @@ pub(crate) fn link<P1: AsRef<Path>, P2: AsRef<Path>>(old_file: P1, new_file: P2)
     let new_c_path = path_to_cstring(&new_file)?;
 
     cfg_if::cfg_if! {
-         if #[cfg(target_arch = "x86_64")] {
+         if #[cfg(any(target_arch = "x86_64", target_arch = "x86"))] {
             let old_c_path_ptr = old_c_path.as_bytes_with_nul() as *const [u8] as *const i8;
             let new_c_path_ptr = new_c_path.as_bytes_with_nul() as *const [u8] as *const i8;
          } else {
@@ -555,12 +554,11 @@ pub(crate) fn link<P1: AsRef<Path>, P2: AsRef<Path>>(old_file: P1, new_file: P2)
 }
 
 pub(crate) fn symlink<P1: AsRef<Path>, P2: AsRef<Path>>(source: P1, dest: P2) -> Result<()> {
-
     let src_c_path = path_to_cstring(&source)?;
     let dest_c_path = path_to_cstring(&dest)?;
 
     cfg_if::cfg_if! {
-         if #[cfg(target_arch = "x86_64")] {
+         if #[cfg(any(target_arch = "x86_64", target_arch = "x86"))] {
             let src_c_path_ptr = src_c_path.as_bytes_with_nul() as *const [u8] as *const i8;
             let dest_c_path_ptr = dest_c_path.as_bytes_with_nul() as *const [u8] as *const i8;
          } else {
@@ -585,7 +583,7 @@ pub(crate) fn mkdir<P: AsRef<Path>>(path: P, mode: u32) -> Result<()> {
     debug!("mkdir: '{}'", path.as_ref().display());
     let c_path = path_to_cstring(&path)?;
     cfg_if::cfg_if! {
-         if #[cfg(target_arch = "x86_64")] {
+         if #[cfg(any(target_arch = "x86_64", target_arch = "x86"))] {
             let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const i8;
          } else {
             let c_path_ptr = c_path.as_bytes_with_nul() as *const [u8] as *const u8;

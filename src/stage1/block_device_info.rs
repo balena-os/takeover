@@ -165,11 +165,7 @@ impl BlockDeviceInfo {
                     let mounted: Option<Mount> = if let Some(mount) = mounts.get(&dev_path) {
                         Some(mount.clone())
                     } else if root_number == curr_number {
-                        if let Some(mount) = mounts.get(PathBuf::from("/dev/root").as_path()) {
-                            Some(mount.clone())
-                        } else {
-                            None
-                        }
+                        mounts.get(PathBuf::from("/dev/root").as_path()).cloned()
                     } else {
                         None
                     };
@@ -285,11 +281,7 @@ impl BlockDeviceInfo {
                         let mounted = if let Some(mount) = mounts.get(dev_path.as_path()) {
                             Some(mount.clone())
                         } else if curr_number == *root_number {
-                            if let Some(mount) = mounts.get(PathBuf::from("/dev/root").as_path()) {
-                                Some(mount.clone())
-                            } else {
-                                None
-                            }
+                            mounts.get(PathBuf::from("/dev/root").as_path()).cloned()
                         } else {
                             None
                         };
@@ -345,7 +337,7 @@ impl BlockDeviceInfo {
             dev_info_path.display()
         ))?;
 
-        Ok(DeviceNum::from_str(dev_info.as_str())?)
+        DeviceNum::from_str(dev_info.as_str())
     }
 
     /// extract last element of path as string

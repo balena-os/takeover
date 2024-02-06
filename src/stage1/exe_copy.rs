@@ -28,7 +28,7 @@ impl ExeCopy {
         );
 
         for command in cmd_list {
-            executables.insert(whereis(&command).error_with_all(
+            executables.insert(whereis(command).error_with_all(
                 ErrorKind::FileNotFound,
                 &format!("Command '{}' could not be located", command),
             )?);
@@ -59,7 +59,7 @@ impl ExeCopy {
             let stat = stat(curr_path)
                 .upstream_with_context(&format!("Failed to stat '{}'", curr_path))?;
             self.req_space += stat.st_size as u64;
-            self.get_libs(&curr_path, ldd_path.as_str(), &mut check_libs)?;
+            self.get_libs(curr_path, ldd_path.as_str(), &mut check_libs)?;
         }
 
         while !check_libs.is_empty() {
@@ -196,7 +196,7 @@ impl ExeCopy {
             src_path.display(),
             dest_path.display()
         );
-        copy(&src_path, &dest_path).upstream_with_context(&format!(
+        copy(src_path, &dest_path).upstream_with_context(&format!(
             "Failed toop copy '{}' to '{}'",
             src_path.display(),
             dest_path.display()
@@ -232,7 +232,7 @@ impl ExeCopy {
                     &file,
                     dest_path.display()
                 );
-                copy(&file, &dest_path).upstream_with_context(&format!(
+                copy(file, &dest_path).upstream_with_context(&format!(
                     "Failed to copy '{}' to '{}'",
                     file,
                     dest_path.display()

@@ -84,7 +84,7 @@ pub(crate) fn is_secure_boot() -> Result<bool> {
             );
             Err(Error::with_context(
                 ErrorKind::InvParam,
-                &"is_secure_boot: failed to parse command output".to_string(),
+                "is_secure_boot: failed to parse command output",
             ))
         } else if cmd_res
             .stderr
