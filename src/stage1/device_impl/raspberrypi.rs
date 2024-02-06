@@ -18,10 +18,11 @@ const RPI2_SLUGS: [&str; 1] = [DEV_TYPE_RPI2];
 const RPI3_SLUGS: [&str; 1] = [DEV_TYPE_RPI3];
 const RPI4_64_SLUGS: [&str; 1] = [DEV_TYPE_RPI4_64];
 
-const SUPPORTED_OSSES: [&str; 4] = [
+const SUPPORTED_OSSES: [&str; 5] = [
     "Raspbian GNU/Linux 8 (jessie)",
     "Raspbian GNU/Linux 9 (stretch)",
     "Raspbian GNU/Linux 10 (buster)",
+    "Debian GNU/Linux 12 (bookworm)",
     "Ubuntu 20.04 LTS",
 ];
 
