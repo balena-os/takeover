@@ -10,12 +10,9 @@ use crate::{
     },
 };
 
-// Pi Zero W:  "Raspberry Pi Zero W Rev 1.1"
-// Balena Fin: "Raspberry Pi Compute Module 3 Plus Rev 1.0"
-// RPI 4:      "Raspberry Pi 4 Model B Rev 1.1"
-// RPI 2:      "Raspberry Pi 2 Model B Rev 1.1"
-// RPI Zero W: "Raspberry Pi Zero W Rev 1.1"
-const RPI_MODEL_REGEX: &str = r#"^Raspberry\s+Pi\s+(1|2|3|4|Compute Module 3|Zero)\s+(Model\s+(\S+)|W|Plus)\s+(Rev\s+(\S+))$"#;
+// TODO: Frankly, at this point we should either use a much simpler regex or
+// just allowlist the specific models we want...
+const RPI_MODEL_REGEX: &str = r#"^Raspberry\s+Pi\s+(1|2|3|4|Compute Module 3|Zero)(\s+(Model\s+(\S+)|W))?(\s+Plus)?\s+(Rev\s+(\S+))$"#;
 const RPI1_SLUGS: [&str; 1] = [DEV_TYPE_RPI1];
 const RPI2_SLUGS: [&str; 1] = [DEV_TYPE_RPI2];
 const RPI3_SLUGS: [&str; 1] = [DEV_TYPE_RPI3];
@@ -170,5 +167,26 @@ impl Device for RaspberryPi4_64 {
 
     fn get_device_type(&self) -> DeviceType {
         DeviceType::RaspberryPi4
+    }
+}
+
+#[cfg(test)]
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_model_regex() {
+        let re = Regex::new(RPI_MODEL_REGEX).unwrap();
+
+        assert!(re.is_match("Raspberry Pi Zero W Rev 1.1")); // RPI Zero W
+        assert!(re.is_match("Raspberry Pi Compute Module 3 Plus Rev 1.0")); // balena Fin
+        assert!(re.is_match("Raspberry Pi 4 Model B Rev 1.1")); // RPI 4
+        assert!(re.is_match("Raspberry Pi 3 Model B Plus Rev 1.3")); // RPI 3
+        assert!(re.is_match("Raspberry Pi 2 Model B Rev 1.1")); // RPI 2
+
+        assert!(!re.is_match("Blueberry Pi Zero W Rev 1.1"));
+        assert!(!re.is_match("Raspberry Pii Zero W Rev 1.1"));
+        assert!(!re.is_match("Raspberry Pi 3 Model B Minus Rev 1.3"));
     }
 }
