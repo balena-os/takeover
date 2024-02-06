@@ -31,7 +31,7 @@ pub(crate) fn check_os(supported: &[&str], opts: &Options, dev_type: &str) -> Re
             Ok(false)
         } else {
             warn!(
-                "The OS '{}' has not been tested with {} for device type IntelNuc, prodeeding due to no-os-check option", os_name, env!("CARGO_PKG_NAME"));
+                "The OS '{}' has not been tested with {} for device type IntelNuc, proceeding due to no-os-check option", os_name, env!("CARGO_PKG_NAME"));
             Ok(true)
         }
     } else {

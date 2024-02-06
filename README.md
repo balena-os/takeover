@@ -27,7 +27,7 @@ USAGE:
 FLAGS:
     -d, --download-only     Download image only, do not check device and migrate
     -h, --help              Prints help information
-        --no-ack            Scripted mode - no interactive acknoledgement of takeover
+        --no-ack            Scripted mode - no interactive acknowledgement of takeover
         --no-api-check      Do not check if balena API is available
         --no-cleanup        Debug - do not cleanup after stage1 failure
         --no-efi-setup      Do not setup EFI boot
@@ -52,7 +52,7 @@ OPTIONS:
         --nwmgr-cfg <NWMGR_FILE>...      Supply a network manager file to inject into balena-os
         --s2-log-level <s2-log-level>    Set stage2 log level, one of [error,warn,info,debug,trace]
     -v, --version <VERSION>              Version of balena-os image to download
-        --wifi <SSID>...                 Create a network manager configuation for configured wifi with SSID
+        --wifi <SSID>...                 Create a network manager configuration for configured wifi with SSID
     -w, --work-dir <DIRECTORY>           Path to working directory%                                                                              
 ```   
 
@@ -70,7 +70,7 @@ on the command line.
  
 The above command will download the latest production image for your platform and migrate the device to balena. 
 
-Several options are availble to cover special situations: 
+Several options are available to cover special situations: 
 
 ### Image Selection
 
@@ -90,17 +90,17 @@ of ~x.y.z and ^x.y.z requirements as defined at [semver](https://www.npmjs.com/p
 ```
    
 When downloading images,  certain platforms (mainly intel-nuc, Generic-x86_64, beaglebone) require unpacking the image and 
-extracting the actual OS-image. The *takeover* command does this automatically but the process of unpacking temporarilly 
+extracting the actual OS-image. The *takeover* command does this automatically but the process of unpacking temporarily 
 requires up to 2.3GB of disk space. You can use the --work-dir option to specify a working directory that has sufficient 
 disk space (eg. a memory stick) to unpack if your current directory does not. Otherwise you can use *takeover* 
-on a computer with sufficient diskspace to download the image, copy it to the target device and use the 
+on a computer with sufficient disk space to download the image, copy it to the target device and use the 
 ```-i / --image``` as described below.
 
 The ```-d / --download-only``` option allows you to download an image without installing it. This option also 
 disables most checks, so that you can download an image e.g. for your RaspberryPI 3 using your X86 PC. 
 All you need to do is use a config.json for a raspberry PI and the ```-d``` option.
 
-Example - Dowload only of a balena OS image: 
+Example - Download only of a balena OS image: 
 ```shell script
 sudo ./takeover -d --version 2.50.1+rev1.dev -c config.json 
 ```
@@ -113,7 +113,7 @@ You can use the ```-i / --image``` option to specify any valid balena-os image.
 **Warning:** Please be aware that specifying an invalid 
 image might lead to your target device being flashed with something invalid which will very likely lead to it not booting. 
 
-Be carefull with images you have downloaded from the [balena dashboard](https://balena.io). These images are zip encoded 
+Be careful with images you have downloaded from the [balena dashboard](https://balena.io). These images are zip encoded 
 and need to be unpacked and recompressed using gzip as follows: 
 ```shell script
 unzip <image-name>
@@ -132,7 +132,7 @@ Using the ```--wifi``` option you can instruct *takeover* to migrate only specif
 You can also specify your own NetworkManager configuration file using the ```--nwmgr-cfg``` option. 
 
 If no network configurations are found *takeover* will print an error message and abort to keep you from accidentally 
-migrating a configuration that will not be able to come online. This check can be overridden by specifyng the 
+migrating a configuration that will not be able to come online. This check can be overridden by specifying the 
 ```--np-nwmgr-check``` option. 
    
 By default *takeover* will migrate the devices hostname. This can be disabled using the ```--no-keep-name``` option. 
@@ -149,7 +149,7 @@ This part of migration is called stage2. In stage2 the console does not receive 
 ssh-sessions will usually be disconnected. 
 Logging to the harddisk does not make sense, as that device will be overwritten with balena-os during the migration process. 
 For this reason you can specify a log device using the ```-l / --log-to``` option. 
-You should use a device that is independant from the disk that balena will be installed on. Usually a secondary disk 
+You should use a device that is independent from the disk that balena will be installed on. Usually a secondary disk 
 or a USB stick works well. The log device should be formatted with a *vfat*, *ext3* or *ext4* file system.
 It also makes sense to adapt the stage2 log level to see a maximum of information. This can be done using the 
 ```-s / --s2-log-level``` option. Log levels are as given above. 
@@ -163,12 +163,12 @@ sudo ./takeover -c config.json -l /dev/sda1 --s2-log-level debug -i balena-cloud
 
 *takeover* can be configured to create a backup that will automatically be converted to volumes once 
 balena-os is running on the device. The backup is configured using a file in YAML syntax which is 
-made available to takeover using the ```--backup-cfg``` comand line option.
+made available to takeover using the ```--backup-cfg``` command line option.
 
-**Warning**: Plaese be aware that the backup file will be stored in RAMFS together with the balena-os image and some other 
+**Warning**: Please be aware that the backup file will be stored in RAMFS together with the balena-os image and some other 
 files at some point of stage2 takeover processing. 
 For this reason the backup size should be restricted to a size that fits into the devices ram leaving ample space. 
-*takeover* will fail in stage2 if unsufficient ram is found to transfer all files.    
+*takeover* will fail in stage2 if insufficient ram is found to transfer all files.    
  
      
 The backup is grouped into volumes. 
@@ -180,7 +180,7 @@ The supervisor will delete the backup once this process is terminated. Backup di
 are not retained. 
 
 Backup volume definitions can contain one or more ```items```. An Item consists of a mandatory ```source``` source path definition
-and the following optionial fields: 
+and the following optional fields: 
 - ```target``` - an alternative target directory name - if not present the files will be copied to the root of the volume.
 - ```filter``` - a regular expression that will be applied to the source path. Only files matching the filter will be copied. 
 If no filter is given, all files will be copied.      
