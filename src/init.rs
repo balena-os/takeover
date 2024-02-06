@@ -106,7 +106,7 @@ fn redirect_fd(file_name: &str, old_fd: c_int, mode: c_int) -> Result<()> {
         .into_raw();
 
     let new_fd = unsafe { open(filename, mode) };
-    unsafe { CString::from_raw(filename) };
+    let _ = unsafe { CString::from_raw(filename) };
     if new_fd >= 0 {
         let res = unsafe { dup2(new_fd, old_fd) };
         if res >= 0 {
