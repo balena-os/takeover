@@ -11,10 +11,10 @@ use crate::{
     stage1::{
         backup::config::backup_cfg_from_file,
         backup::{create, create_ext},
-        defs::{DEV_TYPE_GEN_X86_64, GZIP_MAGIC_COOKIE, MAX_CONFIG_JSON},
+        defs::{DEV_TYPE_GEN_X86_64, GZIP_MAGIC_COOKIE, MAX_CONFIG_JSON, BOOT_BLOB_PARTITION_JETSON_XAVIER, DEV_TYPE_JETSON_XAVIER},
         device::Device,
         device_impl::get_device,
-        image_retrieval::download_image,
+        image_retrieval::{download_image, FLASHER_DEVICES},
         migrate_info::balena_cfg_json::BalenaCfgJson,
         utils::mktemp,
         wifi_config::WifiConfig,
@@ -38,6 +38,8 @@ pub(crate) struct MigrateInfo {
     mounts: Vec<PathBuf>,
     to_dir: Option<PathBuf>,
     image_path: PathBuf,
+    boot0_image_path: PathBuf, /* boot blob for Jetson AGX Xavier */
+    boot0_image_dev: PathBuf, /* HW defined boot partition on AGX Xavier */
     device: Box<dyn Device>,
     config: BalenaCfgJson,
     work_dir: PathBuf,
@@ -50,11 +52,18 @@ pub(crate) struct MigrateInfo {
 impl MigrateInfo {
     pub fn new(opts: &Options) -> Result<MigrateInfo> {
         let device = get_device(opts)?;
-        info!("Detected device type: {}", device.get_device_type());
+        let os_name = get_os_name()?;
+        info!("Detected device type: {} running {}", device.get_device_type(), os_name);
 
+        /* If no config.json is passed in command line and we're running on balenaOS,
+         * we can preserve the existing config.json
+         */
         let mut config = if let Some(balena_cfg) = opts.config() {
             BalenaCfgJson::new(balena_cfg)?
-        } else {
+        } else if Path::new("/mnt/boot/config.json").exists() {
+            BalenaCfgJson::new("/mnt/boot/config.json")?
+        }
+        else {
             match MigrateInfo::get_internal_cfg_json(&opts.work_dir()) {
                 Ok(balena_cfg_json) => balena_cfg_json,
                 Err(why) => {
@@ -111,6 +120,7 @@ impl MigrateInfo {
             ))?
         };
 
+
         if !opts.migrate() {
             return Err(Error::with_context(
                 ErrorKind::ImageDownloaded,
@@ -119,6 +129,36 @@ impl MigrateInfo {
         }
 
         debug!("image path: '{}'", image_path.display());
+
+        /* We could not to extract the boot blob from the non-flasher
+         * image, so, for the purpose of testing migration on the AGX Xavier
+         * we added a config flag to pass the path to the boot blob
+         * TODO: Extract the boot blob from /opt/<boot.img>
+         */
+        let mut boot0_image_path = PathBuf::new();
+        let mut boot0_image_dev = PathBuf::new();
+        if device.supports_device_type(DEV_TYPE_JETSON_XAVIER) {
+             boot0_image_path = opts
+            .boot0_image()
+            .canonicalize()
+            .upstream_with_context(&format!(
+                "Failed to canonicalize path to boot0 image: '{}'",
+                opts.boot0_image().display()
+            ))?;
+
+            if file_exists(&boot0_image_path) {
+                info!("boot0 image found!");
+            }
+
+            boot0_image_dev = PathBuf::from(BOOT_BLOB_PARTITION_JETSON_XAVIER);
+        }
+
+        /* TODO: Check if we will convert the Jetson AGX, Jetson Xavier NX eMMC and NX SD to flasher types */
+        if FLASHER_DEVICES.contains(&config.get_device_type()?.as_str()) {
+            info!("device-type '{}' is a flasher type, should unpack image", &config.get_device_type()?.as_str());
+            // below function needs to be implemented if we decide to release flasher images for the new L4T, to extract the flasher image from the non-flasher image
+            //extract_image_from_local(&image_path ...)?;
+        }
 
         let wifi_ssids = opts.wifis();
 
@@ -176,6 +216,8 @@ impl MigrateInfo {
             mounts: Vec::new(),
             config,
             image_path,
+            boot0_image_path,
+            boot0_image_dev,
             device,
             work_dir,
             wifis,
@@ -201,8 +243,16 @@ impl MigrateInfo {
         &self.to_dir
     }
 
+    pub fn get_device_type_name(&self) -> String {
+         self.device.to_string()
+    }
+
     pub fn is_x86(&self) -> bool {
         self.device.supports_device_type(DEV_TYPE_GEN_X86_64)
+    }
+
+    pub fn is_jetson_xavier(&self) -> bool {
+        self.device.supports_device_type(DEV_TYPE_JETSON_XAVIER)
     }
 
     pub fn backup(&self) -> Option<&Path> {
@@ -213,8 +263,19 @@ impl MigrateInfo {
         }
     }
 
+    pub(crate) fn os_name(&self) -> &str {
+        self.os_name.as_ref()
+    }
     pub fn image_path(&self) -> &Path {
         self.image_path.as_path()
+    }
+
+    pub fn boot0_image_path(&self) -> &Path {
+        self.boot0_image_path.as_path()
+    }
+
+    pub fn boot0_image_dev(&self) -> &Path {
+        self.boot0_image_dev.as_path()
     }
 
     pub fn balena_cfg(&self) -> &BalenaCfgJson {
@@ -231,6 +292,11 @@ impl MigrateInfo {
 
     pub fn nwmgr_files(&self) -> &Vec<PathBuf> {
         &self.nwmgr_files
+    }
+
+    pub fn add_nwmgr_file<P: AsRef<Path>>(&mut self, nwmgr_file_path: P) {
+        self.nwmgr_files.push(nwmgr_file_path.as_ref().to_path_buf());
+        debug!("Adding network connection file to copy list: {}", nwmgr_file_path.as_ref().to_path_buf().display());
     }
 
     pub fn wifis(&self) -> &Vec<WifiConfig> {

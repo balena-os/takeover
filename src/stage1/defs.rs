@@ -10,11 +10,18 @@ pub const DEV_TYPE_RPI4_64: &str = "raspberrypi4-64";
 pub const DEV_TYPE_BBG: &str = "beaglebone-green";
 pub const DEV_TYPE_BBB: &str = "beaglebone-black";
 pub const DEV_TYPE_BBXM: &str = "beagleboard-xm";
+pub const DEV_TYPE_JETSON_XAVIER: &str = "jetson-xavier";
+
+/* Hardware defined boot partition for Jetson AGX Xavier */
+pub const BOOT_BLOB_PARTITION_JETSON_XAVIER: &str = "/dev/mmcblk0boot0";
+
+/* Stage 2 destination file name for the boot blob */
+pub const BOOT_BLOB_NAME_JETSON_XAVIER: &str = "boot0_mmcblk0boot0.img";
 
 pub const MAX_CONFIG_JSON: usize = 2048;
 pub const GZIP_MAGIC_COOKIE: u16 = 0x1f8b;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum DeviceType {
     BeagleboneGreen,
     BeagleboneBlack,
@@ -24,6 +31,7 @@ pub(crate) enum DeviceType {
     RaspberryPi2,
     RaspberryPi3,
     RaspberryPi4,
+    JetsonXavier
 }
 
 impl Display for DeviceType {
@@ -40,6 +48,7 @@ impl Display for DeviceType {
                 Self::RaspberryPi2 => "Raspberry Pi 2",
                 Self::RaspberryPi3 => "Raspberry Pi 3",
                 Self::RaspberryPi4 => "Raspberry Pi 4",
+                Self::JetsonXavier => "Jetson Xavier",
             }
         )
     }

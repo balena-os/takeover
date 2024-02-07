@@ -1,0 +1,6 @@
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
+
+[profile.release]
+opt-level = "z"
+strip = true

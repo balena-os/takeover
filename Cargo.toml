@@ -7,6 +7,9 @@ publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[profile.release]
+opt-level = "s"
+
 [dependencies]
 
 [dependencies.libc]
@@ -72,6 +75,7 @@ version = "0.4"
 raspberrypi3 = []
 raspberrypi4-64 = []
 intel-nuc = []
+jetson-xavier = []
 
 [dependencies.openssl]
 version = "0.10.63"
