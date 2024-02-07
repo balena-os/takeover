@@ -1,5 +1,5 @@
 use std::fs::{
-    copy, create_dir, create_dir_all, read_dir, read_to_string, remove_dir, File, OpenOptions,
+    copy, create_dir, create_dir_all, read_dir, read_to_string, remove_dir, File, OpenOptions, read, write
 };
 use std::io::{self, Read, Write};
 
@@ -21,6 +21,7 @@ use log::{debug, error, info, trace, warn, Level};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
 use crate::common::stage2_config::LogDevice;
+
 use crate::common::{
     call,
     defs::{
@@ -165,7 +166,7 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<()> {
         src_path.display(),
         &to_path.display()
     ))?;
-    info!("Copied image to '{}'", to_path.display());
+    info!("Copied image from {} to '{}'", src_path.display(), to_path.display());
 
     let src_path = path_append(OLD_ROOT_MP, &s2_cfg.config_path);
     let to_path = path_append(TRANSFER_DIR, BALENA_CONFIG_PATH);
@@ -175,6 +176,20 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<()> {
         &to_path.display()
     ))?;
     info!("Copied config to '{}'", to_path.display());
+
+    /* Below boot0 image is only for Xaviers, and we cneed to copy it along with the OS image for now
+    because I couldn't extract it from the flasher image, at least for the purpose of this test */
+
+    let src_path = path_append("/", &s2_cfg.boot0_image_path);
+    let dest_path = path_append(TRANSFER_DIR, &s2_cfg.boot0_image_path);
+    copy(&src_path, &dest_path).upstream_with_context(&format!(
+        "Failed to copy '{}' to {}",
+        src_path.display(),
+        &dest_path.display()
+    ))?;
+    info!("Copied '{}' to '{}'", src_path.display(), dest_path.display());
+    info!("{} exists {}", dest_path.display(), dest_path.exists());
+    /* Above boot0 image is only for Xaviers */
 
     if let Some(ref backup_path) = s2_cfg.backup_path {
         let src_path = path_append(OLD_ROOT_MP, backup_path);
@@ -456,7 +471,7 @@ fn transfer_boot_files<P: AsRef<Path>>(dev_root: P) -> Result<()> {
         src_path.display(),
         target_path.display()
     ))?;
-
+    info!("Source config json is '{}' while target config.json is '{}'", src_path.display(),  target_path.display());
     info!("Successfully copied config.json to boot partition",);
 
     let src_path = path_append(TRANSFER_DIR, SYSTEM_CONNECTIONS_DIR);
@@ -573,7 +588,8 @@ fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo)> {
                     p.starting_lba,
                     p.partition_name.as_str());
                 match i {
-                    1 => {
+                    1..=42 => debug!("Skipping partition {}", i),
+                    43 => {
                         boot_part = Some(PartInfo {
                             index: i as usize,
                             ptype: 0x83,  // MBR Linux byte; really this is the EFI system
@@ -583,8 +599,8 @@ fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo)> {
                             num_sectors: p.size().unwrap()
                         })
                     }
-                    2..=4 => debug!("Skipping partition {}", i),
-                    5 => {
+                    44..=46 => debug!("Skipping partition {}", i),
+                    47 => {
                         data_part = Some(PartInfo {
                             index: i as usize,
                             ptype: 0x83,  // MBR Linux byte
@@ -1146,8 +1162,29 @@ pub fn stage2(opts: &Options) -> ! {
 
     sync();
 
-    let image_path = path_append(TRANSFER_DIR, BALENA_IMAGE_PATH);
+    let boot0_image_path = path_append("/", s2_config.boot0_image_path);
 
+    info!("boot0_image_path is: '{}'", boot0_image_path.display());
+    info!("boot0_image_dev is: '{}'", s2_config.boot0_image_dev.display());
+
+    info!("boot0 exists {}", boot0_image_path.exists());
+    info!("/dev/mmcblk0boot0 exists {}", Path::new("/dev/mmcblk0boot0").exists());
+
+    let force_ro = "0";
+    std::fs::write("/sys/block/mmcblk0boot0/force_ro", force_ro).expect("Unable to write force_ro");
+    
+    let boot0_data = std::fs::read(boot0_image_path).unwrap();
+
+    info!("Read '{}' ", boot0_data.len());
+
+    std::fs::write(s2_config.boot0_image_dev, boot0_data).expect("Unable to write mmcblk0boot0");
+    info!("boot0_image_path - was written");
+
+    let image_path = path_append(TRANSFER_DIR, BALENA_IMAGE_PATH);
+    info!("image exists {}", image_path.exists());
+
+    sync;
+   
     match flash_external(
         &s2_config.flash_dev,
         &image_path,
@@ -1160,6 +1197,41 @@ pub fn stage2(opts: &Options) -> ! {
         }
     }
 
+    /* 
+    Below approach of writing /dev/mmcblk0boot0 hangs indefinitely with:
+    `
+    2024-02-07 12:43:00 INFO  [takeover::stage2] Copied network config to '/transfer/system-connections/resin-wifi-0'
+    2024-02-07 12:43:00 INFO  [takeover::stage2] Attempting to unmount '/dev/mmcblk0p43' from '/mnt/old_root/mnt/boot'
+    2024-02-07 12:43:00 INFO  [takeover::stage2] Successfully unmounted '/mnt/old_root/mnt/boot'
+    2024-02-07 12:43:00 INFO  [takeover::stage2] Attempting to unmount '/dev/mmcblk0p47' from '/mnt/old_root/var/volatile/lib/docker'
+    2024-02-07 12:43:00 INFO  [takeover::stage2] Successfully unmounted '/mnt/old_root/var/volatile/lib/docker'
+    2024-02-07 12:43:00 INFO  [takeover::stage2] boot0_image_path is: '/boot0.img.gz'
+    2024-02-07 12:43:00 INFO  [takeover::stage2] boot0_image_dev is: '/dev/mmcblk0boot0'
+    2024-02-07 12:43:00 INFO  [takeover::stage2] boot0 exists true
+    2024-02-07 12:43:00 INFO  [takeover::stage2] /dev/mmcblk0boot0 exists true
+    2024-02-07 12:43:00 INFO  [takeover::stage2] image exists true
+    2024-02-07 12:43:00 DEBUG [takeover::stage2] invoking dd
+    2024-02-07 12:43:14 INFO  [takeover::stage2] Wrote 2805989376 bytes, 2676 MiB to dd in 13 seconds @ 205 MiB/sec
+    2024-02-07 12:43:14 INFO  [takeover::stage2] dd terminated successfully
+    2024-02-07 12:43:14 INFO  [takeover::stage2] will write boot0 image
+    2024-02-07 12:43:14 DEBUG [takeover::stage2] invoking dd
+    `
+    info!("will write boot0 image");
+
+    match flash_external(
+        &s2_config.boot0_image_dev,
+        &boot0_image_path,
+        &format!("/bin/{}", DD_CMD),
+    ) {
+        FlashState::Success => (),
+        _ => {
+            sleep(Duration::from_secs(10));
+            reboot();
+        }
+    }
+
+    info!("Wrote boot0 image");
+    */
     sync();
     sleep(Duration::from_secs(5));
 

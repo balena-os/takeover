@@ -28,6 +28,14 @@ pub struct Options {
     #[structopt(
         short,
         long,
+        value_name = "BOOT0_IMAGE",
+        parse(from_os_str),
+        help = "Path to boot0.gz image"
+    )]
+    boot0_image: Option<PathBuf>,
+    #[structopt(
+        short,
+        long,
         value_name = "VERSION",
         help = "Version of balena-os image to download"
     )]
@@ -166,6 +174,14 @@ impl Options {
 
     pub fn image(&self) -> &Option<PathBuf> {
         &self.image
+    }
+    
+    pub fn boot0_image(&self) -> PathBuf {
+        if let Some(boot0_image) = &self.boot0_image {
+            boot0_image.clone()
+        } else {
+            PathBuf::from("boot0.img.gz")
+        }
     }
 
     pub fn version(&self) -> &str {

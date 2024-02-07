@@ -14,7 +14,7 @@ use crate::{
         defs::{DEV_TYPE_GEN_X86_64, GZIP_MAGIC_COOKIE, MAX_CONFIG_JSON},
         device::Device,
         device_impl::get_device,
-        image_retrieval::download_image,
+        image_retrieval::{download_image, extract_image_from_local, FLASHER_DEVICES},
         migrate_info::balena_cfg_json::BalenaCfgJson,
         utils::mktemp,
         wifi_config::WifiConfig,
@@ -37,6 +37,8 @@ pub(crate) struct MigrateInfo {
     mounts: Vec<PathBuf>,
     to_dir: Option<PathBuf>,
     image_path: PathBuf,
+    boot0_image_path: PathBuf,
+    boot0_image_dev: PathBuf,
     device: Box<dyn Device>,
     config: BalenaCfgJson,
     work_dir: PathBuf,
@@ -110,6 +112,7 @@ impl MigrateInfo {
             ))?
         };
 
+
         if !opts.migrate() {
             return Err(Error::with_context(
                 ErrorKind::ImageDownloaded,
@@ -118,7 +121,23 @@ impl MigrateInfo {
         }
 
         debug!("image path: '{}'", image_path.display());
+ 
+        let boot0_image_path = opts.boot0_image();
+            
+        if file_exists(&boot0_image_path) {
+             info!("boot0 image exists!");
+             boot0_image_path.canonicalize().upstream_with_context(&format!(
+                    "Failed to canonicalize path '{}'",
+                    boot0_image_path.display()
+                ));
+        }
 
+
+        if FLASHER_DEVICES.contains(&config.get_device_type()?.as_str()) {
+            info!("device-type '{}' is a flasher type, should unpack image", &config.get_device_type()?.as_str());
+            // below function needs to be fixed or re-written, to extract the flasher image from the non-flasher image
+            //extract_image_from_local(&image_path ...)?;
+        }
         let wifi_ssids = opts.wifis();
 
         let wifis: Vec<WifiConfig> = if !wifi_ssids.is_empty() || !opts.no_wifis() {
@@ -175,6 +194,8 @@ impl MigrateInfo {
             mounts: Vec::new(),
             config,
             image_path,
+            boot0_image_path,
+            boot0_image_dev: PathBuf::from(r"/dev/mmcblk0boot0"),
             device,
             work_dir,
             wifis,
@@ -214,6 +235,14 @@ impl MigrateInfo {
 
     pub fn image_path(&self) -> &Path {
         self.image_path.as_path()
+    }
+    
+    pub fn boot0_image_path(&self) -> &Path {
+        self.boot0_image_path.as_path()
+    }
+    
+    pub fn boot0_image_dev(&self) -> &Path {
+        self.boot0_image_dev.as_path()
     }
 
     pub fn balena_cfg(&self) -> &BalenaCfgJson {

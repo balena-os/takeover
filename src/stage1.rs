@@ -21,7 +21,7 @@ use log::{debug, error, info, warn, Level};
 pub(crate) mod migrate_info;
 
 mod api_calls;
-mod block_device_info;
+pub(crate) mod block_device_info;
 mod defs;
 mod device;
 mod device_impl;
@@ -336,6 +336,21 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     commands.copy_files(&takeover_dir)?;
 
+    info!(">>>>> copi work dir '{}'", curr_path.display());
+
+    let src_path =  path_append(PathBuf::from(r"/mnt/data/"), mig_info.boot0_image_path());
+    
+    info!(">>>>> copi boot0_img '{}'",src_path.display());
+    let boot0_copy_path = path_append(&takeover_dir, mig_info.boot0_image_path());
+
+    copy(src_path, &boot0_copy_path);
+    info!(">>>>> copied boot0_img to '{}'", boot0_copy_path.display());
+    let checkPath = path_append(&takeover_dir, "");
+    let paths = std::fs::read_dir(checkPath).unwrap();
+
+    for path in paths {
+        println!("Name: {}", path.unwrap().path().display())
+    }
     prepare_configs(opts.work_dir(), mig_info)?;
 
     // *********************************************************
@@ -433,6 +448,8 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
                 opts.work_dir().display()
             ))?,
         image_path: mig_info.image_path().to_path_buf(),
+        boot0_image_path : mig_info.boot0_image_path().to_path_buf(),
+        boot0_image_dev : mig_info.boot0_image_dev().to_path_buf(),
         config_path: mig_info.balena_cfg().get_path().to_path_buf(),
         backup_path: if let Some(backup_path) = mig_info.backup() {
             Some(backup_path.to_owned())

@@ -10,6 +10,7 @@ pub const DEV_TYPE_RPI4_64: &str = "raspberrypi4-64";
 pub const DEV_TYPE_BBG: &str = "beaglebone-green";
 pub const DEV_TYPE_BBB: &str = "beaglebone-black";
 pub const DEV_TYPE_BBXM: &str = "beagleboard-xm";
+pub const DEV_TYPE_JETSON_XAVIER: &str = "jetson-xavier";
 
 pub const MAX_CONFIG_JSON: usize = 2048;
 pub const GZIP_MAGIC_COOKIE: u16 = 0x1f8b;
@@ -24,6 +25,7 @@ pub(crate) enum DeviceType {
     RaspberryPi2,
     RaspberryPi3,
     RaspberryPi4,
+    JetsonXavier
 }
 
 impl Display for DeviceType {
@@ -40,6 +42,7 @@ impl Display for DeviceType {
                 Self::RaspberryPi2 => "Raspberry Pi 2",
                 Self::RaspberryPi3 => "Raspberry Pi 3",
                 Self::RaspberryPi4 => "Raspberry Pi 4",
+                Self::JetsonXavier => "Jetson Xavier",
             }
         )
     }

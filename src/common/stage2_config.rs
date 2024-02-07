@@ -26,6 +26,8 @@ pub(crate) struct Stage2Config {
     pub umount_parts: Vec<UmountPart>,
     pub work_dir: PathBuf,
     pub image_path: PathBuf,
+    pub boot0_image_path: PathBuf,
+    pub boot0_image_dev: PathBuf,
     pub config_path: PathBuf,
     pub backup_path: Option<PathBuf>,
     pub tty: PathBuf,
