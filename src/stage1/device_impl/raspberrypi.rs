@@ -5,17 +5,22 @@ use crate::stage1::device_impl::check_os;
 use crate::{
     common::{options::Options, Error, ErrorKind, Result},
     stage1::{
-        defs::{DeviceType, DEV_TYPE_RPI1, DEV_TYPE_RPI2, DEV_TYPE_RPI3, DEV_TYPE_RPI4_64},
+        defs::{
+            DeviceType, DEV_TYPE_RPI1, DEV_TYPE_RPI2, DEV_TYPE_RPI3, DEV_TYPE_RPI3_64,
+            DEV_TYPE_RPI4_64,
+        },
         device::Device,
     },
 };
 
 // TODO: Frankly, at this point we should either use a much simpler regex or
-// just allowlist the specific models we want...
+// just allowlist the specific models we want... However, beware that we
+// use the regex captures down below to identify things like the model and
+// revision.
 const RPI_MODEL_REGEX: &str = r#"^Raspberry\s+Pi\s+(1|2|3|4|Compute Module 3|Zero)(\s+(Model\s+(\S+)|W))?(\s+Plus)?\s+(Rev\s+(\S+))$"#;
 const RPI1_SLUGS: [&str; 1] = [DEV_TYPE_RPI1];
 const RPI2_SLUGS: [&str; 1] = [DEV_TYPE_RPI2];
-const RPI3_SLUGS: [&str; 1] = [DEV_TYPE_RPI3];
+const RPI3_SLUGS: [&str; 2] = [DEV_TYPE_RPI3, DEV_TYPE_RPI3_64];
 const RPI4_64_SLUGS: [&str; 1] = [DEV_TYPE_RPI4_64];
 
 const SUPPORTED_OSSES: [&str; 5] = [
