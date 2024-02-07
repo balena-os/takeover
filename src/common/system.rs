@@ -1,5 +1,5 @@
 use libc::{
-    self, ino_t, mode_t, utsname, EACCES, EEXIST, ENOENT, ENXIO, EPERM, O_RDONLY, S_IFBLK, S_IFCHR,
+    self, ino_t, mode_t, utsname, EACCES, EEXIST, ENOENT, ENXIO, EPERM, EIO, O_RDONLY, S_IFBLK, S_IFCHR,
     S_IFDIR, S_IFIFO, S_IFLNK, S_IFMT, S_IFREG, S_IFSOCK,
 };
 
@@ -55,6 +55,7 @@ fn sys_error(message: &str) -> Error {
         ENOENT => ErrorKind::FileNotFound,
         ENXIO => ErrorKind::DeviceNotFound,
         EEXIST => ErrorKind::FileExists,
+        EIO=> ErrorKind::CmdIo,
         _ => ErrorKind::Upstream,
     };
     Error::with_all(error_kind, message, Box::new(io::Error::last_os_error()))
