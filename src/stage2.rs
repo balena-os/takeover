@@ -177,7 +177,7 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<()> {
     ))?;
     info!("Copied config to '{}'", to_path.display());
 
-    /* Below boot0 image is only for Xaviers, and we cneed to copy it along with the OS image for now
+    /* Below boot0 image is only for Xaviers, and we need to copy it along with the OS image for now
     because I couldn't extract it from the flasher image, at least for the purpose of this test */
 
     let src_path = path_append("/", &s2_cfg.boot0_image_path);
@@ -587,9 +587,8 @@ fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo)> {
                     p.size().unwrap() * gpt.sector_size,
                     p.starting_lba,
                     p.partition_name.as_str());
-                match i {
-                    1..=42 => debug!("Skipping partition {}", i),
-                    43 => {
+                 
+                 if  p.partition_name.as_str() == "resin-boot" {
                         boot_part = Some(PartInfo {
                             index: i as usize,
                             ptype: 0x83,  // MBR Linux byte; really this is the EFI system
@@ -598,9 +597,7 @@ fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo)> {
                             start_lba: p.starting_lba,
                             num_sectors: p.size().unwrap()
                         })
-                    }
-                    44..=46 => debug!("Skipping partition {}", i),
-                    47 => {
+                    } else if p.partition_name.as_str() == "resin-data" {
                         data_part = Some(PartInfo {
                             index: i as usize,
                             ptype: 0x83,  // MBR Linux byte
@@ -608,16 +605,8 @@ fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo)> {
                             start_lba: p.starting_lba,
                             num_sectors: p.size().unwrap()
                         });
-                        break;
-                    }
-                    _ => {
-                        return Err(Error::with_context(
-                            ErrorKind::InvParam,
-                            &format!("Invalid partition index encountered: {}", i),
-                        ));
                     }
                 }
-            }
         }
     }
 
