@@ -153,8 +153,11 @@ pub(crate) fn get_mem_info() -> Result<(u64, u64)> {
         // depending on the platform. We need the conversion for 32-bit
         // architectures, but clippy would complain about it in 64-bit ones.
         // Therefore, we suppress the warning.
-        #[allow(clippy::useless_conversion)]
-        Ok((s_info.totalram.into(), s_info.freeram.into()))
+        #[allow(clippy::unnecessary_cast)]
+        Ok((
+            (s_info.totalram as u64) * (s_info.mem_unit as u64),
+            (s_info.freeram as u64) * (s_info.mem_unit as u64),
+        ))
     } else {
         Err(Error::new(ErrorKind::NotImpl))
     }
