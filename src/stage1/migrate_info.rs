@@ -14,7 +14,7 @@ use crate::{
         defs::{DEV_TYPE_GEN_X86_64, GZIP_MAGIC_COOKIE, MAX_CONFIG_JSON},
         device::Device,
         device_impl::get_device,
-        image_retrieval::{download_image, extract_image_from_local, FLASHER_DEVICES},
+        image_retrieval::{download_image, FLASHER_DEVICES},
         migrate_info::balena_cfg_json::BalenaCfgJson,
         utils::mktemp,
         wifi_config::WifiConfig,
@@ -55,7 +55,10 @@ impl MigrateInfo {
 
         let mut config = if let Some(balena_cfg) = opts.config() {
             BalenaCfgJson::new(balena_cfg)?
-        } else {
+        } else if Path::new("/mnt/boot/config.json").exists() {
+            BalenaCfgJson::new("/mnt/boot/config.json")?
+        }
+        else {
             match MigrateInfo::get_internal_cfg_json(&opts.work_dir()) {
                 Ok(balena_cfg_json) => balena_cfg_json,
                 Err(why) => {
@@ -135,7 +138,7 @@ impl MigrateInfo {
 
         if FLASHER_DEVICES.contains(&config.get_device_type()?.as_str()) {
             info!("device-type '{}' is a flasher type, should unpack image", &config.get_device_type()?.as_str());
-            // below function needs to be fixed or re-written, to extract the flasher image from the non-flasher image
+            // below function needs to be implemented, to extract the flasher image from the non-flasher image
             //extract_image_from_local(&image_path ...)?;
         }
         let wifi_ssids = opts.wifis();

@@ -37,7 +37,7 @@ use crate::{
         call,
         defs::{
             NIX_NONE, OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD, SYSTEM_CONNECTIONS_DIR,
-            SYS_EFIVARS_DIR, SYS_EFI_DIR, TELINIT_CMD,
+            SYS_EFIVARS_DIR, SYS_EFI_DIR, TELINIT_CMD, BALENA_CONFIG_PATH,
         },
         error::{Error, ErrorKind, Result, ToError},
         file_exists, format_size_with_unit, get_mem_info, is_admin, get_os_name,
@@ -336,11 +336,9 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     commands.copy_files(&takeover_dir)?;
 
-    debug!(">>>>> copy work dir '{}'", curr_path.display());
-
     let src_path =  path_append(PathBuf::from(r"/mnt/data/"), mig_info.boot0_image_path());
     
-    debug!(">>>>> copy boot0_img '{}'",src_path.display());
+    debug!(">>>>> Will copy boot0_img '{}'",src_path.display());
     let boot0_copy_path = path_append(&takeover_dir, mig_info.boot0_image_path());
 
     copy(src_path, &boot0_copy_path);
@@ -429,7 +427,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     // collect partitions that need to be unmounted
 
-    let s2_cfg = Stage2Config {
+    let mut s2_cfg = Stage2Config {
         log_dev: log_device,
         log_level: opts.s2_log_level().to_string(),
         flash_dev: flash_dev.get_dev_path(),
@@ -454,7 +452,12 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         tty: read_link("/proc/self/fd/1")
             .upstream_with_context("Failed to read tty from '/proc/self/fd/1'")?,
     };
-
+    /* Implemented in migrate_info
+    if get_os_name()?.starts_with("balenaOS") {
+        s2_cfg.config_path=path_append("/mnt/boot/", BALENA_CONFIG_PATH);
+        info!("Detected balenaOS, copying old config.json");
+    }
+    */
     let s2_cfg_path = takeover_dir.join(STAGE2_CONFIG_NAME);
     let mut s2_cfg_file = OpenOptions::new()
         .create(true)
