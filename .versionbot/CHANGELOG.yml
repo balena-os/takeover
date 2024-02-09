@@ -1,4 +1,19 @@
 - commits:
+    - subject: Fix get_mem_info() on 32-bit systems
+      hash: 0f09cfeecd8d6dbd18fe2bffd845099c09e09200
+      body: |
+        Use units multiplier to calculate memory values. It may be >1
+        on systems with large memory.
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Ken Bannister <kb2ma@runbox.com>
+        signed-off-by: Ken Bannister <kb2ma@runbox.com>
+      author: Ken Bannister
+  version: 0.1.2
+  title: ""
+  date: 2024-02-09T17:27:51.707Z
+- commits:
     - subject: Take into account that chars are signed also in 32-bit x86
       hash: bec1460e58fc62b988980d47b3f52be9c895018a
       body: |
