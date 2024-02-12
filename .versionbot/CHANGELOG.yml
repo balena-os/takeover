@@ -1,4 +1,17 @@
 - commits:
+    - subject: Update reqwest to v0.11.24
+      hash: ff360cd28a7e8f2e16c6326a05756c2a1835e898
+      body: ""
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Rahul Thakoor <rahul@balena.io>
+        signed-off-by: Rahul Thakoor <rahul@balena.io>
+      author: Rahul Thakoor
+  version: 0.1.3
+  title: ""
+  date: 2024-02-12T11:44:17.416Z
+- commits:
     - subject: Fix get_mem_info() on 32-bit systems
       hash: 0f09cfeecd8d6dbd18fe2bffd845099c09e09200
       body: |
