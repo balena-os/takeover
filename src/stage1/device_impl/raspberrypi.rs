@@ -17,7 +17,7 @@ use crate::{
 // just allowlist the specific models we want... However, beware that we
 // use the regex captures down below to identify things like the model and
 // revision.
-const RPI_MODEL_REGEX: &str = r#"^Raspberry\s+Pi\s+(1|2|3|4|Compute Module 3|Zero)(\s+(Model\s+(\S+)|W))?(\s+Plus)?\s+(Rev\s+(\S+))$"#;
+const RPI_MODEL_REGEX: &str = r#"^Raspberry\s+Pi\s+(1|2|3|4|Compute Module 3|Zero)(\s+(Model\s+(\S+)|W))?(\+|\s+Plus)?((\s+(Rev\s+(\S+)))?)$"#;
 const RPI1_SLUGS: [&str; 1] = [DEV_TYPE_RPI1];
 const RPI2_SLUGS: [&str; 1] = [DEV_TYPE_RPI2];
 const RPI3_SLUGS: [&str; 2] = [DEV_TYPE_RPI3, DEV_TYPE_RPI3_64];
@@ -189,6 +189,7 @@ mod tests {
         assert!(re.is_match("Raspberry Pi Compute Module 3 Plus Rev 1.0")); // balena Fin
         assert!(re.is_match("Raspberry Pi 4 Model B Rev 1.1")); // RPI 4
         assert!(re.is_match("Raspberry Pi 3 Model B Plus Rev 1.3")); // RPI 3
+        assert!(re.is_match("Raspberry Pi 3 Model B+")); // RPI 3, as reported by QEMU
         assert!(re.is_match("Raspberry Pi 2 Model B Rev 1.1")); // RPI 2
 
         assert!(!re.is_match("Blueberry Pi Zero W Rev 1.1"));
