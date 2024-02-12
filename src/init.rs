@@ -186,12 +186,7 @@ fn close_fds() -> Result<i32> {
                     close_count += 1;
                 }
                 Err(why) => {
-                    if let Some(err_no) = why.as_errno() {
-                        if let Errno::EBADF = err_no {
-                        } else {
-                            warn!("Unexpected error from fcntl({},F_GETFD) : {}", fd, err_no);
-                        }
-                    } else {
+                    if why != Errno::EBADF {
                         warn!("Unexpected error from fcntl({},F_GETFD) : {}", fd, why);
                     }
                 }
