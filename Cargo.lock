@@ -1204,7 +1204,7 @@ dependencies = [
 
 [[package]]
 name = "takeover"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "cfg-if 0.1.10",
  "flate2",

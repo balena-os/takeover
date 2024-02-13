@@ -1,4 +1,33 @@
 - commits:
+    - subject: Fix multiple typos
+      hash: 9517c637000c77e87b9625939ad65b2fac31b0d6
+      body: ""
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+    - subject: Update dependencies to fix security vulnerabilities
+      hash: 1d49a6757a3804133656ccf3d3161e16dadee18f
+      body: |
+        The only required adjustment in the code itself was in src/init.rs. In
+        the older version of `nix`, `Result<T>` was defined as `Result<T,
+        Error>`, and `Error` had to be converted to an `Errno` with the `
+        as_errno()` method.
+
+        In the newer version, `Result<T>` is defined as `Result<T, Errno>`. We
+        get the `Errno` directly, so we don't need to call `as_errno()` anymore.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+  version: 0.1.4
+  title: ""
+  date: 2024-02-13T09:32:15.161Z
+- commits:
     - subject: Update reqwest to v0.11.24
       hash: ff360cd28a7e8f2e16c6326a05756c2a1835e898
       body: ""
