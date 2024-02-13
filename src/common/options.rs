@@ -67,7 +67,7 @@ pub struct Options {
     s2_log_level: Option<Level>,
     #[structopt(
         long,
-        help = "Scripted mode - no interactive acknoledgement of takeover"
+        help = "Scripted mode - no interactive acknowledgement of takeover"
     )]
     no_ack: bool,
     #[structopt(long, help = "Pretend mode, do not flash device")]
@@ -127,7 +127,7 @@ pub struct Options {
     #[structopt(
         long,
         value_name = "SSID",
-        help = "Create a network manager configuation for configured wifi with SSID"
+        help = "Create a network manager configuration for configured wifi with SSID"
     )]
     wifi: Option<Vec<String>>,
     #[structopt(
