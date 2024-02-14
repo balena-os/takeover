@@ -1,5 +1,6 @@
 [package]
 name = "takeover"
+description = "Brownfield device migration tool to balenaOS and balenaCloud"
 version = "0.2.0"
 authors = ["balena.io"]
 edition = "2018"
