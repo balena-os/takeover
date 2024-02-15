@@ -14,7 +14,7 @@ use crate::{
         loop_device::LoopDevice,
         path_append,
         stream_progress::StreamProgress,
-        Error, Result, ToError,
+        Error, Options, Result, ToError,
     },
     stage1::{
         api_calls::{get_os_image, get_os_versions, Versions},
@@ -371,19 +371,27 @@ fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
 }
 
 pub(crate) fn download_image(
+    opts: &Options,
     balena_cfg: &BalenaCfgJson,
     work_dir: &Path,
     device_type: &str,
     version: &str,
 ) -> Result<PathBuf> {
     if !SUPPORTED_DEVICES.contains(&device_type) {
-        return Err(Error::with_context(
-            ErrorKind::InvParam,
-            &format!(
-                "OS download is not supported for device type '{}'",
+        if opts.dt_check() {
+            return Err(Error::with_context(
+                ErrorKind::InvParam,
+                &format!(
+                    "OS download is not supported for device type '{}', to override this check use the no-dt-check option on the command line",
+                    device_type
+                ),
+            ));
+        } else {
+            warn!(
+                "OS download is not supported for device type '{}', proceeding due to no-dt-check option",
                 device_type
-            ),
-        ));
+            );
+        }
     }
 
     let api_key = balena_cfg.get_api_key().upstream_with_context(

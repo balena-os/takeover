@@ -100,6 +100,7 @@ impl MigrateInfo {
             }
         } else {
             let image_path = download_image(
+                opts,
                 &config,
                 &work_dir,
                 config.get_device_type()?.as_str(),

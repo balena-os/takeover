@@ -7,8 +7,8 @@ use crate::{
     stage1::{defs::OSArch, device::Device, utils::get_os_arch},
 };
 
-// mod beaglebone;
 mod beaglebone;
+mod dummy;
 mod intel_nuc;
 mod raspberrypi;
 
@@ -45,6 +45,11 @@ pub(crate) fn check_os(supported: &[&str], opts: &Options, dev_type: &str) -> Re
 pub(crate) fn get_device(opts: &Options) -> Result<Box<dyn Device>> {
     let os_arch = get_os_arch()?;
     info!("Detected OS Architecture is {:?}", os_arch);
+
+    if !opts.dt_check() {
+        info!("Disabling all device type-related checks due to no-dt-check option");
+        return Ok(Box::new(dummy::Dummy::new()));
+    }
 
     match os_arch {
         OSArch::ARMHF | OSArch::ARM64 => {
