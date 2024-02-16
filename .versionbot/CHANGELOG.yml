@@ -1,4 +1,32 @@
 - commits:
+    - subject: Update `get_os_version` to use /v6/release
+      hash: d9e0efce241ca3886412d107ec9b7bc40e7ba092
+      body: >
+        - /device-types/v1/ has been deprecated per issue #18
+
+        - currently using percent-encoded url and replacing device-type in the url
+
+        - /v6/release returns a different response `JSON` compared to /device-types/v1/
+
+        and does not contain the `latest` field.
+
+        - replaced struct `Versions` with a type alias to `Vec<String>`
+
+        - modified `determine_versions` to handle new data structure and [unified images](https://blog.balena.io/unified-balenaos-releases-now-available/)
+
+        - added unit tests for `determine_versions`
+
+        - modified README to remove reference to `dev` and `prod` images
+      footer:
+        Change-type: minor
+        change-type: minor
+        Signed-off-by: Rahul Thakoor <rahul@balena.io>
+        signed-off-by: Rahul Thakoor <rahul@balena.io>
+      author: Rahul Thakoor
+  version: 0.2.0
+  title: ""
+  date: 2024-02-16T08:21:46.715Z
+- commits:
     - subject: Fix multiple typos
       hash: 9517c637000c77e87b9625939ad65b2fac31b0d6
       body: ""
