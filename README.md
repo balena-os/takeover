@@ -68,7 +68,7 @@ sudo ./takeover -c config.json
 ``` 
 on the command line.
  
-The above command will download the latest production image for your platform and migrate the device to balena. 
+The above command will download the latest image for your platform and migrate the device to balena. 
 
 Several options are available to cover special situations: 
 
@@ -78,15 +78,15 @@ The *takeover* command allows you to specify a balena-os version for download or
 
 #### Downloading an image
 
-By default *takeover* will download the latest production image for the platform specified in your config.json. 
-If you need a development image or a version different from the latest you can use the ```--version``` option to specify 
+By default *takeover* will download the latest image for the platform specified in your config.json. 
+If you need a version different from the latest you can use the ```--version``` option to specify 
 a version. 
-The ```--version``` option accepts either a full image name (eg. ```--version 2.50.1+rev1.dev```) or parsing 
+The ```--version``` option accepts either a full image name (eg. ```--version 5.1.20+rev1```) or parsing 
 of ~x.y.z and ^x.y.z requirements as defined at [semver](https://www.npmjs.com/package/semver)
- (eg. ```--version ~2.48```).
+ (eg. ```--version ~5.1```).
  Example: 
  ```shell script
-./sudo takeover -c config.json --version 2.50.1+rev1.dev
+./sudo takeover -c config.json --version 5.1.20+rev1
 ```
    
 When downloading images,  certain platforms (mainly intel-nuc, Generic-x86_64, beaglebone) require unpacking the image and 
