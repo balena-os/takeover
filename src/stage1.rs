@@ -50,10 +50,10 @@ use crate::{
         block_device_info::BlockDevice, block_device_info::BlockDeviceInfo, exe_copy::ExeCopy,
         migrate_info::MigrateInfo, utils::mount_fs,
     },
-    stage1::defs::BOOT_BLOB_NAME_JETSON_XAVIER,
+    stage1::defs::{BOOT_BLOB_NAME_JETSON_XAVIER, BOOT_BLOB_NAME_JETSON_XAVIER_NX}
 };
 
-use crate::common::defs::{DD_CMD, EFIBOOTMGR_CMD, TAKEOVER_DIR};
+use crate::common::defs::{DD_CMD, EFIBOOTMGR_CMD, MTD_DEBUG_CMD, TAKEOVER_DIR};
 use crate::common::dir_exists;
 use crate::common::stage2_config::LogDevice;
 use crate::common::system::{is_dir, mkdir, stat};
@@ -252,6 +252,10 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         copy_commands.push(EFIBOOTMGR_CMD)
     }
 
+    if mig_info.is_jetson_xavier_nx() {
+        copy_commands.push(MTD_DEBUG_CMD)
+    }
+
     let commands = match ExeCopy::new(copy_commands) {
         Ok(commands) => {
             let cmd_space = commands.get_req_space();
@@ -380,6 +384,24 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
             }
         }
         debug!("Copied boot0 image to '{}'", boot0_copy_path.display());
+    } else if mig_info.is_jetson_xavier_nx() {
+        info!("Device is a Jetson Xavier NX. Will copy boot0 image.");
+        let src_path = mig_info.boot0_image_path().canonicalize().upstream_with_context(&format!(
+            "Failed to canonicalize boot0 source path: '{}'",
+            mig_info.boot0_image_path().display()
+        ))?;
+
+        debug!("Will copy boot0 image from '{}'", src_path.display());
+        let boot0_copy_path = path_append(&takeover_dir, PathBuf::from(BOOT_BLOB_NAME_JETSON_XAVIER_NX));
+
+        let res = copy(src_path, &boot0_copy_path);
+        match res {
+            Ok(_val) => (),
+            Err(err) => {
+                warn!("Failed to copy boot0_img {}", err);
+            }
+        }
+        debug!("Copied boot0 image to '{}'", boot0_copy_path.display());
     }
 
     prepare_configs(opts.work_dir(), mig_info)?;
@@ -464,7 +486,12 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     };
 
     // collect partitions that need to be unmounted
-
+    let mut boot0_path: PathBuf = PathBuf::from("/dev/null");
+    if mig_info.is_jetson_xavier() {
+        boot0_path = PathBuf::from(BOOT_BLOB_NAME_JETSON_XAVIER)
+    } else if mig_info.is_jetson_xavier_nx() {
+        boot0_path = PathBuf::from(BOOT_BLOB_NAME_JETSON_XAVIER_NX)
+    }
     let s2_cfg = Stage2Config {
         log_dev: log_device,
         log_level: opts.s2_log_level().to_string(),
@@ -479,7 +506,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
                 opts.work_dir().display()
             ))?,
         image_path: mig_info.image_path().to_path_buf(),
-        boot0_image_path : PathBuf::from(BOOT_BLOB_NAME_JETSON_XAVIER), /* destination file name */
+        boot0_image_path : boot0_path, /* path to boot0 uncompressed image, will be written to QSPI or hw-defined boot partition */
         boot0_image_dev : mig_info.boot0_image_dev().to_path_buf(), /* hardware boot partition or QSPI path */
         config_path: mig_info.balena_cfg().get_path().to_path_buf(),
         backup_path: if let Some(backup_path) = mig_info.backup() {

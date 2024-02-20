@@ -5,7 +5,7 @@ use std::io::{self, Read, Write};
 
 use std::os::unix::io::AsRawFd;
 use std::process::{exit, Command, Stdio};
-use std::thread::sleep;
+use std::thread::{sleep};
 use std::time::{Duration, Instant};
 
 use nix::{
@@ -20,6 +20,7 @@ use libc::{ioctl, LINUX_REBOOT_CMD_RESTART, MS_RDONLY, MS_REMOUNT, SIGKILL, SIGT
 use log::{debug, error, info, trace, warn, Level};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
+use crate::common::defs::MTD_DEBUG_CMD;
 use crate::common::stage2_config::LogDevice;
 
 use crate::common::{
@@ -43,7 +44,7 @@ use crate::common::{
 use regex::Regex;
 
 const DD_BLOCK_SIZE: usize = 128 * 1024; // 4_194_304;
-
+const JETSON_XAVIER_NX_QSPI_SIZE: &str = "0x2000000";
 const VALIDATE_MAX_ERR: usize = 20;
 const DO_VALIDATE: bool = false;
 const VALIDATE_BLOCK_SIZE: usize = 64 * 1024; // 4_194_304;
@@ -988,6 +989,43 @@ fn validate(target_path: &Path, image_path: &Path) -> Result<bool> {
     Ok(err_count == 0)
 }
 
+fn flash_qspi(target_path: &Path, image_path: &Path) -> FlashState {
+    let mut flash_qspi_res = FlashState::Success;
+    info!("entered flash_qspi");
+
+    match call_command!(&format!("/bin/{}", MTD_DEBUG_CMD), &["erase", &format!("{}", target_path.to_string_lossy()), "0", &format!("{}", JETSON_XAVIER_NX_QSPI_SIZE)], "Failed to execute mtdebug!") {
+        Ok(cmd_stdout) => {
+            for line in cmd_stdout.lines() {
+                    info!("line: {}", line);
+                    }
+                },
+        _ => { warn!("Error executing mtd_debug erase!")}
+    }
+
+
+    match call_command!(&format!("/bin/{}", MTD_DEBUG_CMD), &[
+        "write",
+        &format!("{}", target_path.to_string_lossy()),
+        "0",
+        &format!("{}", JETSON_XAVIER_NX_QSPI_SIZE),
+        &image_path.to_string_lossy()
+    ], "Failed to execute mtdebug!") {
+        Ok(cmd_stdout) => {
+            for line in cmd_stdout.lines() {
+                    info!("line: {}", line);
+                    }
+                },
+        _ => { warn!("Error executing mtd_debug write!");
+                flash_qspi_res = FlashState::FailRecoverable; // TODO: try flash back old boot0 image as fallback
+        }
+    }
+
+    info!("Executed mtd_debug");
+
+    info!("leaving flash_qspi()");
+    return flash_qspi_res;
+}
+
 fn flash_external(target_path: &Path, image_path: &Path, dd_cmd: &str) -> FlashState {
     let mut fail_res = FlashState::FailRecoverable;
 
@@ -1152,7 +1190,7 @@ pub fn stage2(opts: &Options) -> ! {
 
     sync();
 
-    if s2_config.device_type.starts_with("Jetson Xavier") {
+    if s2_config.device_type.starts_with("Jetson Xavier AGX") {
         let boot0_image_path = path_append(TRANSFER_DIR, s2_config.boot0_image_path);
 
         debug!("boot0_image_path is: '{}'", boot0_image_path.display());
@@ -1168,6 +1206,16 @@ pub fn stage2(opts: &Options) -> ! {
 
         std::fs::write(s2_config.boot0_image_dev, boot0_data).expect("Unable to write mmcblk0boot0");
         debug!("Jetson Xavier AGX boot blob was written");
+    } else if s2_config.device_type.starts_with("Jetson Xavier NX") {
+        let boot0_image_path = path_append(TRANSFER_DIR, s2_config.boot0_image_path);
+        debug!("boot0_image_path is: '{}'", boot0_image_path.display());
+        debug!("boot0_image_dev is: '{}'", s2_config.boot0_image_dev.display());
+        debug!("boot0 exists - {}", boot0_image_path.exists());
+
+        match flash_qspi(&s2_config.boot0_image_dev, &boot0_image_path) {
+            FlashState::Success => {info!("QSPI written succesfully!")},
+            _ => {warn!("Failed to write QSPI!")}
+        }
     }
 
     let image_path = path_append(TRANSFER_DIR, BALENA_IMAGE_PATH);
@@ -1185,41 +1233,6 @@ pub fn stage2(opts: &Options) -> ! {
         }
     }
 
-    /*
-    Below approach of writing /dev/mmcblk0boot0 hangs indefinitely with:
-
-    2024-02-07 12:43:00 INFO  [takeover::stage2] Copied network config to '/transfer/system-connections/resin-wifi-0'
-    2024-02-07 12:43:00 INFO  [takeover::stage2] Attempting to unmount '/dev/mmcblk0p43' from '/mnt/old_root/mnt/boot'
-    2024-02-07 12:43:00 INFO  [takeover::stage2] Successfully unmounted '/mnt/old_root/mnt/boot'
-    2024-02-07 12:43:00 INFO  [takeover::stage2] Attempting to unmount '/dev/mmcblk0p47' from '/mnt/old_root/var/volatile/lib/docker'
-    2024-02-07 12:43:00 INFO  [takeover::stage2] Successfully unmounted '/mnt/old_root/var/volatile/lib/docker'
-    2024-02-07 12:43:00 INFO  [takeover::stage2] boot0_image_path is: '/boot0.img.gz'
-    2024-02-07 12:43:00 INFO  [takeover::stage2] boot0_image_dev is: '/dev/mmcblk0boot0'
-    2024-02-07 12:43:00 INFO  [takeover::stage2] boot0 exists true
-    2024-02-07 12:43:00 INFO  [takeover::stage2] /dev/mmcblk0boot0 exists true
-    2024-02-07 12:43:00 INFO  [takeover::stage2] image exists true
-    2024-02-07 12:43:00 DEBUG [takeover::stage2] invoking dd
-    2024-02-07 12:43:14 INFO  [takeover::stage2] Wrote 2805989376 bytes, 2676 MiB to dd in 13 seconds @ 205 MiB/sec
-    2024-02-07 12:43:14 INFO  [takeover::stage2] dd terminated successfully
-    2024-02-07 12:43:14 INFO  [takeover::stage2] will write boot0 image
-    2024-02-07 12:43:14 DEBUG [takeover::stage2] invoking dd
-
-    info!("will write boot0 image");
-
-    match flash_external(
-        &s2_config.boot0_image_dev,
-        &boot0_image_path,
-        &format!("/bin/{}", DD_CMD),
-    ) {
-        FlashState::Success => (),
-        _ => {
-            sleep(Duration::from_secs(10));
-            reboot();
-        }
-    }
-
-    debug!("Wrote boot0 image");
-    */
     sync();
     sleep(Duration::from_secs(5));
 

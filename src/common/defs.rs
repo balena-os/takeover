@@ -10,6 +10,7 @@ pub(crate) const BLKID_CMD: &str = "blkid";
 
 pub(crate) const EFIBOOTMGR_CMD: &str = "efibootmgr";
 pub(crate) const DD_CMD: &str = "dd";
+pub(crate) const MTD_DEBUG_CMD: &str = "mtd_debug";
 
 pub(crate) const TAR_CMD: &str = "tar";
 

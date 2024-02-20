@@ -11,7 +11,7 @@ use crate::{
     stage1::{
         backup::config::backup_cfg_from_file,
         backup::{create, create_ext},
-        defs::{DEV_TYPE_GEN_X86_64, GZIP_MAGIC_COOKIE, MAX_CONFIG_JSON, BOOT_BLOB_PARTITION_JETSON_XAVIER, DEV_TYPE_JETSON_XAVIER},
+        defs::{DEV_TYPE_GEN_X86_64, GZIP_MAGIC_COOKIE, MAX_CONFIG_JSON, BOOT_BLOB_PARTITION_JETSON_XAVIER, BOOT_BLOB_PARTITION_JETSON_XAVIER_NX, DEV_TYPE_JETSON_XAVIER, DEV_TYPE_JETSON_XAVIER_NX},
         device::Device,
         device_impl::get_device,
         image_retrieval::{download_image, FLASHER_DEVICES},
@@ -137,7 +137,7 @@ impl MigrateInfo {
          */
         let mut boot0_image_path = PathBuf::new();
         let mut boot0_image_dev = PathBuf::new();
-        if device.supports_device_type(DEV_TYPE_JETSON_XAVIER) {
+        if device.supports_device_type(DEV_TYPE_JETSON_XAVIER) || device.supports_device_type(DEV_TYPE_JETSON_XAVIER_NX){
              boot0_image_path = opts
             .boot0_image()
             .canonicalize()
@@ -150,7 +150,11 @@ impl MigrateInfo {
                 info!("boot0 image found!");
             }
 
-            boot0_image_dev = PathBuf::from(BOOT_BLOB_PARTITION_JETSON_XAVIER);
+            if device.supports_device_type(DEV_TYPE_JETSON_XAVIER) {
+                boot0_image_dev = PathBuf::from(BOOT_BLOB_PARTITION_JETSON_XAVIER);
+            } else if device.supports_device_type(DEV_TYPE_JETSON_XAVIER_NX) {
+                boot0_image_dev = PathBuf::from(BOOT_BLOB_PARTITION_JETSON_XAVIER_NX);
+            }
         }
 
         /* TODO: Check if we will convert the Jetson AGX, Jetson Xavier NX eMMC and NX SD to flasher types */
@@ -253,6 +257,10 @@ impl MigrateInfo {
 
     pub fn is_jetson_xavier(&self) -> bool {
         self.device.supports_device_type(DEV_TYPE_JETSON_XAVIER)
+    }
+
+    pub fn is_jetson_xavier_nx(&self) -> bool {
+        self.device.supports_device_type(DEV_TYPE_JETSON_XAVIER_NX)
     }
 
     pub fn backup(&self) -> Option<&Path> {
