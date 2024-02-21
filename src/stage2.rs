@@ -297,6 +297,11 @@ fn setup_logging(log_dev: Option<&LogDevice>) {
 
 fn kill_procs(log_level: Level) -> Result<()> {
     trace!("kill_procs: entered");
+
+    if log_level >= Level::Debug {
+        print_active_processes()?;
+    }
+
     let mut killed = false;
     let mut signal = SIGTERM;
     loop {
@@ -314,44 +319,6 @@ fn kill_procs(log_level: Level) -> Result<()> {
         } else {
             signal = SIGKILL;
             sleep(Duration::from_secs(5));
-        }
-    }
-
-    if log_level >= Level::Debug {
-        debug!("active processes:");
-        for proc_info in get_process_infos()? {
-            let mut name = if let Some(name) = proc_info.status().get("Name") {
-                name.to_owned()
-            } else {
-                "-".to_owned()
-            };
-
-            let ppid = if let Some(ppid) = proc_info.status().get("PPid") {
-                ppid.as_ref()
-            } else {
-                "-"
-            };
-
-            if proc_info.process_id() != 1 && (ppid == "0" || ppid == "2") {
-                name = format!("[{}]", name);
-            }
-
-            if let Some(executable) = proc_info.executable() {
-                debug!(
-                    "pid: {:6} name: {}\t executable: {}\t ppid: {}",
-                    proc_info.process_id(),
-                    name,
-                    executable.display(),
-                    ppid
-                );
-            } else {
-                debug!(
-                    "pid: {:6} name: '{}'\t executable: -\t ppid: {}",
-                    proc_info.process_id(),
-                    name,
-                    ppid
-                );
-            }
         }
     }
 
@@ -1137,4 +1104,43 @@ pub fn stage2(opts: &Options) -> ! {
     sync();
 
     reboot();
+}
+
+fn print_active_processes() -> Result<()> {
+    debug!("active processes:");
+    for proc_info in get_process_infos()? {
+        let mut name = if let Some(name) = proc_info.status().get("Name") {
+            name.to_owned()
+        } else {
+            "-".to_owned()
+        };
+
+        let ppid = if let Some(ppid) = proc_info.status().get("PPid") {
+            ppid.as_ref()
+        } else {
+            "-"
+        };
+
+        if proc_info.process_id() != 1 && (ppid == "0" || ppid == "2") {
+            name = format!("[{}]", name);
+        }
+
+        if let Some(executable) = proc_info.executable() {
+            debug!(
+                "pid: {:6} name: {}\t executable: {}\t ppid: {}",
+                proc_info.process_id(),
+                name,
+                executable.display(),
+                ppid
+            );
+        } else {
+            debug!(
+                "pid: {:6} name: '{}'\t executable: -\t ppid: {}",
+                proc_info.process_id(),
+                name,
+                ppid
+            );
+        }
+    }
+    Ok(())
 }
