@@ -392,7 +392,7 @@ pub(crate) fn fuser<P: AsRef<Path>>(
         sleep(if let Some(wait_for_term) = wait_for_term {
             wait_for_term
         } else {
-            Duration::from_millis(500)
+            Duration::from_millis(3000)
         });
         let mut kill_count = 0;
         for pid in sent_signals {
