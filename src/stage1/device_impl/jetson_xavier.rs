@@ -5,7 +5,7 @@ use crate::{
     common::{Error, Options, Result},
     // linux_common::is_secure_boot,
     stage1::{
-        defs::{DeviceType, DEV_TYPE_JETSON_XAVIER, DEV_TYPE_JETSON_XAVIER_NX},
+        defs::{DeviceType, DEV_TYPE_JETSON_XAVIER, DEV_TYPE_JETSON_XAVIER_NX, DEV_TYPE_JETSON_XAVIER_NX_EMMC},
         device::Device,
     },
 };
@@ -30,7 +30,7 @@ pub(crate) fn is_jetson_xavier(opts: &Options, model_string: &str) -> Result<Opt
 }
 
 const XAVIER_AGX_SLUGS: [&str; 1] = [DEV_TYPE_JETSON_XAVIER];
-const XAVIER_NX_SLUGS: [&str; 1] = [DEV_TYPE_JETSON_XAVIER_NX];
+const XAVIER_NX_SLUGS: [&str; 2] = [DEV_TYPE_JETSON_XAVIER_NX, DEV_TYPE_JETSON_XAVIER_NX_EMMC];
 
 
 pub(crate) struct JetsonXavier;

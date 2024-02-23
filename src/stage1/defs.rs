@@ -12,6 +12,7 @@ pub const DEV_TYPE_BBB: &str = "beaglebone-black";
 pub const DEV_TYPE_BBXM: &str = "beagleboard-xm";
 pub const DEV_TYPE_JETSON_XAVIER: &str = "jetson-xavier";
 pub const DEV_TYPE_JETSON_XAVIER_NX: &str = "jetson-xavier-nx-devkit";
+pub const DEV_TYPE_JETSON_XAVIER_NX_EMMC: &str = "jetson-xavier-nx-devkit-emmc";
 
 /* Hardware defined boot partition for Jetson AGX Xavier */
 pub const BOOT_BLOB_PARTITION_JETSON_XAVIER: &str = "/dev/mmcblk0boot0";
