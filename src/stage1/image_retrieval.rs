@@ -145,81 +145,6 @@ fn determine_version(ver_str: &str, versions: &Versions) -> Result<Version> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    const VERSIONS: [&str; 6] = [
-        "5.1.20+rev1",
-        "3.2.25",
-        "3.3.0",
-        "4.0.26+rev",
-        "5.0.1+rev1",
-        "0.0.0+rev60",
-    ];
-    use mod_logger::Logger;
-
-    #[test]
-    fn returns_latest_version_by_default() {
-        Logger::set_default_level(Level::Trace);
-
-        let selection = "default";
-        debug!("Selection is {}", selection);
-
-        let versions: Versions = VERSIONS.iter().map(|&s| s.to_string()).collect();
-
-        let result = determine_version(selection, &versions);
-        assert_eq!(
-            result.unwrap(),
-            Version::parse("5.1.20+rev1").expect("Could not parse version")
-        );
-    }
-
-    #[test]
-    fn returns_specific_version() {
-        Logger::set_default_level(Level::Trace);
-        let selection = "4.0.26+rev";
-        debug!("Selection is {}", selection);
-
-        let versions: Versions = VERSIONS.iter().map(|&s| s.to_string()).collect();
-
-        let result = determine_version(selection, &versions);
-        assert_eq!(
-            result.unwrap(),
-            Version::parse("4.0.26+rev").expect("Could not parse version")
-        );
-    }
-
-    #[test]
-    fn returns_compatible_version() {
-        Logger::set_default_level(Level::Trace);
-        let selection = "^3.2";
-        debug!("Selection is {}", selection);
-
-        let versions: Versions = VERSIONS.iter().map(|&s| s.to_string()).collect();
-
-        let result = determine_version(selection, &versions);
-        assert_eq!(
-            result.unwrap(),
-            Version::parse("3.3.0").expect("Could not parse version")
-        );
-    }
-
-    #[test]
-    fn returns_closest_version() {
-        Logger::set_default_level(Level::Trace);
-        let selection = "~3.2.8";
-        debug!("Selection is {}", selection);
-
-        let versions: Versions = VERSIONS.iter().map(|&s| s.to_string()).collect();
-
-        let result = determine_version(selection, &versions);
-        assert_eq!(
-            result.unwrap(),
-            Version::parse("3.2.25").expect("Could not parse version")
-        );
-    }
-}
-
 fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
     stream: Box<dyn Read>,
     image_file_name: P1,
@@ -446,4 +371,79 @@ pub(crate) fn download_image(
     }
 
     Ok(img_file_name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const VERSIONS: [&str; 6] = [
+        "5.1.20+rev1",
+        "3.2.25",
+        "3.3.0",
+        "4.0.26+rev",
+        "5.0.1+rev1",
+        "0.0.0+rev60",
+    ];
+    use mod_logger::Logger;
+
+    #[test]
+    fn returns_latest_version_by_default() {
+        Logger::set_default_level(Level::Trace);
+
+        let selection = "default";
+        debug!("Selection is {}", selection);
+
+        let versions: Versions = VERSIONS.iter().map(|&s| s.to_string()).collect();
+
+        let result = determine_version(selection, &versions);
+        assert_eq!(
+            result.unwrap(),
+            Version::parse("5.1.20+rev1").expect("Could not parse version")
+        );
+    }
+
+    #[test]
+    fn returns_specific_version() {
+        Logger::set_default_level(Level::Trace);
+        let selection = "4.0.26+rev";
+        debug!("Selection is {}", selection);
+
+        let versions: Versions = VERSIONS.iter().map(|&s| s.to_string()).collect();
+
+        let result = determine_version(selection, &versions);
+        assert_eq!(
+            result.unwrap(),
+            Version::parse("4.0.26+rev").expect("Could not parse version")
+        );
+    }
+
+    #[test]
+    fn returns_compatible_version() {
+        Logger::set_default_level(Level::Trace);
+        let selection = "^3.2";
+        debug!("Selection is {}", selection);
+
+        let versions: Versions = VERSIONS.iter().map(|&s| s.to_string()).collect();
+
+        let result = determine_version(selection, &versions);
+        assert_eq!(
+            result.unwrap(),
+            Version::parse("3.3.0").expect("Could not parse version")
+        );
+    }
+
+    #[test]
+    fn returns_closest_version() {
+        Logger::set_default_level(Level::Trace);
+        let selection = "~3.2.8";
+        debug!("Selection is {}", selection);
+
+        let versions: Versions = VERSIONS.iter().map(|&s| s.to_string()).collect();
+
+        let result = determine_version(selection, &versions);
+        assert_eq!(
+            result.unwrap(),
+            Version::parse("3.2.25").expect("Could not parse version")
+        );
+    }
 }

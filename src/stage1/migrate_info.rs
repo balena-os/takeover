@@ -291,7 +291,6 @@ impl MigrateInfo {
             {
                 let mut file = OpenOptions::new()
                     .append(true)
-                    .write(true)
                     .open(&target_path)
                     .upstream_with_context(&format!(
                         "Failed to open config.json for writing: '{}",
