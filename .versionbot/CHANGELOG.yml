@@ -1,4 +1,60 @@
 - commits:
+    - subject: Log process list before killing processes
+      hash: 513810c7b31cd865eed908b096ae79b43717ce2c
+      body: |
+        This is for better troubleshooting.
+
+        In one of my test runs, takeover failed because it was unable to kill
+        one of the processes during stage2. The logs contained only the PID of
+        the process, which was not enough to form any hypothesis about what
+        could have failed.
+
+        We already had code that would log a nice process table including the
+        program names, but strangely this was executed only when and if all
+        processes were killed successfully.
+
+        This commit:
+
+        1. Factor out the process table logging into a separate function.
+        2. Call this function before trying to kill the processes.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+    - subject: Allow running with unsupported target device types
+      hash: 91e731c3c2e333d781d50c715469da8fde683b2b
+      body: |
+        This adds the `--no-dt-check` option, which skips the checks for
+        compatibility between the actual device and the device type of the
+        target fleet. It will also skip a similar check by device type when
+        downloading the balenaOS image.
+
+        This is useful for running takeover on devices that are technically
+        compatible with the fleet device type, but are not officially
+        tested/supported.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: minor
+        change-type: minor
+      author: Leandro Motta Barros
+    - subject: "Bugfix: Don't use hardcoded device type in message"
+      hash: d04f0d8ab40e6b1ba2aa09be713e87f848d014ba
+      body: |
+        A log message was using a hardcoded "IntelNuc" instead of the actual
+        device type.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+  version: 0.3.0
+  title: ""
+  date: 2024-02-26T13:52:30.528Z
+- commits:
     - subject: Update `get_os_version` to use /v6/release
       hash: d9e0efce241ca3886412d107ec9b7bc40e7ba092
       body: >
