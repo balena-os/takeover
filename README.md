@@ -14,12 +14,11 @@ Takeover consists of a single executable that supports automatic download of all
 All that is needed to migrate a device to balena-os is a valid config.json typically obtained from the dashboard of your 
 balena application. 
 
-
 ```shell script
 > takeover --help
-takeover 0.1.1
-Thomas Runte <thomasr@balena.io>
-
+takeover 0.3.0
+balena.io
+Brownfield device migration tool to balenaOS and balenaCloud
 
 USAGE:
     takeover [FLAGS] [OPTIONS]
@@ -30,6 +29,7 @@ FLAGS:
         --no-ack            Scripted mode - no interactive acknowledgement of takeover
         --no-api-check      Do not check if balena API is available
         --no-cleanup        Debug - do not cleanup after stage1 failure
+        --no-dt-check       Do not check if the target device type is valid
         --no-efi-setup      Do not setup EFI boot
         --no-keep-name      Do not migrate host-name
         --no-nwmgr-check    Do not check network manager files exist
@@ -53,9 +53,8 @@ OPTIONS:
         --s2-log-level <s2-log-level>    Set stage2 log level, one of [error,warn,info,debug,trace]
     -v, --version <VERSION>              Version of balena-os image to download
         --wifi <SSID>...                 Create a network manager configuration for configured wifi with SSID
-    -w, --work-dir <DIRECTORY>           Path to working directory%                                                                              
-```   
-
+    -w, --work-dir <DIRECTORY>           Path to working directory
+```
 
 To download a config.json, please direct your browser to  the [balena dashboard](https://balena.io), logging in to to your user 
 account and selecting the application you want to migrate the device to. From there you can press the 'add device' button 
@@ -211,7 +210,45 @@ If no filter is given, all files will be copied.
     filter: 'balena-.*'
 ```
 
-    
+### Working with unsupported scenarios
+
+**Warning**: *Use these options at your own risk.* They allow you to run *takeover* in scenarios that were never tested
+by balena. You may have success, but you may also hit serious issues, including rendering your device unbootable. Please
+test thoroughly before using these options in production.
+
+There is a huge number of combinations of device types, device models, and operating systems. *takeover* was developed
+and tested with a subset of these combinations in mind, and therefore will refuse to run with other combinations. That
+said, we do provide the following options to skip or override these checks, so that you can try to use the tool in
+different scenarios.
+
+### ```--no-os-check```
+
+With this option, *takeover* will not check if the OS currently running on the device is supported. This allows you to
+attempt to migrate away from an unsupported OS (for example, a newly released version of an OS).
+
+### ```--no-dt-check```
+
+Normally, *takeover* performs some checks that are related with the device type and model. For example:
+
+- Is this device model known to work with *takeover*?
+- Is this device model compatible with the device type of the target fleet?
+- Is this combination of device model and source OS known to work with *takeover*?
+
+Passing in the ```--no-dt-check``` option will skip all these checks. This can be useful to enable migrations that are
+technically valid but were not tested. Please be careful to use only compatible architectures. A mistake here can cause
+your device to be flashed with an OS for an incompatible architecture, rendering it unbootable!
+
+Notice from the list above that checks for OS compatibility are dependent on the device type, so using this option also
+effectively disables the OS checks (similar to what ```--no-os-check``` does).
+
+Here's an example: *takeover* was never officially tested to migrate *Raspberry Pi 3*s to 64-bit balenaOS. So, even
+though migrating a Pi 3 to a fleet with device type ```raspberrypi3-64``` would be technically valid, *takeover* will
+not allow you to do that -- unless you force it by using
+
+```sh
+# sudo ./takeover --no-dt-check [...other options...]
+```
+
 ## Compiling takeover
 
 *takeover* needs to be compiled for the target platform. For Raspberry PI & beaglebone devices that is *armv7* and 
