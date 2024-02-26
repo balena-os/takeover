@@ -195,8 +195,8 @@ pub(crate) fn get_os_name() -> Result<String> {
 
 pub(crate) fn is_admin() -> Result<bool> {
     trace!("is_admin: entered");
-    let admin = Some(unsafe { libc::getuid() } == 0);
-    Ok(admin.unwrap())
+    let admin = unsafe { libc::getuid() } == 0;
+    Ok(admin)
 }
 
 pub fn file_exists<P: AsRef<Path>>(file: P) -> bool {
