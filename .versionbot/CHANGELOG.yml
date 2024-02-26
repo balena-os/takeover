@@ -1,4 +1,34 @@
 - commits:
+    - subject: Use latest Rust toolchain
+      hash: c6107a357e04e769367ea989faa57999c5ff4e83
+      body: |
+        The latest version of clap requires a newer version of the Rust
+        toolchain. So, in this commit we:
+
+        1. Update the toolchain to the latest stable version.
+        2. Fix the new clippy warnings that appeared after the update.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+    - subject: Migrate from structopt to clap
+      hash: f7ca621e9564529064dd321cb0a3df8ade68fed9
+      body: |
+        The structopt library is no longer being maintained, and its
+        functionality has been merged into the clap library. This commit makes
+        the switch.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+  version: 0.3.1
+  title: ""
+  date: 2024-02-26T16:24:12.957Z
+- commits:
     - subject: Log process list before killing processes
       hash: 513810c7b31cd865eed908b096ae79b43717ce2c
       body: |
