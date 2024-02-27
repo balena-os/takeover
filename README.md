@@ -85,7 +85,7 @@ of ~x.y.z and ^x.y.z requirements as defined at [semver](https://www.npmjs.com/p
  (eg. ```--version ~5.1```).
  Example: 
  ```shell script
-./sudo takeover -c config.json --version 5.1.20+rev1
+sudo ./takeover -c config.json --version 5.1.20+rev1
 ```
    
 When downloading images,  certain platforms (mainly intel-nuc, Generic-x86_64, beaglebone) require unpacking the image and 
@@ -132,8 +132,8 @@ You can also specify your own NetworkManager configuration file using the ```--n
 
 If no network configurations are found *takeover* will print an error message and abort to keep you from accidentally 
 migrating a configuration that will not be able to come online. This check can be overridden by specifying the 
-```--np-nwmgr-check``` option. 
-   
+```--no-nwmgr-check``` option.
+
 By default *takeover* will migrate the devices hostname. This can be disabled using the ```--no-keep-name``` option. 
 
 ### Logging
