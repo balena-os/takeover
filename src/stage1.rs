@@ -72,7 +72,7 @@ fn prepare_configs<P1: AsRef<Path>>(
     // *********************************************************
     // write network_manager filess to tmpfs
     let mut nwmgr_cfgs: u64 = 0;
-    let nwmgr_path = path_append(&work_dir, SYSTEM_CONNECTIONS_DIR);
+    let nwmgr_path = path_append(work_dir, SYSTEM_CONNECTIONS_DIR);
     create_dir_all(&nwmgr_path).upstream_with_context(&format!(
         "Failed to create directory '{}",
         nwmgr_path.display()
@@ -81,7 +81,7 @@ fn prepare_configs<P1: AsRef<Path>>(
     for source_file in mig_info.nwmgr_files() {
         nwmgr_cfgs += 1;
         let target_file = path_append(&nwmgr_path, &format!("balena-{:02}", nwmgr_cfgs));
-        copy(&source_file, &target_file).upstream_with_context(&format!(
+        copy(source_file, &target_file).upstream_with_context(&format!(
             "Failed to copy '{}' to '{}'",
             source_file.display(),
             target_file.display()
@@ -150,7 +150,7 @@ fn mount_sys_filesystems(
     // *********************************************************
     // mount tmpfs
 
-    mount_fs(&takeover_dir, "tmpfs", "tmpfs", None)?;
+    mount_fs(takeover_dir, "tmpfs", "tmpfs", None)?;
 
     let curr_path = takeover_dir.join("etc");
     create_dir(&curr_path).upstream_with_context(&format!(
@@ -173,13 +173,13 @@ fn mount_sys_filesystems(
     mount_fs(curr_path, "proc", "proc", Some(mig_info))?;
 
     let curr_path = takeover_dir.join("tmp");
-    mount_fs(&curr_path, "tmpfs", "tmpfs", Some(mig_info))?;
+    mount_fs(curr_path, "tmpfs", "tmpfs", Some(mig_info))?;
 
     let curr_path = takeover_dir.join("sys");
-    mount_fs(&curr_path, "sys", "sysfs", Some(mig_info))?;
+    mount_fs(curr_path, "sys", "sysfs", Some(mig_info))?;
 
     if dir_exists(SYS_EFIVARS_DIR)? {
-        let curr_path = path_append(&takeover_dir, SYS_EFIVARS_DIR);
+        let curr_path = path_append(takeover_dir, SYS_EFIVARS_DIR);
         create_dir_all(&curr_path)?;
         mount_fs(&curr_path, "efivarfs", "efivarfs", Some(mig_info))?;
         // TODO: copy stuff ?
@@ -209,7 +209,7 @@ fn mount_sys_filesystems(
     }
 
     let curr_path = takeover_dir.join("dev/pts");
-    mount_fs(&curr_path, "devpts", "devpts", Some(mig_info))?;
+    mount_fs(curr_path, "devpts", "devpts", Some(mig_info))?;
 
     Ok(())
 }
@@ -335,7 +335,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         read_link("/proc/1/exe").upstream_with_context("Failed to read link for /proc/1/exe")?;
 
     // TODO: make new_init_path point to /$takeover_dir/bin/takeover directly
-    let new_init_path = path_append(&takeover_dir, &format!("/bin/{}", env!("CARGO_PKG_NAME")));
+    let new_init_path = path_append(&takeover_dir, format!("/bin/{}", env!("CARGO_PKG_NAME")));
     // Assets::write_stage2_script(&takeover_dir, &new_init_path, &tty, opts.get_s2_log_level())?;
 
     let block_dev_info = BlockDeviceInfo::new()?;
@@ -356,7 +356,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         block_dev_info.get_root_device()
     };
 
-    if !file_exists(&flash_dev.as_ref().get_dev_path()) {
+    if !file_exists(flash_dev.as_ref().get_dev_path()) {
         return Err(Error::with_context(
             ErrorKind::DeviceNotFound,
             &format!(
@@ -419,11 +419,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
             ))?,
         image_path: mig_info.image_path().to_path_buf(),
         config_path: mig_info.balena_cfg().get_path().to_path_buf(),
-        backup_path: if let Some(backup_path) = mig_info.backup() {
-            Some(backup_path.to_owned())
-        } else {
-            None
-        },
+        backup_path: mig_info.backup().map(|backup_path| backup_path.to_owned()),
         tty: read_link("/proc/self/fd/1")
             .upstream_with_context("Failed to read tty from '/proc/self/fd/1'")?,
     };
@@ -498,7 +494,7 @@ pub fn stage1(opts: &Options) -> Result<()> {
     */
 
     if let Some(s1_log_path) = opts.log_file() {
-        Logger::set_log_file(&LogDestination::StreamStderr, &s1_log_path, true)
+        Logger::set_log_file(&LogDestination::StreamStderr, s1_log_path, true)
             .upstream_with_context(&format!(
                 "Failed to set logging to '{}'",
                 s1_log_path.display(),
@@ -508,7 +504,7 @@ pub fn stage1(opts: &Options) -> Result<()> {
             .upstream_with_context("Failed to set up logging")?;
     }
 
-    let mut mig_info = match MigrateInfo::new(&opts) {
+    let mut mig_info = match MigrateInfo::new(opts) {
         Ok(mig_info) => mig_info,
         Err(why) => {
             if why.kind() == ErrorKind::ImageDownloaded {
@@ -556,7 +552,7 @@ pub fn stage1(opts: &Options) -> Result<()> {
     }
 
     if opts.migrate() {
-        match prepare(&opts, &mut mig_info) {
+        match prepare(opts, &mut mig_info) {
             Ok(_) => {
                 info!("Takeover initiated successfully, please wait for the device to be reflashed and reboot");
                 Logger::flush();

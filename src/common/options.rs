@@ -1,139 +1,141 @@
 use std::path::{Path, PathBuf};
 
+use clap::Parser;
 use log::Level;
-use structopt::StructOpt;
 
 const DEFAULT_CHECK_TIMEOUT: u64 = 10;
 
-#[derive(StructOpt, Debug, Clone)]
-#[structopt(name = env!("CARGO_PKG_NAME"), author, about)]
+#[derive(Parser, Debug, Clone)]
+#[clap(name = env!("CARGO_PKG_NAME"), author, about)]
 pub struct Options {
     /// what to do
-    #[structopt(
+    #[clap(
         short,
         long,
         value_name = "DIRECTORY",
-        parse(from_os_str),
+        value_parser,
         help = "Path to working directory"
     )]
     work_dir: Option<PathBuf>,
-    #[structopt(
+    #[clap(
         short,
         long,
         value_name = "IMAGE",
-        parse(from_os_str),
+        value_parser,
         help = "Path to balena-os image"
     )]
     image: Option<PathBuf>,
-    #[structopt(
+    #[clap(
         short,
         long,
         value_name = "VERSION",
         help = "Version of balena-os image to download"
     )]
     version: Option<String>,
-    #[structopt(
+    #[clap(
         short,
         long,
         value_name = "CONFIG_JSON",
-        parse(from_os_str),
+        value_parser,
         help = "Path to balena config.json"
     )]
     config: Option<PathBuf>,
-    #[structopt(
+    #[clap(
         long,
         default_value = "info",
         help = "Set log level, one of [error,warn,info,debug,trace]"
     )]
     log_level: Level,
-    #[structopt(
+    #[clap(
         long,
         value_name = "LOG_FILE",
-        parse(from_os_str),
+        value_parser,
         help = "Set stage1 log file name"
     )]
     log_file: Option<PathBuf>,
-    #[structopt(
+    #[clap(
         long,
         value_name = "BACKUP-CONFIG",
-        parse(from_os_str),
+        value_parser,
         help = "Backup configuration file"
     )]
     backup_cfg: Option<PathBuf>,
-    #[structopt(
+    #[clap(
         long,
         help = "Set stage2 log level, one of [error,warn,info,debug,trace]"
     )]
     s2_log_level: Option<Level>,
-    #[structopt(
+    #[clap(
         long,
-        help = "Scripted mode - no interactive acknoledgement of takeover"
+        help = "Scripted mode - no interactive acknowledgement of takeover"
     )]
     no_ack: bool,
-    #[structopt(long, help = "Pretend mode, do not flash device")]
+    #[clap(long, help = "Pretend mode, do not flash device")]
     pretend: bool,
-    #[structopt(long, help = "Internal - stage2 invocation")]
+    #[clap(long, help = "Internal - stage2 invocation")]
     stage2: bool,
-    #[structopt(long, help = "Use internal tar instead of external command")]
+    #[clap(long, help = "Use internal tar instead of external command")]
     tar_internal: bool,
-    #[structopt(long, help = "Debug - do not cleanup after stage1 failure")]
+    #[clap(long, help = "Debug - do not cleanup after stage1 failure")]
     no_cleanup: bool,
-    #[structopt(long, help = "Do not check if OS is supported")]
+    #[clap(long, help = "Do not check if OS is supported")]
     no_os_check: bool,
-    #[structopt(long, help = "Do not check if balena API is available")]
+    #[clap(long, help = "Do not check if the target device type is valid")]
+    no_dt_check: bool,
+    #[clap(long, help = "Do not check if balena API is available")]
     no_api_check: bool,
-    #[structopt(long, help = "Do not check if balena VPN is available")]
+    #[clap(long, help = "Do not check if balena VPN is available")]
     no_vpn_check: bool,
-    #[structopt(long, help = "Do not setup EFI boot")]
+    #[clap(long, help = "Do not setup EFI boot")]
     no_efi_setup: bool,
-    #[structopt(long, help = "Do not check network manager files exist")]
+    #[clap(long, help = "Do not check network manager files exist")]
     no_nwmgr_check: bool,
-    #[structopt(long, help = "Do not migrate host-name")]
+    #[clap(long, help = "Do not migrate host-name")]
     no_keep_name: bool,
-    #[structopt(
+    #[clap(
         short,
         long,
         help = "Download image only, do not check device and migrate"
     )]
     download_only: bool,
-    #[structopt(
+    #[clap(
         long,
         value_name = "TIMEOUT",
-        parse(try_from_str),
+        value_parser,
         help = "API/VPN check timeout in seconds."
     )]
     check_timeout: Option<u64>,
-    #[structopt(
+    #[clap(
         long,
         short,
         value_name = "LOG_DEVICE",
-        parse(from_os_str),
+        value_parser,
         help = "Write stage2 log to LOG_DEVICE"
     )]
     log_to: Option<PathBuf>,
-    #[structopt(
+    #[clap(
         short,
         long,
         value_name = "INSTALL_DEVICE",
-        parse(from_os_str),
+        value_parser,
         help = "Use INSTALL_DEVICE to flash balena to"
     )]
     flash_to: Option<PathBuf>,
-    #[structopt(
+    #[clap(
         long,
         help = "Do not create network manager configurations for configured wifis"
     )]
     no_wifis: bool,
-    #[structopt(
+    #[clap(
         long,
         value_name = "SSID",
-        help = "Create a network manager configuation for configured wifi with SSID"
+        help = "Create a network manager configuration for configured wifi with SSID"
     )]
     wifi: Option<Vec<String>>,
-    #[structopt(
+    #[clap(
         long,
         value_name = "NWMGR_FILE",
-        parse(from_os_str),
+        value_parser,
         help = "Supply a network manager file to inject into balena-os"
     )]
     nwmgr_cfg: Option<Vec<PathBuf>>,
@@ -210,6 +212,10 @@ impl Options {
 
     pub fn os_check(&self) -> bool {
         !self.no_os_check
+    }
+
+    pub fn dt_check(&self) -> bool {
+        !self.no_dt_check
     }
 
     pub fn no_efi_setup(&self) -> bool {

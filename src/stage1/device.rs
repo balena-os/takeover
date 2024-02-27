@@ -1,8 +1,6 @@
-use std::fmt::{self, Display, Debug};
+use std::fmt::{self, Debug, Display};
 
-use crate::{
-    stage1::{defs::DeviceType, },
-};
+use crate::stage1::defs::DeviceType;
 
 pub(crate) trait Device {
     fn supports_device_type(&self, dev_type: &str) -> bool;
@@ -11,7 +9,7 @@ pub(crate) trait Device {
 
 impl Display for dyn Device {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{},", self.get_device_type() )
+        write!(f, "{},", self.get_device_type())
     }
 }
 

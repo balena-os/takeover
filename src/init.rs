@@ -106,7 +106,7 @@ fn redirect_fd(file_name: &str, old_fd: c_int, mode: c_int) -> Result<()> {
         .into_raw();
 
     let new_fd = unsafe { open(filename, mode) };
-    unsafe { CString::from_raw(filename) };
+    let _ = unsafe { CString::from_raw(filename) };
     if new_fd >= 0 {
         let res = unsafe { dup2(new_fd, old_fd) };
         if res >= 0 {
@@ -186,12 +186,7 @@ fn close_fds() -> Result<i32> {
                     close_count += 1;
                 }
                 Err(why) => {
-                    if let Some(err_no) = why.as_errno() {
-                        if let Errno::EBADF = err_no {
-                        } else {
-                            warn!("Unexpected error from fcntl({},F_GETFD) : {}", fd, err_no);
-                        }
-                    } else {
+                    if why != Errno::EBADF {
                         warn!("Unexpected error from fcntl({},F_GETFD) : {}", fd, why);
                     }
                 }
@@ -317,8 +312,8 @@ pub fn init() -> ! {
         }
     }
 
-    let _child_pid = match Command::new(&format!("/bin/{}", env!("CARGO_PKG_NAME")))
-        .args(&["--stage2", "--s2-log-level", &s2_config.log_level])
+    let _child_pid = match Command::new(format!("/bin/{}", env!("CARGO_PKG_NAME")))
+        .args(["--stage2", "--s2-log-level", &s2_config.log_level])
         .spawn()
     {
         Ok(cmd_res) => cmd_res.id(),

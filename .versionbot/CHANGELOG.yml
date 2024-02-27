@@ -1,0 +1,413 @@
+- commits:
+    - subject: Use latest Rust toolchain
+      hash: c6107a357e04e769367ea989faa57999c5ff4e83
+      body: |
+        The latest version of clap requires a newer version of the Rust
+        toolchain. So, in this commit we:
+
+        1. Update the toolchain to the latest stable version.
+        2. Fix the new clippy warnings that appeared after the update.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+    - subject: Migrate from structopt to clap
+      hash: f7ca621e9564529064dd321cb0a3df8ade68fed9
+      body: |
+        The structopt library is no longer being maintained, and its
+        functionality has been merged into the clap library. This commit makes
+        the switch.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+  version: 0.3.1
+  title: ""
+  date: 2024-02-26T16:24:12.957Z
+- commits:
+    - subject: Log process list before killing processes
+      hash: 513810c7b31cd865eed908b096ae79b43717ce2c
+      body: |
+        This is for better troubleshooting.
+
+        In one of my test runs, takeover failed because it was unable to kill
+        one of the processes during stage2. The logs contained only the PID of
+        the process, which was not enough to form any hypothesis about what
+        could have failed.
+
+        We already had code that would log a nice process table including the
+        program names, but strangely this was executed only when and if all
+        processes were killed successfully.
+
+        This commit:
+
+        1. Factor out the process table logging into a separate function.
+        2. Call this function before trying to kill the processes.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+    - subject: Allow running with unsupported target device types
+      hash: 91e731c3c2e333d781d50c715469da8fde683b2b
+      body: |
+        This adds the `--no-dt-check` option, which skips the checks for
+        compatibility between the actual device and the device type of the
+        target fleet. It will also skip a similar check by device type when
+        downloading the balenaOS image.
+
+        This is useful for running takeover on devices that are technically
+        compatible with the fleet device type, but are not officially
+        tested/supported.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: minor
+        change-type: minor
+      author: Leandro Motta Barros
+    - subject: "Bugfix: Don't use hardcoded device type in message"
+      hash: d04f0d8ab40e6b1ba2aa09be713e87f848d014ba
+      body: |
+        A log message was using a hardcoded "IntelNuc" instead of the actual
+        device type.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+  version: 0.3.0
+  title: ""
+  date: 2024-02-26T13:52:30.528Z
+- commits:
+    - subject: Update `get_os_version` to use /v6/release
+      hash: d9e0efce241ca3886412d107ec9b7bc40e7ba092
+      body: >
+        - /device-types/v1/ has been deprecated per issue #18
+
+        - currently using percent-encoded url and replacing device-type in the url
+
+        - /v6/release returns a different response `JSON` compared to /device-types/v1/
+
+        and does not contain the `latest` field.
+
+        - replaced struct `Versions` with a type alias to `Vec<String>`
+
+        - modified `determine_versions` to handle new data structure and [unified images](https://blog.balena.io/unified-balenaos-releases-now-available/)
+
+        - added unit tests for `determine_versions`
+
+        - modified README to remove reference to `dev` and `prod` images
+      footer:
+        Change-type: minor
+        change-type: minor
+        Signed-off-by: Rahul Thakoor <rahul@balena.io>
+        signed-off-by: Rahul Thakoor <rahul@balena.io>
+      author: Rahul Thakoor
+  version: 0.2.0
+  title: ""
+  date: 2024-02-16T08:21:46.715Z
+- commits:
+    - subject: Fix multiple typos
+      hash: 9517c637000c77e87b9625939ad65b2fac31b0d6
+      body: ""
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+    - subject: Update dependencies to fix security vulnerabilities
+      hash: 1d49a6757a3804133656ccf3d3161e16dadee18f
+      body: |
+        The only required adjustment in the code itself was in src/init.rs. In
+        the older version of `nix`, `Result<T>` was defined as `Result<T,
+        Error>`, and `Error` had to be converted to an `Errno` with the `
+        as_errno()` method.
+
+        In the newer version, `Result<T>` is defined as `Result<T, Errno>`. We
+        get the `Errno` directly, so we don't need to call `as_errno()` anymore.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+  version: 0.1.4
+  title: ""
+  date: 2024-02-13T09:32:15.161Z
+- commits:
+    - subject: Update reqwest to v0.11.24
+      hash: ff360cd28a7e8f2e16c6326a05756c2a1835e898
+      body: ""
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Rahul Thakoor <rahul@balena.io>
+        signed-off-by: Rahul Thakoor <rahul@balena.io>
+      author: Rahul Thakoor
+  version: 0.1.3
+  title: ""
+  date: 2024-02-12T11:44:17.416Z
+- commits:
+    - subject: Fix get_mem_info() on 32-bit systems
+      hash: 0f09cfeecd8d6dbd18fe2bffd845099c09e09200
+      body: |
+        Use units multiplier to calculate memory values. It may be >1
+        on systems with large memory.
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Ken Bannister <kb2ma@runbox.com>
+        signed-off-by: Ken Bannister <kb2ma@runbox.com>
+      author: Ken Bannister
+  version: 0.1.2
+  title: ""
+  date: 2024-02-09T17:27:51.707Z
+- commits:
+    - subject: Take into account that chars are signed also in 32-bit x86
+      hash: bec1460e58fc62b988980d47b3f52be9c895018a
+      body: |
+        Previously, our code had different paths to deal with the fact that in
+        the C world, chars are signed in x86_64. However, chars are signed also
+        in x86 (i.e., the 32-bit platform), and this case we were not handling.
+
+        This commit simply makes sure we handle both x86 and x86_64 in the same
+        way: by using the `i8` type for chars.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+    - subject: Fix typing in 32-bit architectures
+      hash: 0dcdeb76575a72b7a9ad40253aba4021d976fbf0
+      body: |
+        Fields of the `sysinfo` structure are `u32` or `u64` depending on the
+        architecture. This makes sure both types are accepted.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+    - subject: Enable Flowzone for CI/CD
+      hash: 1d70b260c36432cbdd4c82fabf8f947bd7e25756
+      body: ""
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Kyle Harding <kyle@balena.io>
+        signed-off-by: Kyle Harding <kyle@balena.io>
+      author: Kyle Harding
+  version: 0.1.1
+  title: ""
+  date: 2024-02-06T17:11:29.261Z
+- version: 0.1.0
+  date: 2021-06-30T17:39:40Z
+  commits:
+    - hash: 547f0e56da5b238451f7196af1014dacfec47b39
+      author: Kyle Harding
+      footers:
+        change-type: patch
+        signed-off-by: Kyle Harding <kyle@balena.io>
+      subject: Delete CODEOWNERS
+      body: ""
+    - hash: c111201e076f7f488b93216d2a88d131214f9f4a
+      author: Thomas Runte
+      subject: Modified device type detection,  added Comnpute Module and RPI1 / Zero
+      body: ""
+    - hash: 7d657a764335ead1c58dbcfc3117835884a3db0c
+      author: Thomas Runte
+      subject: Added ubuntu 20.04 64 and rpi1 / zero
+      body: |-
+        Change-type: minor
+        Signed-off-by: Thomas Runte <thomasr@balena.io>
+    - hash: 0d00d3a1472a7f593ed90caaa859e914a20c1c85
+      author: Thomas Runte
+      subject: Added Docker setup to compile Pi zero version on balena builders
+      body: ""
+    - hash: 66e562a606c7f68995b6b08ea055c47aa83de3b8
+      author: Thomas Runte
+      footers:
+        change-type: minor
+        signed-off-by: Thomas Runte <thomasr@balena.io>
+      subject: Added support for gzipped internel config.json
+      body: ""
+    - hash: e268e993c19e00533f4f35fabce9906906256f2f
+      author: Thomas Runte
+      footers:
+        signed-off-by: Thomas Runte <thomasr@balena.io>
+      subject: Added support for gzipped internal config.json
+      body: ""
+    - hash: 1ae866ddd46f6125dbf1e8187e429e77724bceeb
+      author: Thomas Runte
+      footers:
+        change-type: minor
+        signed-off-by: Thomas Runte <thomasr@balena.io>
+      subject: Removed library migrator - including all modules directly from main now
+      body: ""
+    - hash: 842f5ca509e0526f013ddf9ec5caa2a72c2dc419
+      author: Thomas Runte
+      footers:
+        change-type: minor
+        signed-off-by: Thomas Runte <thomasr@balena.io>
+      subject: Updated README.md and applied changes from clippy run
+      body: ""
+    - hash: 7ab9bec0a47734c18b932a7e366070db7ccb1e76
+      author: Thomas Runte
+      subject: wip on partition iterator to fix bug, intermediate checkin
+      body: ""
+    - hash: 5f2c190d9067a08d1afa5ededa854b6d81ce0a72
+      author: Thomas Runte
+      footers:
+        change-type: minor
+        signed-off-by: Thomas Runte <thomasr@balena.io>
+      subject: Enabled backup feature
+      body: ""
+    - hash: dbb658174880c022abcca07a95c70aee2c84910a
+      author: Thomas Runte
+      footers:
+        change-type: minor
+        signed-off-by: Thomas Runte <thomasr@balena.io>
+      subject: Tested backup on RPI3 & beaglebone
+      body: Added option --tar-internal and defaulting to external tar
+    - hash: e0bb594ee190a054357f0f18b43b1c7f23f4a8d0
+      author: Thomas Runte
+      subject: Added partitionInfo to block device
+      body: ""
+    - hash: 24d4e86dee6d90fa24915ef2aa371a251e82ee8d
+      author: Thomas Runte
+      footers:
+        signed-off-by: Thomas Runte <thomasr@balena.io>
+      subject: Added partition info to block-device to support partition types in
+        log-device
+      body: ""
+    - hash: 34b07d5d16151ae23f0f2adfbe36dbf6fb963a31
+      author: Thomas Runte
+      subject: Added partitionInfo to block device
+      body: ""
+    - hash: ae0c7d06028641fe43429a71a712d20552428a8f
+      author: Thomas Runte
+      footers:
+        signed-off-by: Thomas Runte <thomasr@balena.io>
+      subject: Added partition info to block-device to support partition types in
+        log-device
+      body: ""
+    - hash: b746b8c9826fc5063a6fb798d952602c146db583
+      author: Thomas Runte
+      footers:
+        change-type: minor
+        signed-off-by: Thomas Runte <thomasr@balena.io>
+      subject: Update README.md, cleanup in Options and changes to block-device-info
+        to allow
+      body: log device filesystem types other than vfat
+    - hash: e9d00c79e5aa42e705702e671e209af577d2f683
+      author: Thomas Runte
+      footers:
+        signed-off-by: Thomas Runte <thomasr@balena.io>
+      subject: Merge branch 'block-dev-add-part-info' of github.com:balena-io/takeover
+        into block-dev-add-part-info
+      body: ""
+    - hash: ba9e80fbb1a1d03bc18bf1cabb638d41aff5ed4b
+      author: Thomas Runte
+      subject: intermittent commit - replaces cp, fuser
+      body: ""
+    - hash: d8d527b2f815fdd828028547d35b6d03ca7afe45
+      author: Thomas Runte
+      subject: replaced ps , added ProcessIterator
+      body: ""
+    - hash: 9fc6acbe7137c0fb607ff416a7ec26a8a304cf53
+      author: Thomas Runte
+      footers:
+        signed-off-by: Thomas Runte <thomasr@balena.io>
+      subject: Removed all busybox invocations from stage2
+      body: ""
+    - hash: f7852cc5a61fd139e6408fb98d7596a88cfd6c5d
+      author: Thomas Runte
+      subject: Removed assets - takeover now works without busybox
+      body: "Signed-off-by: Thomas Runte <thomasr@balena.io>"
+    - hash: b99a9bc8fe420c472cfff62f38d9a758bc5f619f
+      author: Thomas Runte
+      footers:
+        signed-off-by: Thomas Runte <thomasr@balena.io>
+      subject: Fixed issues found in testing
+      body: |-
+        - mod system functions had issues with i8/u8 string in x-86 / arm builds
+        - RPI3 could not find pivo-_root command in stage2
+    - hash: 136ebbd10bf34e64959713fd1242a2b70cc7d70a
+      author: Thomas Runte
+      subject: "Cleaned up:"
+      body: >-
+        - error handling
+
+        - removed clippy warnings
+
+        - removed attempt to delete non existant /boot/efi directory for non x86 platforms
+
+        Change-type: minor
+
+        Signed-off-by: Thomas Runte <thomasr@balena.io>
+    - hash: 22175293cd4f0790157b02ffe195059e3a67076e
+      author: Thomas Runte
+      subject: Enabled & tested on RPI2
+      body: |-
+        Change-type: minor
+        Signed-off-by: Thomas Runte <thomasr@balena.io>
+    - hash: 7d0b8d8b2b37e655b84eae56ff413fce78c60c06
+      author: Thomas Runte
+      subject: unified supported Osses for RP devices
+      body: ""
+    - hash: 2eb19c4bc4688450556620c00674ed2240bf331a
+      author: Thomas Runte
+      subject: Checking and copying files needed for efibootmgr in stage1
+      body: ""
+    - hash: e50750884f371eac718e716c289fc782f9249dc0
+      author: Thomas Runte
+      subject: Adding efibootmgr & dependencies to setup
+      body: ""
+    - hash: 59bbfab30de84b7f25d7a2511e75239508b9818d
+      author: Thomas Runte
+      subject: UEFI setup enabled for x86 devices
+      body: |-
+        Change-type: minor
+        Signed-off-by: Thomas Runte <thomasr@balena.io>
+    - hash: 1b3715b20f64f763d6efb42b522da5b3cf63b198
+      author: Thomas Runte
+      subject: Fixed typos & wording in README.md
+      body: ""
+    - hash: 9dc7303e568dea45b50f8ad0267f062a50cdb4ad
+      author: Thomas Runte
+      subject: WIP on README.md
+      body: ""
+    - hash: 35ba33afea146e3a10fbe010f8a9988206e5a6ca
+      author: Thomas Runte
+      subject: WIP on README.md
+      body: ""
+    - hash: cb3edf8ebea2b745a28bf481d46ab71fcd8834d2
+      author: Thomas Runte
+      subject: updated ModuleLogger to 0.7 , cosmetical changes to error handling &
+        logging
+      body: ""
+    - hash: 9b14cc2920d848b1be1719c1ed8ac9d26eee5563
+      author: Thomas Runte
+      subject: Replaced crate fauilure for error handling with own error implementation
+      body: |-
+        Change-type: minor
+        Signed-off-by: Thomas Runte <thomasr@balena.io>
+    - hash: 22e2447794461e25747dd86889894fb8deaa692e
+      author: Thomas Runte
+      subject: Implemeted interactive migration acknoledgement and --no-ack option
+      body: |-
+        Implemented --download-only option
+        Change-Type: minor
+        Signed-off-by: Thomas Runte <thomasr@balena.io>
+    - hash: dc4f00c02a0b484b33fa922f57fbdbbcc7fad949
+      author: Thomas Runte
+      subject: removed warnings and implemented clippy suggestions
+      body: ""

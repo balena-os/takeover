@@ -84,7 +84,7 @@ impl BalenaCfgJson {
         if opts.api_check() {
             let api_endpoint = &self.get_api_endpoint()?;
 
-            let api_url = Url::parse(&api_endpoint).upstream_with_context(&format!(
+            let api_url = Url::parse(api_endpoint).upstream_with_context(&format!(
                 "Failed to parse balena api url '{}'",
                 api_endpoint
             ))?;
@@ -197,14 +197,9 @@ impl BalenaCfgJson {
     pub fn set_host_name(&mut self, hostname: &str) -> Option<String> {
         self.modified = true;
 
-        if let Some(value) = self
-            .config
+        self.config
             .insert("hostname".to_string(), Value::String(hostname.to_string()))
-        {
-            Some(value.to_string())
-        } else {
-            None
-        }
+            .map(|value| value.to_string())
     }
 
     pub fn get_app_id(&self) -> Result<u64> {

@@ -30,6 +30,7 @@ static CONFIG_JSON: [u8; MAX_CONFIG_JSON] = [0; MAX_CONFIG_JSON];
 
 pub(crate) mod balena_cfg_json;
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) struct MigrateInfo {
     os_name: String,
@@ -85,7 +86,7 @@ impl MigrateInfo {
             ))?;
 
         let image_path = if let Some(image_path) = opts.image() {
-            if file_exists(&image_path) {
+            if file_exists(image_path) {
                 image_path.canonicalize().upstream_with_context(&format!(
                     "Failed to canonicalize path '{}'",
                     image_path.display()
@@ -99,6 +100,7 @@ impl MigrateInfo {
             }
         } else {
             let image_path = download_image(
+                opts,
                 &config,
                 &work_dir,
                 config.get_device_type()?.as_str(),
@@ -192,8 +194,8 @@ impl MigrateInfo {
         Ok(())
     }
 
-    pub fn set_to_dir(&mut self, to_dir: &PathBuf) {
-        self.to_dir = Some(to_dir.clone())
+    pub fn set_to_dir(&mut self, to_dir: &Path) {
+        self.to_dir = Some(to_dir.to_path_buf())
     }
 
     pub fn to_dir(&self) -> &Option<PathBuf> {
@@ -289,7 +291,6 @@ impl MigrateInfo {
             {
                 let mut file = OpenOptions::new()
                     .append(true)
-                    .write(true)
                     .open(&target_path)
                     .upstream_with_context(&format!(
                         "Failed to open config.json for writing: '{}",

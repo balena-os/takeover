@@ -71,7 +71,7 @@ fn get_required_space(s2_cfg: &Stage2Config) -> Result<u64> {
             "Failed to retrieve imagesize for '{}'",
             curr_file.display()
         ))?
-        .len() as u64;
+        .len();
 
     let curr_file = path_append(OLD_ROOT_MP, &s2_cfg.config_path);
     req_size += curr_file
@@ -80,7 +80,7 @@ fn get_required_space(s2_cfg: &Stage2Config) -> Result<u64> {
             "Failed to retrieve file size for '{}'",
             curr_file.display()
         ))?
-        .len() as u64;
+        .len();
 
     if let Some(ref backup_path) = s2_cfg.backup_path {
         let curr_file = path_append(OLD_ROOT_MP, backup_path);
@@ -90,7 +90,7 @@ fn get_required_space(s2_cfg: &Stage2Config) -> Result<u64> {
                 "Failed to retrieve file size for '{}'",
                 curr_file.display()
             ))?
-            .len() as u64;
+            .len();
     }
 
     let nwmgr_path = path_append(
@@ -297,6 +297,11 @@ fn setup_logging(log_dev: Option<&LogDevice>) {
 
 fn kill_procs(log_level: Level) -> Result<()> {
     trace!("kill_procs: entered");
+
+    if log_level >= Level::Debug {
+        print_active_processes()?;
+    }
+
     let mut killed = false;
     let mut signal = SIGTERM;
     loop {
@@ -314,44 +319,6 @@ fn kill_procs(log_level: Level) -> Result<()> {
         } else {
             signal = SIGKILL;
             sleep(Duration::from_secs(5));
-        }
-    }
-
-    if log_level >= Level::Debug {
-        debug!("active processes:");
-        for proc_info in get_process_infos()? {
-            let mut name = if let Some(name) = proc_info.status().get("Name") {
-                name.to_owned()
-            } else {
-                "-".to_owned()
-            };
-
-            let ppid = if let Some(ppid) = proc_info.status().get("PPid") {
-                ppid.as_ref()
-            } else {
-                "-"
-            };
-
-            if proc_info.process_id() != 1 && (ppid == "0" || ppid == "2") {
-                name = format!("[{}]", name);
-            }
-
-            if let Some(executable) = proc_info.executable() {
-                debug!(
-                    "pid: {:6} name: {}\t executable: {}\t ppid: {}",
-                    proc_info.process_id(),
-                    name,
-                    executable.display(),
-                    ppid
-                );
-            } else {
-                debug!(
-                    "pid: {:6} name: '{}'\t executable: -\t ppid: {}",
-                    proc_info.process_id(),
-                    name,
-                    ppid
-                );
-            }
         }
     }
 
@@ -654,7 +621,7 @@ fn raw_mount_balena(device: &Path) -> Result<()> {
         loop_device.get_path().display()
     );
 
-    loop_device.setup(&device, Some(byte_offset), Some(size_limit))?;
+    loop_device.setup(device, Some(byte_offset), Some(size_limit))?;
     info!(
         "Setup device '{}' with offset {}, sizelimit {} on '{}'",
         device.display(),
@@ -860,7 +827,7 @@ fn fill_buffer<I: Read>(buffer: &mut [u8], input: &mut I) -> Result<usize> {
 fn validate(target_path: &Path, image_path: &Path) -> Result<bool> {
     debug!("Validate: opening: '{}'", image_path.display());
 
-    let mut decoder = GzDecoder::new(File::open(&image_path).upstream_with_context(&format!(
+    let mut decoder = GzDecoder::new(File::open(image_path).upstream_with_context(&format!(
         "Validate: Failed to open image file '{}'",
         image_path.display(),
     ))?);
@@ -870,7 +837,7 @@ fn validate(target_path: &Path, image_path: &Path) -> Result<bool> {
         .write(false)
         .read(true)
         .create(false)
-        .open(&target_path)
+        .open(target_path)
         .upstream_with_context(&format!(
             "Validate: Failed to open output file '{}'",
             target_path.display(),
@@ -928,7 +895,7 @@ fn validate(target_path: &Path, image_path: &Path) -> Result<bool> {
 fn flash_external(target_path: &Path, image_path: &Path, dd_cmd: &str) -> FlashState {
     let mut fail_res = FlashState::FailRecoverable;
 
-    let mut decoder = GzDecoder::new(match File::open(&image_path) {
+    let mut decoder = GzDecoder::new(match File::open(image_path) {
         Ok(file) => file,
         Err(why) => {
             error!(
@@ -942,7 +909,7 @@ fn flash_external(target_path: &Path, image_path: &Path, dd_cmd: &str) -> FlashS
 
     debug!("invoking dd");
     match Command::new(dd_cmd)
-        .args(&[
+        .args([
             &format!("of={}", &target_path.to_string_lossy()),
             &format!("bs={}", DD_BLOCK_SIZE),
         ])
@@ -1137,4 +1104,43 @@ pub fn stage2(opts: &Options) -> ! {
     sync();
 
     reboot();
+}
+
+fn print_active_processes() -> Result<()> {
+    debug!("active processes:");
+    for proc_info in get_process_infos()? {
+        let mut name = if let Some(name) = proc_info.status().get("Name") {
+            name.to_owned()
+        } else {
+            "-".to_owned()
+        };
+
+        let ppid = if let Some(ppid) = proc_info.status().get("PPid") {
+            ppid.as_ref()
+        } else {
+            "-"
+        };
+
+        if proc_info.process_id() != 1 && (ppid == "0" || ppid == "2") {
+            name = format!("[{}]", name);
+        }
+
+        if let Some(executable) = proc_info.executable() {
+            debug!(
+                "pid: {:6} name: {}\t executable: {}\t ppid: {}",
+                proc_info.process_id(),
+                name,
+                executable.display(),
+                ppid
+            );
+        } else {
+            debug!(
+                "pid: {:6} name: '{}'\t executable: -\t ppid: {}",
+                proc_info.process_id(),
+                name,
+                ppid
+            );
+        }
+    }
+    Ok(())
 }

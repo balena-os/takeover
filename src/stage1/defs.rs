@@ -23,6 +23,7 @@ pub(crate) enum DeviceType {
     RaspberryPi2,
     RaspberryPi3,
     RaspberryPi4,
+    Dummy,
 }
 
 impl Display for DeviceType {
@@ -39,11 +40,13 @@ impl Display for DeviceType {
                 Self::RaspberryPi2 => "Raspberry Pi 2",
                 Self::RaspberryPi3 => "Raspberry Pi 3",
                 Self::RaspberryPi4 => "Raspberry Pi 4",
+                Self::Dummy => "Dummy",
             }
         )
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone)]
 pub(crate) enum OSArch {
     AMD64,

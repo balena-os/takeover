@@ -57,7 +57,7 @@ impl IntelNuc {
     }
 }
 
-impl<'a> Device for IntelNuc {
+impl Device for IntelNuc {
     fn supports_device_type(&self, dev_type: &str) -> bool {
         X86_SLUGS.contains(&dev_type)
     }

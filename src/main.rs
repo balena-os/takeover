@@ -8,8 +8,8 @@ mod stage2;
 use log::error;
 use std::process::exit;
 
+use clap::Parser;
 use mod_logger::Logger;
-use structopt::StructOpt;
 
 use crate::{
     common::{error::ErrorKind, Options},
@@ -29,7 +29,7 @@ fn main() {
     if is_init() {
         init();
     } else {
-        let opts = Options::from_args();
+        let opts = Options::parse();
 
         if opts.stage2() {
             stage2(&opts);

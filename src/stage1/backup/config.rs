@@ -19,7 +19,7 @@ pub(crate) struct VolumeConfig {
 }
 
 pub(crate) fn backup_cfg_from_file<P: AsRef<Path>>(file: P) -> Result<Vec<VolumeConfig>> {
-    Ok(serde_yaml::from_str(
+    serde_yaml::from_str(
         &read_to_string(file.as_ref()).upstream_with_context(&format!(
             "Failed to read backup configuration from file: '{}'",
             file.as_ref().display()
@@ -28,5 +28,5 @@ pub(crate) fn backup_cfg_from_file<P: AsRef<Path>>(file: P) -> Result<Vec<Volume
     .upstream_with_context(&format!(
         "Failed to parse backup configuration from file: '{}'",
         file.as_ref().display()
-    ))?)
+    ))
 }

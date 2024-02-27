@@ -185,7 +185,7 @@ impl LoopDevice {
                         ErrorKind::Upstream,
                         &format!(
                             "get_free: ioctl IOCTL_LOOP_CTL_GET_FREE failed with error: {}",
-                            io::Error::last_os_error().to_string()
+                            io::Error::last_os_error()
                         ),
                     ))
                 } else {
@@ -212,7 +212,7 @@ impl LoopDevice {
                                 return Ok(loop_dev);
                             }
                         } else {
-                            return Ok(LoopDevice::from_index(loop_idx, auto_unset)?);
+                            return LoopDevice::from_index(loop_idx, auto_unset);
                         }
                     }
                     Err(Error::with_context(
@@ -353,7 +353,7 @@ impl LoopDevice {
                 &format!(
                     "setup: ioctrl IOCTL_LOOP_SET_FD failed on device '{}' with error {}",
                     self.path.display(),
-                    io::Error::last_os_error().to_string()
+                    io::Error::last_os_error()
                 ),
             ))
         }
@@ -409,7 +409,7 @@ impl LoopDevice {
                 &format!(
                     "get_loop_info: ioctl IOCTL_LOOP_GET_STATUS_64 on '{}' failed with error {}",
                     self.path.display(),
-                    io::Error::last_os_error().to_string()
+                    io::Error::last_os_error()
                 ),
             ))
         }

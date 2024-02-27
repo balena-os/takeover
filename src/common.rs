@@ -149,7 +149,15 @@ pub(crate) fn get_mem_info() -> Result<(u64, u64)> {
     let mut s_info: libc::sysinfo = unsafe { MaybeUninit::<libc::sysinfo>::zeroed().assume_init() };
     let res = unsafe { libc::sysinfo(&mut s_info) };
     if res == 0 {
-        Ok((s_info.totalram as u64, s_info.freeram as u64))
+        // Fields `totalram` and `freeram` are typed either as `u32` or `u64`
+        // depending on the platform. We need the conversion for 32-bit
+        // architectures, but clippy would complain about it in 64-bit ones.
+        // Therefore, we suppress the warning.
+        #[allow(clippy::unnecessary_cast)]
+        Ok((
+            (s_info.totalram as u64) * (s_info.mem_unit as u64),
+            (s_info.freeram as u64) * (s_info.mem_unit as u64),
+        ))
     } else {
         Err(Error::new(ErrorKind::NotImpl))
     }
@@ -187,8 +195,8 @@ pub(crate) fn get_os_name() -> Result<String> {
 
 pub(crate) fn is_admin() -> Result<bool> {
     trace!("is_admin: entered");
-    let admin = Some(unsafe { libc::getuid() } == 0);
-    Ok(admin.unwrap())
+    let admin = unsafe { libc::getuid() } == 0;
+    Ok(admin)
 }
 
 pub fn file_exists<P: AsRef<Path>>(file: P) -> bool {
@@ -253,7 +261,7 @@ pub fn get_mountpoint<P: AsRef<Path>>(device: P) -> Result<Option<PathBuf>> {
     let mtab = read_to_string("/etc/mtab").upstream_with_context("Failed to read /etc/mtab")?;
     for line in mtab.lines() {
         let words: Vec<&str> = line.split_whitespace().collect();
-        if let Some(device) = words.get(0) {
+        if let Some(device) = words.first() {
             if device == &device_str {
                 if let Some(mountpoint) = words.get(1) {
                     return Ok(Some(PathBuf::from(mountpoint)));
@@ -290,12 +298,10 @@ pub(crate) fn path_append<P1: AsRef<Path>, P2: AsRef<Path>>(base: P1, append: P2
 
 pub(crate) fn path_to_cstring<P: AsRef<Path>>(path: P) -> Result<CString> {
     let temp: OsString = path.as_ref().into();
-    Ok(
-        CString::new(temp.as_bytes()).upstream_with_context(&format!(
-            "Failed to convert path to CString: '{}'",
-            path.as_ref().display()
-        ))?,
-    )
+    CString::new(temp.as_bytes()).upstream_with_context(&format!(
+        "Failed to convert path to CString: '{}'",
+        path.as_ref().display()
+    ))
 }
 
 #[allow(dead_code)]
@@ -310,14 +316,12 @@ pub(crate) unsafe fn hex_dump_ptr_u8(buffer: *const u8, length: isize) -> String
         output.push_str(&format!("0x{:08x}: ", idx));
         for _ in 0..min(length - idx, 16) {
             let byte: u8 = *buffer.offset(idx);
-            let char: char = if (byte as u8).is_ascii_alphanumeric()
-                || (byte as u8).is_ascii_punctuation()
-                || (byte as u8) == 32
-            {
-                char::from(byte as u8)
-            } else {
-                '.'
-            };
+            let char: char =
+                if byte.is_ascii_alphanumeric() || byte.is_ascii_punctuation() || byte == 32 {
+                    char::from(byte)
+                } else {
+                    '.'
+                };
             output.push_str(&format!("{:02x} {}  ", byte, char));
             idx += 1;
         }
@@ -330,9 +334,8 @@ pub(crate) fn hex_dump(buffer: &[u8]) -> String {
     unsafe { hex_dump_ptr_u8(buffer as *const [u8] as *const u8, buffer.len() as isize) }
 }
 
-
 cfg_if::cfg_if! {
-    if #[cfg(target_arch = "x86_64")] {
+    if #[cfg(any(target_arch = "x86_64", target_arch = "x86"))] {
         pub(crate) fn string_from_c_string(c_string: &[i8]) -> Result<String> {
             let mut len: Option<usize> = None;
             for (idx, char) in c_string.iter().enumerate() {
@@ -384,7 +387,7 @@ pub(crate) fn log(text: &str) {
     } else {
         PathBuf::from("/balena-takeover.log")
     };
-    if let Ok(mut log_file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+    if let Ok(mut log_file) = OpenOptions::new().create(true).append(true).open(log_path) {
         let _res = writeln!(log_file, "{}", text);
         let _res = log_file.flush();
         sync()

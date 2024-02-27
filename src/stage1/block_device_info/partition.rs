@@ -15,6 +15,7 @@ use lazy_static::lazy_static;
 use log::{debug, warn};
 use regex::Regex;
 
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) struct PartitionInfo {
     uuid: Option<String>,
@@ -135,7 +136,7 @@ impl Partition {
             device_num,
             mounted,
             parent,
-            partition_info: PartitionInfo::new(&format!("/dev/{}", name))?,
+            partition_info: PartitionInfo::new(format!("/dev/{}", name))?,
         })
     }
 }

@@ -60,7 +60,7 @@ impl Archiver for ExtTarArchiver {
             }
         }
 
-        let lnk_target = path_append(&self.tmp_dir, &target);
+        let lnk_target = path_append(&self.tmp_dir, target);
 
         debug!(
             "ExtTarArchiver::add_file: link '{}' to '{}'",

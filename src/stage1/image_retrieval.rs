@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use log::{debug, error, info, warn, Level};
 
-use semver::{Identifier, Version, VersionReq};
+use semver::{Version, VersionReq};
 
 use crate::{
     common::{
@@ -14,7 +14,7 @@ use crate::{
         loop_device::LoopDevice,
         path_append,
         stream_progress::StreamProgress,
-        Error, Result, ToError,
+        Error, Options, Result, ToError,
     },
     stage1::{
         api_calls::{get_os_image, get_os_versions, Versions},
@@ -54,7 +54,6 @@ const IMG_NAME_BBB: &str = "resin-image-beaglebone-black.resinos-img";
 
 fn parse_versions(versions: &Versions) -> Vec<Version> {
     let mut sem_vers: Vec<Version> = versions
-        .versions
         .iter()
         .map(|ver_str| Version::parse(ver_str))
         .filter_map(|ver_res| match ver_res {
@@ -72,25 +71,13 @@ fn parse_versions(versions: &Versions) -> Vec<Version> {
 
 fn determine_version(ver_str: &str, versions: &Versions) -> Result<Version> {
     match ver_str {
-        "latest" => {
-            info!("Selected latest version ({}) for download", versions.latest);
-            Ok(
-                Version::parse(&versions.latest).upstream_with_context(&format!(
-                    "Failed to parse version from '{}'",
-                    versions.latest
-                ))?,
-            )
-        }
         "default" => {
             let mut found: Option<Version> = None;
-            for cmp_ver in parse_versions(&versions) {
+            for cmp_ver in parse_versions(versions) {
                 debug!("Looking at version {}", cmp_ver);
                 if cmp_ver.is_prerelease() {
                     continue;
-                } else if cmp_ver
-                    .build
-                    .contains(&Identifier::AlphaNumeric("prod".to_string()))
-                {
+                } else {
                     found = Some(cmp_ver);
                     break;
                 }
@@ -113,13 +100,8 @@ fn determine_version(ver_str: &str, versions: &Versions) -> Result<Version> {
                     ver_str
                 ))?;
                 let mut found: Option<Version> = None;
-                for cmp_ver in parse_versions(&versions) {
-                    if ver_req.matches(&cmp_ver)
-                        && !cmp_ver.is_prerelease()
-                        && cmp_ver
-                            .build
-                            .contains(&Identifier::AlphaNumeric("prod".to_string()))
-                    {
+                for cmp_ver in parse_versions(versions) {
+                    if ver_req.matches(&cmp_ver) && !cmp_ver.is_prerelease() {
                         found = Some(cmp_ver);
                         break;
                     }
@@ -140,13 +122,10 @@ fn determine_version(ver_str: &str, versions: &Versions) -> Result<Version> {
                 ))?;
 
                 let mut found: Option<Version> = None;
-                for cmp_ver in parse_versions(&versions) {
+                for cmp_ver in parse_versions(versions) {
                     if ver_req == cmp_ver
                         && !cmp_ver.is_prerelease()
-                        && (cmp_ver.build == ver_req.build
-                            || cmp_ver
-                                .build
-                                .contains(&Identifier::AlphaNumeric("prod".to_string())))
+                        && (cmp_ver.build == ver_req.build)
                     {
                         found = Some(cmp_ver);
                         break;
@@ -317,19 +296,27 @@ fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
 }
 
 pub(crate) fn download_image(
+    opts: &Options,
     balena_cfg: &BalenaCfgJson,
     work_dir: &Path,
     device_type: &str,
     version: &str,
 ) -> Result<PathBuf> {
     if !SUPPORTED_DEVICES.contains(&device_type) {
-        return Err(Error::with_context(
-            ErrorKind::InvParam,
-            &format!(
-                "OS download is not supported for device type '{}'",
+        if opts.dt_check() {
+            return Err(Error::with_context(
+                ErrorKind::InvParam,
+                &format!(
+                    "OS download is not supported for device type '{}', to override this check use the no-dt-check option on the command line",
+                    device_type
+                ),
+            ));
+        } else {
+            warn!(
+                "OS download is not supported for device type '{}', proceeding due to no-dt-check option",
                 device_type
-            ),
-        ));
+            );
+        }
     }
 
     let api_key = balena_cfg.get_api_key().upstream_with_context(
@@ -355,11 +342,7 @@ pub(crate) fn download_image(
 
     let img_file_name = path_append(
         work_dir,
-        &format!(
-            "balena-cloud-{}-{}.img.gz",
-            device_type,
-            version.to_string()
-        ),
+        format!("balena-cloud-{}-{}.img.gz", device_type, version),
     );
 
     if FLASHER_DEVICES.contains(&device_type) {
@@ -388,4 +371,79 @@ pub(crate) fn download_image(
     }
 
     Ok(img_file_name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const VERSIONS: [&str; 6] = [
+        "5.1.20+rev1",
+        "3.2.25",
+        "3.3.0",
+        "4.0.26+rev",
+        "5.0.1+rev1",
+        "0.0.0+rev60",
+    ];
+    use mod_logger::Logger;
+
+    #[test]
+    fn returns_latest_version_by_default() {
+        Logger::set_default_level(Level::Trace);
+
+        let selection = "default";
+        debug!("Selection is {}", selection);
+
+        let versions: Versions = VERSIONS.iter().map(|&s| s.to_string()).collect();
+
+        let result = determine_version(selection, &versions);
+        assert_eq!(
+            result.unwrap(),
+            Version::parse("5.1.20+rev1").expect("Could not parse version")
+        );
+    }
+
+    #[test]
+    fn returns_specific_version() {
+        Logger::set_default_level(Level::Trace);
+        let selection = "4.0.26+rev";
+        debug!("Selection is {}", selection);
+
+        let versions: Versions = VERSIONS.iter().map(|&s| s.to_string()).collect();
+
+        let result = determine_version(selection, &versions);
+        assert_eq!(
+            result.unwrap(),
+            Version::parse("4.0.26+rev").expect("Could not parse version")
+        );
+    }
+
+    #[test]
+    fn returns_compatible_version() {
+        Logger::set_default_level(Level::Trace);
+        let selection = "^3.2";
+        debug!("Selection is {}", selection);
+
+        let versions: Versions = VERSIONS.iter().map(|&s| s.to_string()).collect();
+
+        let result = determine_version(selection, &versions);
+        assert_eq!(
+            result.unwrap(),
+            Version::parse("3.3.0").expect("Could not parse version")
+        );
+    }
+
+    #[test]
+    fn returns_closest_version() {
+        Logger::set_default_level(Level::Trace);
+        let selection = "~3.2.8";
+        debug!("Selection is {}", selection);
+
+        let versions: Versions = VERSIONS.iter().map(|&s| s.to_string()).collect();
+
+        let result = determine_version(selection, &versions);
+        assert_eq!(
+            result.unwrap(),
+            Version::parse("3.2.25").expect("Could not parse version")
+        );
+    }
 }
