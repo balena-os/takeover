@@ -1,4 +1,26 @@
 - commits:
+    - subject: "bug: fix command in readme"
+      hash: 6265993753847ee4d923eccf3fb0452136d90781
+      body: |
+        Typo in readme command
+      footer:
+        Signed-off-by: Aaron Shaw <shawaj@gmail.com>
+        signed-off-by: Aaron Shaw <shawaj@gmail.com>
+        Change-type: patch
+        change-type: patch
+      author: Aaron Shaw
+    - subject: Update README.md
+      hash: 3d23021b3a914e915d51cad8dd08955cf7f6613f
+      body: |
+        Fixing typo of --no-nwmgr-check option
+      footer:
+        Change-type: patch
+        change-type: patch
+      author: Niels R
+  version: 0.3.2
+  title: ""
+  date: 2024-02-27T18:23:57.146Z
+- commits:
     - subject: Use latest Rust toolchain
       hash: c6107a357e04e769367ea989faa57999c5ff4e83
       body: |
