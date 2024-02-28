@@ -3,15 +3,13 @@ use crate::{
     stage1::{device::Device, utils::check_tcp_connect},
 };
 
-use log::{error, info};
+use log::{debug, error, info};
+use reqwest::blocking::Client;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use url::Url;
-
-pub const BALENA_API_PORT: u16 = 80;
 
 #[derive(Debug, Clone)]
 pub(crate) struct BalenaCfgJson {
@@ -72,7 +70,7 @@ impl BalenaCfgJson {
     }
 
     pub fn check(&self, opts: &Options, device: &dyn Device) -> Result<()> {
-        info!("Configured for application id: {}", self.get_app_id()?);
+        info!("Configured for fleet id: {}", self.get_app_id()?);
 
         let device_type = self.get_device_type()?;
         if !device.supports_device_type(device_type.as_str()) {
@@ -83,40 +81,7 @@ impl BalenaCfgJson {
 
         if opts.api_check() {
             let api_endpoint = &self.get_api_endpoint()?;
-
-            let api_url = Url::parse(api_endpoint).upstream_with_context(&format!(
-                "Failed to parse balena api url '{}'",
-                api_endpoint
-            ))?;
-
-            if let Some(api_host) = api_url.host() {
-                let api_host = api_host.to_string();
-                let api_port = if let Some(api_port) = api_url.port() {
-                    api_port
-                } else {
-                    BALENA_API_PORT
-                };
-
-                if let Ok(_v) = check_tcp_connect(&api_host, api_port, opts.check_timeout()) {
-                    info!("connection to api: {}:{} is ok", api_host, api_port);
-                } else {
-                    return Err(Error::with_context(
-                        ErrorKind::InvState,
-                        &format!(
-                        "failed to connect to api server @ {}:{} your device might not come online",
-                        api_endpoint, api_port
-                    ),
-                    ));
-                }
-            } else {
-                return Err(Error::with_context(
-                    ErrorKind::InvParam,
-                    &format!(
-                        "failed to parse api server url from config.json: {}",
-                        api_endpoint
-                    ),
-                ));
-            }
+            check_api(api_endpoint)?;
         }
 
         if opts.vpn_check() {
@@ -228,5 +193,36 @@ impl BalenaCfgJson {
 
     pub fn get_path(&self) -> &Path {
         &self.file
+    }
+}
+
+fn check_api(api_endpoint: &str) -> Result<()> {
+    let ping_endpoint = format!("{}/ping", api_endpoint);
+    let res = Client::builder()
+        .build()
+        .upstream_with_context("Failed to create https client")?
+        .get(&ping_endpoint)
+        .send()
+        .upstream_with_context(&format!(
+            "Failed to send https request url: {}",
+            &api_endpoint
+        ))?;
+    debug!("Result = {:?}", res);
+    let status = res.status();
+    let response = res
+        .text()
+        .upstream_with_context("Failed to read response")?;
+
+    if status.is_success() && response.trim() == "OK" {
+        info!("connection to api: {} is ok", &api_endpoint);
+        Ok(())
+    } else {
+        Err(Error::with_context(
+            ErrorKind::InvState,
+            &format!(
+                "Got an unexpected reply from the API server @ {} : {}",
+                &ping_endpoint, &response
+            ),
+        ))
     }
 }
