@@ -1,4 +1,17 @@
 - commits:
+    - subject: Use /ping endpoint to check connection to API
+      hash: 25a1cc6823ed29c5b218cdb34f8cb6dba28a23a5
+      body: ""
+      footer:
+        Change-type: minor
+        change-type: minor
+        Signed-off-by: Rahul Thakoor <rahul@balena.io>
+        signed-off-by: Rahul Thakoor <rahul@balena.io>
+      author: Rahul Thakoor
+  version: 0.4.0
+  title: ""
+  date: 2024-02-28T13:07:03.798Z
+- commits:
     - subject: "bug: fix command in readme"
       hash: 6265993753847ee4d923eccf3fb0452136d90781
       body: |
