@@ -1,11 +1,15 @@
 mod backup;
 
 use std::env::set_current_dir;
-use std::fs::{copy, create_dir, create_dir_all, read_dir, read_link, remove_dir_all, OpenOptions};
+use std::fs::{
+    copy, create_dir, create_dir_all, read_dir, read_link, remove_dir_all, symlink_metadata,
+    OpenOptions,
+};
 use std::io::Write;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::str;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -17,6 +21,8 @@ use nix::{
 use libc::MS_BIND;
 
 use log::{debug, error, info, warn, Level};
+
+use which::which;
 
 pub(crate) mod migrate_info;
 
@@ -451,6 +457,9 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         takeover_dir.display()
     ))?;
 
+    let telinit_path =
+        get_safe_telinit_path().upstream_with_context("Failed to get telinit path.")?;
+
     mount(
         Some(&new_init_path),
         &old_init_path,
@@ -466,13 +475,11 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     info!("Bind-mounted new init as '{}'", new_init_path.display());
 
-    //return Ok(());
-
-    debug!("calling '{} u'", TELINIT_CMD,);
+    debug!("calling '{} u'", telinit_path.display());
     call_command!(
-        TELINIT_CMD,
+        telinit_path.to_str().unwrap(),
         &["u"],
-        &format!("Call to {} failed", TELINIT_CMD)
+        &format!("Call to {} failed", telinit_path.display())
     )?;
 
     info!("Restarted init");
@@ -570,4 +577,71 @@ pub fn stage1(opts: &Options) -> Result<()> {
     } else {
         Ok(())
     }
+}
+
+/// Returns a path to the `telinit` binary that is safe to use even after
+/// `takeover` has been bind-mounted on top of `init`.
+///
+/// Here's the context: in some distros (e.g., Devuan), `telinit` is a symlink
+/// to `init`. In this case, when we bind-mount `takeover` on top of `init`, we
+/// lose access to `telinit` (because the symlink will effectively point to
+/// `takeover`).
+///
+/// To avoid this problem, whenever we notice that `telinit` is a symlink to
+/// `init`, we copy it to a safe location so we can refer to it when needed.
+fn get_safe_telinit_path() -> Result<PathBuf> {
+    let original_path = which(TELINIT_CMD)
+        .upstream_with_context(&format!("Failed to find '{}' in $PATH", TELINIT_CMD))?;
+
+    debug!("Found telinit at '{}'", original_path.display());
+
+    let metadata = symlink_metadata(&original_path).upstream_with_context(&format!(
+        "Failed to get metadata for '{}'",
+        original_path.display()
+    ))?;
+
+    if !metadata.is_symlink() {
+        info!("telinit is not a symlink, no need to make a safe copy");
+        return Ok(original_path);
+    }
+
+    let canonical_path = original_path
+        .canonicalize()
+        .upstream_with_context(&format!(
+            "Failed to canonicalize '{}'",
+            original_path.display()
+        ))?;
+
+    debug!(
+        "telinit is a symlink with canonical path '{}'",
+        canonical_path.display()
+    );
+
+    let init_path =
+        read_link("/proc/1/exe").upstream_with_context("Failed to read link for /proc/1/exe")?;
+
+    if canonical_path != init_path {
+        info!(
+            "telinit ({}) is a symlink (to {}), but it does not point to init ({}), no need to make a safe copy",
+            original_path.display(),
+            canonical_path.display(),
+            init_path.display());
+        return Ok(original_path);
+    }
+
+    let takeover_dir = PathBuf::from(TAKEOVER_DIR);
+    let copy_path = path_append(takeover_dir, format!("/bin/{}", TELINIT_CMD));
+    copy(&canonical_path, &copy_path).upstream_with_context(&format!(
+        "Failed to copy '{}' to '{}'",
+        canonical_path.display(),
+        copy_path.display()
+    ))?;
+
+    info!(
+        "Copied '{}' to '{}'",
+        canonical_path.display(),
+        copy_path.display()
+    );
+
+    Ok(copy_path)
 }

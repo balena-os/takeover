@@ -69,11 +69,15 @@ version = "0.1"
 [dependencies.tar]
 version = "0.4"
 
+[dependencies.which]
+version = "6.0.0"
+
+[dependencies.openssl]
+version = "0.10.63"
+features = ["vendored"]
+
 [features]
 raspberrypi3 = []
 raspberrypi4-64 = []
 intel-nuc = []
 
-[dependencies.openssl]
-version = "0.10.63"
-features = ["vendored"]
