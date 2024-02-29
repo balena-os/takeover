@@ -2,7 +2,6 @@ pub(crate) const SWAPOFF_CMD: &str = "swapoff";
 pub(crate) const TELINIT_CMD: &str = "telinit";
 
 pub(crate) const MOKUTIL_CMD: &str = "mokutil";
-pub(crate) const WHEREIS_CMD: &str = "whereis";
 pub(crate) const PIDOF_CMD: &str = "pidof";
 pub(crate) const PIVOT_ROOT_CMD: &str = "pivot_root";
 pub(crate) const MOUNT_CMD: &str = "mount";

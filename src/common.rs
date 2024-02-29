@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 
 use log::{debug, error, trace, warn};
-
 use regex::Regex;
+use which::which;
 
 pub(crate) mod stage2_config;
 
@@ -24,7 +24,7 @@ pub mod error;
 pub use error::{Error, ErrorKind, Result, ToError};
 
 pub mod options;
-use crate::common::defs::{OLD_ROOT_MP, PIDOF_CMD, WHEREIS_CMD};
+use crate::common::defs::{OLD_ROOT_MP, PIDOF_CMD};
 
 use nix::unistd::sync;
 pub use options::Options;
@@ -74,58 +74,17 @@ pub(crate) fn call(cmd: &str, args: &[&str], trim_stdout: bool) -> Result<CmdRes
     }
 }
 
+// We should probably get rid of this function and use `which` directly, but the
+// differences in typing between them propagate everywhere. So even if the types
+// for `which` are arguably better, we keep this function for now.
 pub(crate) fn whereis(cmd: &str) -> Result<String> {
-    const BIN_DIRS: &[&str] = &["./", "/bin", "/usr/bin", "/sbin", "/usr/sbin"];
-    // try manually first
-    for path in BIN_DIRS {
-        let path = format!("{}/{}", &path, cmd);
-        if file_exists(&path) {
-            return Ok(path);
-        }
-    }
-
-    // else try whereis command
-    let args: [&str; 2] = ["-b", cmd];
-    let cmd_res = match call(WHEREIS_CMD, &args, true) {
-        Ok(cmd_res) => cmd_res,
-        Err(why) => {
-            // manually try the usual suspects
-            return Err(Error::with_context(
-                ErrorKind::NotFound,
-                &format!(
-                    "whereis failed to execute for: {:?}, error: {:?}",
-                    args, why
-                ),
-            ));
-        }
-    };
-
-    if cmd_res.status.success() {
-        if cmd_res.stdout.is_empty() {
-            Err(Error::with_context(
-                ErrorKind::InvParam,
-                &format!("whereis: no command output for {}", cmd),
-            ))
-        } else {
-            let mut words = cmd_res.stdout.split(' ');
-            if let Some(s) = words.nth(1) {
-                Ok(String::from(s))
-            } else {
-                Err(Error::with_context(
-                    ErrorKind::NotFound,
-                    &format!("whereis: command not found: '{}'", cmd),
-                ))
-            }
-        }
-    } else {
-        Err(Error::with_context(
-            ErrorKind::ExecProcess,
-            &format!(
-                "whereis: command failed for {}: {}",
-                cmd,
-                cmd_res.status.code().unwrap_or(0)
-            ),
-        ))
+    let actual_cmd = which(cmd);
+    match actual_cmd {
+        Ok(cmd) => Ok(cmd.to_string_lossy().to_string()),
+        Err(why) => Err(Error::from_upstream(
+            Box::new(why),
+            &format!("'which' failed to find '{}'", cmd),
+        )),
     }
 }
 
