@@ -1,4 +1,26 @@
 - commits:
+    - subject: Make copy of `telinit` if a symlink to `init`
+      hash: 643428f725a6e7e8a102507c5f19827733857fb9
+      body: |
+        At the end of stage1, we bind-mount `takeover` on top of `init`, and
+        then call `telinit u`. Unfortunately, in some distributions (like
+        Devuan) `telinit` is a symlink to `init`. In this case, we lose access
+        to `telinit`, because the symlink now points to what is effectively
+        `takeover`.
+
+        With this commit, we check if `telinit` is a symlink to `init`, and if
+        so, we make a safe copy of `telinit` so that we can call it after the
+        bind-mounting takes place.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+  version: 0.4.1
+  title: ""
+  date: 2024-02-29T18:02:44.066Z
+- commits:
     - subject: Use /ping endpoint to check connection to API
       hash: 25a1cc6823ed29c5b218cdb34f8cb6dba28a23a5
       body: ""
