@@ -279,3 +279,98 @@ cross build --release --target "aarch64-unknown-linux-musl"
 # For a device with an Intel CPU running a 64-bit operating system.
 cross build --release --target "x86_64-unknown-linux-musl"
 ```
+
+## How it works
+
+The takeover process occurs in 2 stages, namely:
+
+- Stage1: Gathers information about the device and the current operating system and prepares the system for Stage2
+- Stage2: the `takeover` process is re-run as `init` (PID 1) and spawns a worker process that kills running processes, copies required files to RAMFS, unmounts partitions and handles the flashing of balenaOS
+
+````mermaid
+
+flowchart TD
+    A(Start) --> B[[Stage1]]
+    B --> C[[Stage2]]
+    C--> E(End)
+
+````
+
+### Stage1
+---
+
+````mermaid
+
+flowchart TB
+    A(Start)
+    subgraph S1 [Stage1]
+    direction TB
+        S1A[[Gather Migration Info]]
+        S1B[[Prepare for takeover]]
+    S1A --> S1B    
+    end
+    A --> S1
+    S1 --> C[[Stage2]]
+    C--> E(End)
+
+````
+
+Stage1 consists of 2 main processes:
+
+#### 1. Gather Migration Info
+
+- Check device type (can be skipped by passing option `--no_dt_check`)
+- Read `config.json`
+- Run checks
+  - check if device type set in `config.json` is supported by the detected device type
+  - check if can connect to API endpoint set in  `config.json`
+  - check if can connect to VPN endpoint set in `config.json`
+- Download latest balenaOS image if an image is not provided
+- Create corresponding network manager connection files
+- Backup files if required
+- Replicate `hostname` if required
+
+#### 2. Prepare for takeover
+   
+- Disable swap
+- Copy files/binaries to RAMFS
+- Setup new init process (`takeover` is bind-mounted over original `init` executable )
+- Setup Stage2 log device if required
+- Write Stage2 config file
+- Restart init daemon -> since `takeover` is bind-mounted over `init`, `takeover` is actually ran as the init process (PID 1)
+
+### Stage2
+---
+
+````mermaid
+flowchart TB
+    A(Start)-->S1[[Stage1]]
+    subgraph S2 [Stage2]
+    direction TB
+        S2A[[Run as Init]]
+        S2B[[Stage2 Worker]]
+    S2A --> S2B    
+    end
+S1 --> S2
+S2 --> E(End)
+````
+Stage2 also consists of 2 main processes:
+
+#### Run as Init
+
+- Close open files
+- Setup stage2 logging to an external device
+- Set mount propagation to private for rootfs -> mounts and unmounts within this mount point will not propagate to other mount points, and mounts and unmounts in other mount points will not propagate to this mount point. This effectively isolates the mount point from changes in other namespaces.
+- change root filesystem via `pivot_root`
+- Spawn Stage2 worker process
+
+#### Stage2 Migration Worker
+- setup Stage2 logging to external device if configured
+- Kill running processes
+- Copy required files to RAMFS
+- unmount partitions
+- Flash balenaOS image to disk
+- Validate if image was written successfully
+- Transfer files to respective destinations (`config.json`, system connection files)
+- Setup EFI if required
+- Restore backup files is required 
