@@ -1,4 +1,40 @@
 - commits:
+    - subject: Enable the crt-static target feature
+      hash: 072addb7f2abdd451296a5fd24d51360bb22fb1f
+      body: >
+        We were relying on the fact that our current targets link the C runtime
+
+        statically. However, this may be different for other targets and could
+
+        even change in the future (e.g., see
+
+        https://github.com/rust-lang/compiler-team/issues/422).
+
+
+        With this commit we adopt the current recommendation, which is enabling
+
+        the crt-static target feature when building. See
+
+        https://doc.rust-lang.org/reference/linkage.html#static-and-dynamic-c-runtimes
+
+        for details.
+
+
+        Given the current defaults for Rust targets, this change should be a
+
+        no-op, but this shall make us safer and more resilient to Rust changes
+
+        in the long run.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+  version: 0.4.2
+  title: ""
+  date: 2024-03-07T13:49:16.193Z
+- commits:
     - subject: Make copy of `telinit` if a symlink to `init`
       hash: 643428f725a6e7e8a102507c5f19827733857fb9
       body: |
@@ -147,15 +183,19 @@
       body: >
         - /device-types/v1/ has been deprecated per issue #18
 
-        - currently using percent-encoded url and replacing device-type in the url
+        - currently using percent-encoded url and replacing device-type in the
+        url
 
-        - /v6/release returns a different response `JSON` compared to /device-types/v1/
+        - /v6/release returns a different response `JSON` compared to
+        /device-types/v1/
 
         and does not contain the `latest` field.
 
         - replaced struct `Versions` with a type alias to `Vec<String>`
 
-        - modified `determine_versions` to handle new data structure and [unified images](https://blog.balena.io/unified-balenaos-releases-now-available/)
+        - modified `determine_versions` to handle new data structure and
+        [unified
+        images](https://blog.balena.io/unified-balenaos-releases-now-available/)
 
         - added unit tests for `determine_versions`
 
@@ -405,7 +445,8 @@
 
         - removed clippy warnings
 
-        - removed attempt to delete non existant /boot/efi directory for non x86 platforms
+        - removed attempt to delete non existant /boot/efi directory for non x86
+        platforms
 
         Change-type: minor
 
