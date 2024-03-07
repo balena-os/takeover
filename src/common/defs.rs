@@ -35,6 +35,13 @@ pub const BALENA_BOOT_MP: &str = "/mnt/balena-boot";
 pub const BALENA_PART_MP: &str = "/mnt/balena-part";
 
 pub const SYSTEM_CONNECTIONS_DIR: &str = "system-connections";
+pub const SYSTEM_PROXY_DIR: &str = "system-proxy";
+
+pub const BALENA_DATA_MP: &str = "/mnt/data/";
+pub const BALENA_OS_NAME: &str = "balenaOS";
+
+pub const BALENA_SYSTEM_CONNECTIONS_BOOT_PATH: &str = "/mnt/boot/system-connections/";
+pub const BALENA_SYSTEM_PROXY_BOOT_PATH: &str = "/mnt/boot/system-proxy/";
 
 pub const SYS_EFI_DIR: &str = "/sys/firmware/efi";
 pub const SYS_EFIVARS_DIR: &str = "/sys/firmware/efi/efivars";
