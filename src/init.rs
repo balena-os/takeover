@@ -1,8 +1,6 @@
 use crate::{
     common::{
-        call,
-        defs::{MOUNT_CMD, NIX_NONE, PIVOT_ROOT_CMD, TAKEOVER_DIR},
-        get_mountpoint, path_append, whereis, Error, Result, ToError, get_os_name,
+        call, defs::{BALENA_DATA_MP, BALENA_OS_NAME, MOUNT_CMD, NIX_NONE, PIVOT_ROOT_CMD, TAKEOVER_DIR}, get_mountpoint, get_os_name, path_append, whereis, Error, Result, ToError
     },
     stage2::{read_stage2_config, reboot},
     ErrorKind,
@@ -220,8 +218,8 @@ pub fn init() -> ! {
     let mut takeover_path = PathBuf::from("");
     match get_os_name() {
         Ok(name) => {
-            if name.starts_with("balenaOS") {
-                takeover_path.push("/mnt/boot");
+            if name.starts_with(BALENA_OS_NAME) {
+                takeover_path.push(BALENA_DATA_MP);
             }
         }
         Err(_) => {

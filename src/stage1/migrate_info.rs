@@ -45,6 +45,7 @@ pub(crate) struct MigrateInfo {
     work_dir: PathBuf,
     wifis: Vec<WifiConfig>,
     nwmgr_files: Vec<PathBuf>,
+    system_proxy_files: Vec<PathBuf>,
     backup: Option<PathBuf>,
 }
 
@@ -173,6 +174,7 @@ impl MigrateInfo {
         };
 
         let nwmgr_files = Vec::from(opts.nwmgr_cfg());
+        let system_proxy_files = Vec::new();
 
         if nwmgr_files.is_empty() && wifis.is_empty() {
             if opts.no_nwmgr_check() {
@@ -226,6 +228,7 @@ impl MigrateInfo {
             work_dir,
             wifis,
             nwmgr_files,
+            system_proxy_files,
             backup,
         })
     }
@@ -302,9 +305,18 @@ impl MigrateInfo {
         &self.nwmgr_files
     }
 
+    pub fn system_proxy_files(&self) -> &Vec<PathBuf> {
+        &self.system_proxy_files
+    }
+
     pub fn add_nwmgr_file<P: AsRef<Path>>(&mut self, nwmgr_file_path: P) {
         self.nwmgr_files.push(nwmgr_file_path.as_ref().to_path_buf());
         debug!("Adding network connection file to copy list: {}", nwmgr_file_path.as_ref().to_path_buf().display());
+    }
+
+    pub fn add_system_proxy_file<P: AsRef<Path>>(&mut self, system_proxy_file_path: P) {
+        self.system_proxy_files.push(system_proxy_file_path.as_ref().to_path_buf());
+        debug!("Adding system proxy configuration file to copy list: {}", system_proxy_file_path.as_ref().to_path_buf().display());
     }
 
     pub fn wifis(&self) -> &Vec<WifiConfig> {

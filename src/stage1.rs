@@ -36,8 +36,8 @@ use crate::{
     common::{
         call,
         defs::{
-            NIX_NONE, OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD, SYSTEM_CONNECTIONS_DIR,
-            SYS_EFIVARS_DIR, SYS_EFI_DIR, TELINIT_CMD,
+            NIX_NONE, OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD, SYSTEM_CONNECTIONS_DIR, SYSTEM_PROXY_DIR,
+            SYS_EFIVARS_DIR, SYS_EFI_DIR, TELINIT_CMD, BALENA_OS_NAME, BALENA_DATA_MP, BALENA_SYSTEM_CONNECTIONS_BOOT_PATH, BALENA_SYSTEM_PROXY_BOOT_PATH
         },
         error::{Error, ErrorKind, Result, ToError},
         file_exists, format_size_with_unit, get_mem_info, is_admin, get_os_name,
@@ -74,7 +74,13 @@ fn prepare_configs<P1: AsRef<Path>>(
     // write network_manager files to tmpfs
     let mut nwmgr_cfgs: u64 = 0;
     let nwmgr_path = path_append(work_dir, SYSTEM_CONNECTIONS_DIR);
+    let sys_proxy_copy_path = path_append(work_dir, SYSTEM_PROXY_DIR);
     create_dir_all(&nwmgr_path).upstream_with_context(&format!(
+        "Failed to create directory '{}",
+        nwmgr_path.display()
+    ))?;
+
+    create_dir_all(&sys_proxy_copy_path).upstream_with_context(&format!(
         "Failed to create directory '{}",
         nwmgr_path.display()
     ))?;
@@ -82,12 +88,34 @@ fn prepare_configs<P1: AsRef<Path>>(
     /* If migrating from balenaOS, copy all files from the system-connections file in /mnt/boot
      * TODO: Check if we should copy them from the boot partition, or from the NM root overlay directory
      */
-    if mig_info.os_name().starts_with("balenaOS") {
-        debug!("migrating from balenaOS");
-        let  nwmgr_files = read_dir("/mnt/boot/system-connections/").unwrap();
+    if mig_info.os_name().starts_with(BALENA_OS_NAME) {
+        debug!("migrating from balenaOS - copying system-connections files");
+        let  nwmgr_files = read_dir(BALENA_SYSTEM_CONNECTIONS_BOOT_PATH).unwrap();
         for path in nwmgr_files {
             mig_info.add_nwmgr_file(path.unwrap().path());
         }
+
+        debug!("migrating from balenaOS - copying system-proxy files");
+        let system_proxy_files = read_dir(BALENA_SYSTEM_PROXY_BOOT_PATH).unwrap();
+        for sys_proxy_path in system_proxy_files {
+            mig_info.add_system_proxy_file(sys_proxy_path.unwrap().path());
+        }
+    }
+
+    for proxy_file in mig_info.system_proxy_files() {
+        let target_file_name = Path::new(&proxy_file).file_name().unwrap().to_str().unwrap();
+        let target_file = path_append(&sys_proxy_copy_path, target_file_name);
+
+        copy(&proxy_file, &target_file).upstream_with_context(&format!(
+           "Failed to copy '{}' to '{}'",
+           proxy_file.display(),
+           target_file.display()
+       ))?;
+       info!(
+           "Copied '{}' to '{}'",
+           proxy_file.display(),
+           target_file.display()
+       );
     }
 
     for source_file in mig_info.nwmgr_files() {
@@ -293,9 +321,9 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     // *********************************************************
     // make mountpoint for tmpfs
     let mut takeover_dir = PathBuf::from("");
-    if mig_info.os_name().starts_with("balenaOS") {
+    if mig_info.os_name().starts_with(BALENA_OS_NAME) {
         // base directory for mountpoint must be writeable
-        takeover_dir.push("/mnt/boot");
+        takeover_dir.push(BALENA_DATA_MP);
     }
     if TAKEOVER_DIR.starts_with("/") {
         takeover_dir.push(TAKEOVER_DIR[1..].to_string());
@@ -416,9 +444,9 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     let new_init_path = path_append(&takeover_dir, format!("/bin/{}", env!("CARGO_PKG_NAME")));
     // Assets::write_stage2_script(&takeover_dir, &new_init_path, &tty, opts.get_s2_log_level())?;
 
-    let block_dev_info = if get_os_name()?.starts_with("balenaOS") {
+    let block_dev_info = if get_os_name()?.starts_with(BALENA_OS_NAME) {
         // can't use default root dir due to overlayfs
-        BlockDeviceInfo::new_for_dir("/mnt/boot")?
+        BlockDeviceInfo::new_for_dir(BALENA_DATA_MP)?
     } else {
         BlockDeviceInfo::new()?
     };

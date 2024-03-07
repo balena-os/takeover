@@ -29,7 +29,7 @@ use crate::common::{
         IoctlReq, BACKUP_ARCH_NAME, BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART,
         BALENA_CONFIG_PATH, BALENA_DATA_FSTYPE, BALENA_DATA_PART, BALENA_IMAGE_NAME,
         BALENA_IMAGE_PATH, BALENA_PART_MP, DD_CMD, DISK_BY_LABEL_PATH, EFIBOOTMGR_CMD, NIX_NONE,
-        OLD_ROOT_MP, STAGE2_CONFIG_NAME, SYSTEM_CONNECTIONS_DIR, SYS_EFI_DIR,
+        OLD_ROOT_MP, STAGE2_CONFIG_NAME, SYSTEM_CONNECTIONS_DIR, SYS_EFI_DIR, JETSON_XAVIER_HW_PART_FORCE_RO_FILE, SYSTEM_PROXY_DIR
     },
     dir_exists,
     disk_util::{Disk, LabelType, PartInfo, PartitionIterator, DEF_BLOCK_SIZE},
@@ -204,51 +204,56 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<()> {
         info!("Copied backup to '{}'", to_path.display());
     }
 
-    let nwmgr_path = path_append(
-        OLD_ROOT_MP,
-        path_append(&s2_cfg.work_dir, SYSTEM_CONNECTIONS_DIR),
-    );
+    /* Copy system connection and system proxy files over to the new install */
+    let system_config_dirs = vec![SYSTEM_CONNECTIONS_DIR, SYSTEM_PROXY_DIR];
 
-    let to_dir = path_append(TRANSFER_DIR, SYSTEM_CONNECTIONS_DIR);
-    if !dir_exists(&to_dir)? {
-        create_dir_all(&to_dir).upstream_with_context(&format!(
-            "Failed to create directory: '{}'",
-            to_dir.display()
-        ))?;
-    }
+    for system_config_dir in system_config_dirs.into_iter() {
+        let config_file_path = path_append(
+            OLD_ROOT_MP,
+            path_append(&s2_cfg.work_dir, system_config_dir),
+        );
 
-    for dir_entry in read_dir(&nwmgr_path).upstream_with_context(&format!(
-        "Failed to read drectory '{}'",
-        nwmgr_path.display()
-    ))? {
-        match dir_entry {
-            Ok(dir_entry) => {
-                if let Some(filename) = dir_entry.path().file_name() {
-                    let to_path = path_append(&to_dir, filename);
-                    copy(dir_entry.path(), &to_path).upstream_with_context(&format!(
-                        "Failed to copy '{}' to '{}'",
-                        dir_entry.path().display(),
-                        to_path.display()
-                    ))?;
-                    info!("Copied network config to '{}'", to_path.display());
-                } else {
-                    return Err(Error::with_context(
-                        ErrorKind::InvParam,
+        let to_dir = path_append(TRANSFER_DIR, system_config_dir);
+        if !dir_exists(&to_dir)? {
+            create_dir_all(&to_dir).upstream_with_context(&format!(
+                "Failed to create directory: '{}'",
+                to_dir.display()
+            ))?;
+        }
+
+        for dir_entry in read_dir(&config_file_path).upstream_with_context(&format!(
+            "Failed to read drectory '{}'",
+            config_file_path.display()
+        ))? {
+            match dir_entry {
+                Ok(dir_entry) => {
+                    if let Some(filename) = dir_entry.path().file_name() {
+                        let to_path = path_append(&to_dir, filename);
+                        copy(dir_entry.path(), &to_path).upstream_with_context(&format!(
+                            "Failed to copy '{}' to '{}'",
+                            dir_entry.path().display(),
+                            to_path.display()
+                        ))?;
+                        info!("Copied network config to '{}'", to_path.display());
+                    } else {
+                        return Err(Error::with_context(
+                            ErrorKind::InvParam,
+                            &format!(
+                                "Failed to extract filename from path: '{}'",
+                                dir_entry.path().display()
+                            ),
+                        ));
+                    }
+                }
+                Err(why) => {
+                    return Err(Error::from_upstream(
+                        Box::new(why),
                         &format!(
-                            "Failed to extract filename from path: '{}'",
-                            dir_entry.path().display()
+                            "Failed to retrieve directory entry for '{}'",
+                            config_file_path.display()
                         ),
                     ));
                 }
-            }
-            Err(why) => {
-                return Err(Error::from_upstream(
-                    Box::new(why),
-                    &format!(
-                        "Failed to retrieve directory entry for '{}'",
-                        nwmgr_path.display()
-                    ),
-                ));
             }
         }
     }
@@ -476,58 +481,62 @@ fn transfer_boot_files<P: AsRef<Path>>(dev_root: P) -> Result<()> {
     debug!("Source config json is '{}', target config.json is '{}'", src_path.display(),  target_path.display());
     info!("Successfully copied config.json to boot partition",);
 
-    let src_path = path_append(TRANSFER_DIR, SYSTEM_CONNECTIONS_DIR);
-    let dir_list = read_dir(&src_path).upstream_with_context(&format!(
-        "Failed to read directory '{}'",
-        src_path.display()
-    ))?;
+    let boot_directories = vec![SYSTEM_CONNECTIONS_DIR, SYSTEM_PROXY_DIR];
 
-    let target_dir = path_append(dev_root.as_ref(), SYSTEM_CONNECTIONS_DIR);
-    debug!(
-        "Transfering files from '{}' to '{}'",
-        src_path.display(),
-        target_dir.display()
-    );
+    for boot_directory in boot_directories.into_iter() {
+        let src_path = path_append(TRANSFER_DIR, boot_directory);
+        let dir_list = read_dir(&src_path).upstream_with_context(&format!(
+            "Failed to read directory '{}'",
+            src_path.display()
+        ))?;
 
-    for entry in dir_list {
-        match entry {
-            Ok(entry) => {
-                let curr_file = entry.path();
-                debug!("Found source file '{}'", curr_file.display());
-                if entry
-                    .metadata()
-                    .upstream_with_context(&format!(
-                        "Failed to read metadata from file '{}'",
-                        curr_file.display()
-                    ))?
-                    .is_file()
-                {
-                    if let Some(filename) = curr_file.file_name() {
-                        let target_path = path_append(&target_dir, filename);
-                        copy(&curr_file, &target_path).upstream_with_context(&format!(
-                            "Failed to copy '{}' to '{}'",
-                            curr_file.display(),
-                            target_path.display()
-                        ))?;
-                        info!(
-                            "Successfully copied '{}' to boot partition as '{}",
-                            curr_file.display(),
-                            target_path.display()
-                        );
-                    } else {
-                        warn!(
-                            "Failed to extract filename from path '{}'",
+        let target_dir = path_append(dev_root.as_ref(), boot_directory);
+        debug!(
+            "Transfering files from '{}' to '{}'",
+            src_path.display(),
+            target_dir.display()
+        );
+
+        for entry in dir_list {
+            match entry {
+                Ok(entry) => {
+                    let curr_file = entry.path();
+                    debug!("Found source file '{}'", curr_file.display());
+                    if entry
+                        .metadata()
+                        .upstream_with_context(&format!(
+                            "Failed to read metadata from file '{}'",
                             curr_file.display()
-                        );
+                        ))?
+                        .is_file()
+                    {
+                        if let Some(filename) = curr_file.file_name() {
+                            let target_path = path_append(&target_dir, filename);
+                            copy(&curr_file, &target_path).upstream_with_context(&format!(
+                                "Failed to copy '{}' to '{}'",
+                                curr_file.display(),
+                                target_path.display()
+                            ))?;
+                            info!(
+                                "Successfully copied '{}' to boot partition as '{}",
+                                curr_file.display(),
+                                target_path.display()
+                            );
+                        } else {
+                            warn!(
+                                "Failed to extract filename from path '{}'",
+                                curr_file.display()
+                            );
+                        }
                     }
                 }
-            }
-            Err(why) => {
-                return Err(Error::with_all(
-                    ErrorKind::Upstream,
-                    "Failed to read directory entry",
-                    Box::new(why),
-                ));
+                Err(why) => {
+                    return Err(Error::with_all(
+                        ErrorKind::Upstream,
+                        "Failed to read directory entry",
+                        Box::new(why),
+                    ));
+                }
             }
         }
     }
@@ -1199,12 +1208,12 @@ pub fn stage2(opts: &Options) -> ! {
 
         /* Enable writing to /dev/mmcblk0boot0/ */
         let force_ro = "0";
-        std::fs::write("/sys/block/mmcblk0boot0/force_ro", force_ro).expect("Unable to write 0 to force_ro");
+        std::fs::write(JETSON_XAVIER_HW_PART_FORCE_RO_FILE, force_ro).expect("Could not set hw boot partition rw!");
 
         let boot0_data = std::fs::read(boot0_image_path).unwrap();
         debug!("boot blob - bytes read from disk: '{}' ", boot0_data.len());
 
-        std::fs::write(s2_config.boot0_image_dev, boot0_data).expect("Unable to write mmcblk0boot0");
+        std::fs::write(s2_config.boot0_image_dev, boot0_data).expect("Could not write hw boot partition!");
         debug!("Jetson Xavier AGX boot blob was written");
     } else if s2_config.device_type.starts_with("Jetson Xavier NX") {
         let boot0_image_path = path_append(TRANSFER_DIR, s2_config.boot0_image_path);

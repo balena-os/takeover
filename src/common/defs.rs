@@ -43,6 +43,8 @@ pub const BALENA_OS_NAME: &str = "balenaOS";
 pub const BALENA_SYSTEM_CONNECTIONS_BOOT_PATH: &str = "/mnt/boot/system-connections/";
 pub const BALENA_SYSTEM_PROXY_BOOT_PATH: &str = "/mnt/boot/system-proxy/";
 
+pub const JETSON_XAVIER_HW_PART_FORCE_RO_FILE: &str = "/sys/block/mmcblk0boot0/force_ro";
+
 pub const SYS_EFI_DIR: &str = "/sys/firmware/efi";
 pub const SYS_EFIVARS_DIR: &str = "/sys/firmware/efi/efivars";
 
