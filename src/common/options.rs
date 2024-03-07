@@ -34,6 +34,14 @@ pub struct Options {
     )]
     boot0_image: Option<PathBuf>,
     #[structopt(
+        short = "p",
+        long = "--ldd-path",
+        value_name = "LDD_PATH",
+        parse(from_os_str),
+        help = "Path to ldd script"
+    )]
+    ldd_path: Option<PathBuf>,
+    #[structopt(
         short,
         long,
         value_name = "VERSION",
@@ -188,6 +196,14 @@ impl Options {
             boot0_image.clone()
         } else {
             PathBuf::from("boot0.img")
+        }
+    }
+
+    pub fn ldd_path(&self) -> PathBuf {
+        if let Some(ldd_path) = &self.ldd_path {
+            ldd_path.clone()
+        } else {
+            PathBuf::from("")
         }
     }
 
