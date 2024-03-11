@@ -2,10 +2,10 @@ use std::fs::{
     copy, create_dir, create_dir_all, read_dir, read_to_string, remove_dir, File, OpenOptions,
 };
 use std::io::{self, Read, Write};
-
+use finder::Finder;
 use std::os::unix::io::AsRawFd;
 use std::process::{exit, Command, Stdio};
-use std::thread::{sleep};
+use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use nix::{
@@ -27,9 +27,10 @@ use crate::common::{
     call,
     defs::{
         IoctlReq, BACKUP_ARCH_NAME, BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART,
-        BALENA_CONFIG_PATH, BALENA_DATA_FSTYPE, BALENA_DATA_PART, BALENA_IMAGE_NAME,
+        BALENA_CONFIG_PATH, BALENA_DATA_FSTYPE, BALENA_DATA_PART, BALENA_ROOTA_FSTYPE, BALENA_IMAGE_NAME,
         BALENA_IMAGE_PATH, BALENA_PART_MP, DD_CMD, DISK_BY_LABEL_PATH, EFIBOOTMGR_CMD, NIX_NONE,
-        OLD_ROOT_MP, STAGE2_CONFIG_NAME, SYSTEM_CONNECTIONS_DIR, SYS_EFI_DIR, JETSON_XAVIER_HW_PART_FORCE_RO_FILE, SYSTEM_PROXY_DIR
+        OLD_ROOT_MP, STAGE2_CONFIG_NAME, SYSTEM_CONNECTIONS_DIR, SYS_EFI_DIR, JETSON_XAVIER_HW_PART_FORCE_RO_FILE, SYSTEM_PROXY_DIR,
+        BOOT_BLOB_NAME_JETSON_XAVIER, BOOT_BLOB_NAME_JETSON_XAVIER_NX, BOOT_BLOB_PARTITION_JETSON_XAVIER, BOOT_BLOB_PARTITION_JETSON_XAVIER_NX
     },
     dir_exists,
     disk_util::{Disk, LabelType, PartInfo, PartitionIterator, DEF_BLOCK_SIZE},
@@ -177,21 +178,6 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<()> {
         &to_path.display()
     ))?;
     info!("Copied config to '{}'", to_path.display());
-
-    /* Boot blob image is only for Xaviers, and we need to copy it along with the OS image.
-     * I couldn't extract it from the flasher image for now, at least for the purpose of this test
-     */
-    if s2_cfg.device_type.starts_with("Jetson Xavier") {
-        let src_path = path_append("/", &s2_cfg.boot0_image_path);
-        let dest_path = path_append(TRANSFER_DIR, &s2_cfg.boot0_image_path);
-        copy(&src_path, &dest_path).upstream_with_context(&format!(
-            "Failed to copy '{}' to {}",
-            src_path.display(),
-            &dest_path.display()
-        ))?;
-        info!("Copied '{}' to '{}'", src_path.display(), dest_path.display());
-        info!("{} exists {}", dest_path.display(), dest_path.exists());
-    }
 
     if let Some(ref backup_path) = s2_cfg.backup_path {
         let src_path = path_append(OLD_ROOT_MP, backup_path);
@@ -544,10 +530,11 @@ fn transfer_boot_files<P: AsRef<Path>>(dev_root: P) -> Result<()> {
     Ok(())
 }
 
-fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo)> {
+fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo, PartInfo)> {
     let mut disk = Disk::from_drive_file(device, None)?;
 
     let mut boot_part: Option<PartInfo> = None;
+    let mut root_a_part: Option<PartInfo> = None;
     let mut data_part: Option<PartInfo> = None;
 
     // GPT provides a 'protective MBR' at LBA 0 to identify itself in a backward
@@ -566,7 +553,10 @@ fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo)> {
                 1 => {
                     boot_part = Some(partition);
                 }
-                2..=5 => debug!("Skipping partition {}", partition.index),
+                2 => {
+                    root_a_part = Some(partition);
+                }
+                3..=5 => debug!("Skipping partition {}", partition.index),
                 6 => {
                     data_part = Some(partition);
                     break;
@@ -608,6 +598,15 @@ fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo)> {
                             start_lba: p.starting_lba,
                             num_sectors: p.size().unwrap()
                         })
+                } else if  p.partition_name.as_str() == "resin-rootA" {
+                            root_a_part = Some(PartInfo {
+                                index: i as usize,
+                                ptype: 0x83,  // MBR Linux byte; really this is the EFI system
+                                              // partition, but MBR doesn't define this type.
+                                status: 0,    // Not clear what this should be
+                                start_lba: p.starting_lba,
+                                num_sectors: p.size().unwrap()
+                            })
                 } else if p.partition_name.as_str() == "resin-data" {
                         data_part = Some(PartInfo {
                             index: i as usize,
@@ -623,7 +622,14 @@ fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo)> {
 
     if let Some(boot_part) = boot_part {
         if let Some(data_part) = data_part {
-            Ok((boot_part, data_part))
+            if let Some(root_a_part) = root_a_part {
+                Ok((boot_part, root_a_part, data_part))
+            } else {
+                Err(Error::with_context(
+                    ErrorKind::NotFound,
+                    &format!("RootA partition could not be found on '{}", device.display()),
+                ))
+            }
         } else {
             Err(Error::with_context(
                 ErrorKind::NotFound,
@@ -702,7 +708,52 @@ fn efi_setup(device: &Path) -> Result<()> {
     Ok(())
 }
 
-fn raw_mount_balena(device: &Path) -> Result<()> {
+fn write_boot_blob(s2_config: &Stage2Config, mount_path: PathBuf)
+{
+    let file_finder = Finder::new(mount_path.clone());
+    let mut img_path = PathBuf::new();
+
+
+    if s2_config.device_type.starts_with("Jetson Xavier AGX") {
+        for i in file_finder.into_iter() {
+            if i.path().to_string_lossy().contains(BOOT_BLOB_NAME_JETSON_XAVIER) {
+                img_path = i.path().to_path_buf();
+                break;
+            }
+        }
+
+        debug!("boot0_image_path is: '{}'", img_path.display());
+        debug!("target device is: '{}'", BOOT_BLOB_PARTITION_JETSON_XAVIER);
+
+        /* Enable writing to /dev/mmcblk0boot0/ */
+        let force_ro = "0";
+        std::fs::write(JETSON_XAVIER_HW_PART_FORCE_RO_FILE, force_ro).expect("Could not set hw boot partition rw!");
+
+        let boot0_data = std::fs::read(img_path).unwrap();
+        debug!("boot blob - bytes read from disk: '{}' ", boot0_data.len());
+
+        std::fs::write(BOOT_BLOB_PARTITION_JETSON_XAVIER, boot0_data).expect("Could not write hw boot partition!");
+        debug!("Jetson Xavier AGX boot blob was written");
+    } else if s2_config.device_type.starts_with("Jetson Xavier NX") {
+        for i in file_finder.into_iter() {
+            if i.path().to_string_lossy().contains(BOOT_BLOB_NAME_JETSON_XAVIER_NX) {
+                img_path = i.path().to_path_buf();
+                break;
+            }
+        }
+
+        debug!("boot0_image_path is: '{}'", img_path.display());
+        debug!("boot0_image_dev is: '{}'", BOOT_BLOB_PARTITION_JETSON_XAVIER_NX);
+
+        match flash_qspi(&img_path) {
+            FlashState::Success => {info!("Xavier NX QSPI written succesfully!")},
+            _ => {warn!("Failed to write QSPI!")}
+        }
+    }
+}
+
+fn raw_mount_balena(s2_cfg: &Stage2Config) -> Result<()> {
+    let device = &s2_cfg.flash_dev;
     debug!("raw_mount_balena called");
 
     if !dir_exists(BALENA_PART_MP)? {
@@ -712,7 +763,7 @@ fn raw_mount_balena(device: &Path) -> Result<()> {
         ))?;
     }
 
-    let (boot_part, data_part) = get_partition_infos(device)?;
+    let (boot_part, root_a_part, data_part) = get_partition_infos(device)?;
 
     let mut loop_device = LoopDevice::get_free(true)?;
     info!("Create loop device: '{}'", loop_device.get_path().display());
@@ -754,6 +805,7 @@ fn raw_mount_balena(device: &Path) -> Result<()> {
         loop_device.get_path().display(),
         BALENA_PART_MP
     );
+
     // TODO: copy files
 
     transfer_boot_files(BALENA_PART_MP)?;
@@ -765,6 +817,55 @@ fn raw_mount_balena(device: &Path) -> Result<()> {
     umount(BALENA_PART_MP).upstream_with_context("Failed to unmount boot partition")?;
 
     info!("Unmounted boot partition from {}", BALENA_PART_MP);
+
+    let mut loop_device = LoopDevice::get_free(true)?;
+    info!("Create loop device: '{}'", loop_device.get_path().display());
+    let byte_offset = root_a_part.start_lba * DEF_BLOCK_SIZE as u64;
+    let size_limit = root_a_part.num_sectors * DEF_BLOCK_SIZE as u64;
+
+    debug!(
+        "Setting up device '{}' with offset {}, sizelimit {} on '{}'",
+        device.display(),
+        byte_offset,
+        size_limit,
+        loop_device.get_path().display()
+    );
+
+    loop_device.setup(device, Some(byte_offset), Some(size_limit))?;
+    info!(
+        "Setup device '{}' with offset {}, sizelimit {} on '{}'",
+        device.display(),
+        byte_offset,
+        size_limit,
+        loop_device.get_path().display()
+    );
+
+    mount(
+        Some(loop_device.get_path()),
+        BALENA_PART_MP,
+        Some(BALENA_ROOTA_FSTYPE.as_bytes()),
+        MsFlags::empty(),
+        NIX_NONE,
+    )
+    .upstream_with_context(&format!(
+        "Failed to mount {} on {}",
+        loop_device.get_path().display(),
+        BALENA_PART_MP
+    ))?;
+
+    info!(
+        "Mounted resin-rootA partition as {} on {}",
+        loop_device.get_path().display(),
+        BALENA_PART_MP
+    );
+
+    write_boot_blob(s2_cfg, PathBuf::from(BALENA_PART_MP));
+
+    sync();
+
+    umount(BALENA_PART_MP).upstream_with_context("Failed to unmount boot partition")?;
+
+    info!("Unmounted resin-rootA partition from {}", BALENA_PART_MP);
 
     let backup_path = path_append(TRANSFER_DIR, BACKUP_ARCH_NAME);
 
@@ -998,11 +1099,11 @@ fn validate(target_path: &Path, image_path: &Path) -> Result<bool> {
     Ok(err_count == 0)
 }
 
-fn flash_qspi(target_path: &Path, image_path: &Path) -> FlashState {
+fn flash_qspi(image_path: &Path/* boot blob path */) -> FlashState {
     let mut flash_qspi_res = FlashState::Success;
     info!("entered flash_qspi");
 
-    match call_command!(&format!("/bin/{}", MTD_DEBUG_CMD), &["erase", &format!("{}", target_path.to_string_lossy()), "0", &format!("{}", JETSON_XAVIER_NX_QSPI_SIZE)], "Failed to execute mtdebug!") {
+    match call_command!(&format!("/bin/{}", MTD_DEBUG_CMD), &["erase", &format!("{}", BOOT_BLOB_PARTITION_JETSON_XAVIER_NX), "0", &format!("{}", JETSON_XAVIER_NX_QSPI_SIZE)], "Failed to execute mtdebug!") {
         Ok(cmd_stdout) => {
             for line in cmd_stdout.lines() {
                     info!("line: {}", line);
@@ -1014,7 +1115,7 @@ fn flash_qspi(target_path: &Path, image_path: &Path) -> FlashState {
 
     match call_command!(&format!("/bin/{}", MTD_DEBUG_CMD), &[
         "write",
-        &format!("{}", target_path.to_string_lossy()),
+        &format!("{}", BOOT_BLOB_PARTITION_JETSON_XAVIER_NX),
         "0",
         &format!("{}", JETSON_XAVIER_NX_QSPI_SIZE),
         &image_path.to_string_lossy()
@@ -1156,7 +1257,7 @@ pub fn stage2(opts: &Options) -> ! {
     info!("Stage 2 migrate_worker entered");
 
     const NO_PREFIX: Option<&Path> = None;
-    let s2_config = match read_stage2_config(NO_PREFIX) {
+    let s2_config: Stage2Config = match read_stage2_config(NO_PREFIX) {
         Ok(s2_config) => s2_config,
         Err(why) => {
             error!("Failed to read stage2 configuration, error: {:?}", why);
@@ -1199,33 +1300,6 @@ pub fn stage2(opts: &Options) -> ! {
 
     sync();
 
-    if s2_config.device_type.starts_with("Jetson Xavier AGX") {
-        let boot0_image_path = path_append(TRANSFER_DIR, s2_config.boot0_image_path);
-
-        debug!("boot0_image_path is: '{}'", boot0_image_path.display());
-        debug!("boot0_image_dev is: '{}'", s2_config.boot0_image_dev.display());
-        debug!("boot0 exists - {}", boot0_image_path.exists());
-
-        /* Enable writing to /dev/mmcblk0boot0/ */
-        let force_ro = "0";
-        std::fs::write(JETSON_XAVIER_HW_PART_FORCE_RO_FILE, force_ro).expect("Could not set hw boot partition rw!");
-
-        let boot0_data = std::fs::read(boot0_image_path).unwrap();
-        debug!("boot blob - bytes read from disk: '{}' ", boot0_data.len());
-
-        std::fs::write(s2_config.boot0_image_dev, boot0_data).expect("Could not write hw boot partition!");
-        debug!("Jetson Xavier AGX boot blob was written");
-    } else if s2_config.device_type.starts_with("Jetson Xavier NX") {
-        let boot0_image_path = path_append(TRANSFER_DIR, s2_config.boot0_image_path);
-        debug!("boot0_image_path is: '{}'", boot0_image_path.display());
-        debug!("boot0_image_dev is: '{}'", s2_config.boot0_image_dev.display());
-        debug!("boot0 exists - {}", boot0_image_path.exists());
-
-        match flash_qspi(&s2_config.boot0_image_dev, &boot0_image_path) {
-            FlashState::Success => {info!("QSPI written succesfully!")},
-            _ => {warn!("Failed to write QSPI!")}
-        }
-    }
 
     let image_path = path_append(TRANSFER_DIR, BALENA_IMAGE_PATH);
     debug!("OS image exists - {}", image_path.exists());
@@ -1262,12 +1336,13 @@ pub fn stage2(opts: &Options) -> ! {
 
     sleep(Duration::from_secs(5));
 
+
     if (opts.s2_log_level() == Level::Debug) || (opts.s2_log_level() == Level::Trace) {
         use crate::common::debug::check_loop_control;
         check_loop_control("Stage2 after flash", "/dev");
     }
 
-    if let Err(why) = raw_mount_balena(&s2_config.flash_dev) {
+    if let Err(why) = raw_mount_balena(&s2_config) {
         error!("Failed to transfer files to balena OS, error: {:?}", why);
     } else {
         info!("Migration succeded successfully");

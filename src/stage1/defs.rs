@@ -14,14 +14,6 @@ pub const DEV_TYPE_JETSON_XAVIER: &str = "jetson-xavier";
 pub const DEV_TYPE_JETSON_XAVIER_NX: &str = "jetson-xavier-nx-devkit";
 pub const DEV_TYPE_JETSON_XAVIER_NX_EMMC: &str = "jetson-xavier-nx-devkit-emmc";
 
-/* Hardware defined boot partition for Jetson AGX Xavier */
-pub const BOOT_BLOB_PARTITION_JETSON_XAVIER: &str = "/dev/mmcblk0boot0";
-pub const BOOT_BLOB_PARTITION_JETSON_XAVIER_NX: &str = "/dev/mtd0";
-
-/* Stage 2 destination file name for the boot blob */
-pub const BOOT_BLOB_NAME_JETSON_XAVIER: &str = "boot0_mmcblk0boot0.img";
-pub const BOOT_BLOB_NAME_JETSON_XAVIER_NX: &str = "boot0_mtdblock0.img";
-
 pub const MAX_CONFIG_JSON: usize = 2048;
 pub const GZIP_MAGIC_COOKIE: u16 = 0x1f8b;
 

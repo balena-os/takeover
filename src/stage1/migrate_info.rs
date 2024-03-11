@@ -11,10 +11,10 @@ use crate::{
     stage1::{
         backup::config::backup_cfg_from_file,
         backup::{create, create_ext},
-        defs::{DEV_TYPE_GEN_X86_64, GZIP_MAGIC_COOKIE, MAX_CONFIG_JSON, BOOT_BLOB_PARTITION_JETSON_XAVIER, BOOT_BLOB_PARTITION_JETSON_XAVIER_NX, DEV_TYPE_JETSON_XAVIER, DEV_TYPE_JETSON_XAVIER_NX},
+        defs::{DEV_TYPE_GEN_X86_64, GZIP_MAGIC_COOKIE, MAX_CONFIG_JSON, DEV_TYPE_JETSON_XAVIER, DEV_TYPE_JETSON_XAVIER_NX},
         device::Device,
         device_impl::get_device,
-        image_retrieval::{download_image, FLASHER_DEVICES},
+        image_retrieval::download_image,
         migrate_info::balena_cfg_json::BalenaCfgJson,
         utils::mktemp,
         wifi_config::WifiConfig,
@@ -38,8 +38,6 @@ pub(crate) struct MigrateInfo {
     mounts: Vec<PathBuf>,
     to_dir: Option<PathBuf>,
     image_path: PathBuf,
-    boot0_image_path: PathBuf, /* boot blob for Jetson AGX Xavier */
-    boot0_image_dev: PathBuf, /* HW defined boot partition on AGX Xavier */
     device: Box<dyn Device>,
     config: BalenaCfgJson,
     work_dir: PathBuf,
@@ -131,40 +129,6 @@ impl MigrateInfo {
 
         debug!("image path: '{}'", image_path.display());
 
-        /* We could not to extract the boot blob from the non-flasher
-         * image, so, for the purpose of testing migration on the AGX Xavier
-         * we added a config flag to pass the path to the boot blob
-         * TODO: Extract the boot blob from /opt/<boot.img>
-         */
-        let mut boot0_image_path = PathBuf::new();
-        let mut boot0_image_dev = PathBuf::new();
-        if device.supports_device_type(DEV_TYPE_JETSON_XAVIER) || device.supports_device_type(DEV_TYPE_JETSON_XAVIER_NX){
-             boot0_image_path = opts
-            .boot0_image()
-            .canonicalize()
-            .upstream_with_context(&format!(
-                "Failed to canonicalize path to boot0 image: '{}'",
-                opts.boot0_image().display()
-            ))?;
-
-            if file_exists(&boot0_image_path) {
-                info!("boot0 image found!");
-            }
-
-            if device.supports_device_type(DEV_TYPE_JETSON_XAVIER) {
-                boot0_image_dev = PathBuf::from(BOOT_BLOB_PARTITION_JETSON_XAVIER);
-            } else if device.supports_device_type(DEV_TYPE_JETSON_XAVIER_NX) {
-                boot0_image_dev = PathBuf::from(BOOT_BLOB_PARTITION_JETSON_XAVIER_NX);
-            }
-        }
-
-        /* TODO: Check if we will convert the Jetson AGX, Jetson Xavier NX eMMC and NX SD to flasher types */
-        if FLASHER_DEVICES.contains(&config.get_device_type()?.as_str()) {
-            info!("device-type '{}' is a flasher type, should unpack image", &config.get_device_type()?.as_str());
-            // below function needs to be implemented if we decide to release flasher images for the new L4T, to extract the flasher image from the non-flasher image
-            //extract_image_from_local(&image_path ...)?;
-        }
-
         let wifi_ssids = opts.wifis();
 
         let wifis: Vec<WifiConfig> = if !wifi_ssids.is_empty() || !opts.no_wifis() {
@@ -222,8 +186,6 @@ impl MigrateInfo {
             mounts: Vec::new(),
             config,
             image_path,
-            boot0_image_path,
-            boot0_image_dev,
             device,
             work_dir,
             wifis,
@@ -279,14 +241,6 @@ impl MigrateInfo {
     }
     pub fn image_path(&self) -> &Path {
         self.image_path.as_path()
-    }
-
-    pub fn boot0_image_path(&self) -> &Path {
-        self.boot0_image_path.as_path()
-    }
-
-    pub fn boot0_image_dev(&self) -> &Path {
-        self.boot0_image_dev.as_path()
     }
 
     pub fn balena_cfg(&self) -> &BalenaCfgJson {

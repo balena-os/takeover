@@ -30,6 +30,8 @@ pub const BALENA_BOOT_FSTYPE: &str = "vfat";
 pub const BALENA_DATA_PART: &str = "resin-data";
 pub const BALENA_DATA_FSTYPE: &str = "ext4";
 
+pub const BALENA_ROOTA_FSTYPE: &str = "ext4";
+
 pub const OLD_ROOT_MP: &str = "/mnt/old_root";
 pub const BALENA_BOOT_MP: &str = "/mnt/balena-boot";
 pub const BALENA_PART_MP: &str = "/mnt/balena-part";
@@ -44,6 +46,14 @@ pub const BALENA_SYSTEM_CONNECTIONS_BOOT_PATH: &str = "/mnt/boot/system-connecti
 pub const BALENA_SYSTEM_PROXY_BOOT_PATH: &str = "/mnt/boot/system-proxy/";
 
 pub const JETSON_XAVIER_HW_PART_FORCE_RO_FILE: &str = "/sys/block/mmcblk0boot0/force_ro";
+
+/* Hardware defined boot partition for Jetson AGX Xavier */
+pub const BOOT_BLOB_PARTITION_JETSON_XAVIER: &str = "/dev/mmcblk0boot0";
+pub const BOOT_BLOB_PARTITION_JETSON_XAVIER_NX: &str = "/dev/mtd0";
+
+/* Stage 2 destination file name for the boot blob */
+pub const BOOT_BLOB_NAME_JETSON_XAVIER: &str = "boot0_mmcblk0boot0.img";
+pub const BOOT_BLOB_NAME_JETSON_XAVIER_NX: &str = "boot0_mtdblock0.img";
 
 pub const SYS_EFI_DIR: &str = "/sys/firmware/efi";
 pub const SYS_EFIVARS_DIR: &str = "/sys/firmware/efi/efivars";
