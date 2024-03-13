@@ -286,7 +286,7 @@ impl<'a> PartitionIterator<'a> {
                     self.part_idx = 4;
                     self.get_extended_partition()
                 }
-                PartitionType::Fat | PartitionType::Linux => {
+                PartitionType::Fat | PartitionType::Linux | PartitionType::GPT => {
                     // return regular partition
                     self.index += 1;
                     self.part_idx += 1;
@@ -475,6 +475,7 @@ impl<'a> Read for PartitionReader<'a> {
             }
         }
     }
+
 }
 
 #[cfg(test)]
