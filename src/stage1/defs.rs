@@ -10,11 +10,14 @@ pub const DEV_TYPE_RPI4_64: &str = "raspberrypi4-64";
 pub const DEV_TYPE_BBG: &str = "beaglebone-green";
 pub const DEV_TYPE_BBB: &str = "beaglebone-black";
 pub const DEV_TYPE_BBXM: &str = "beagleboard-xm";
+pub const DEV_TYPE_JETSON_XAVIER: &str = "jetson-xavier";
+pub const DEV_TYPE_JETSON_XAVIER_NX: &str = "jetson-xavier-nx-devkit";
+pub const DEV_TYPE_JETSON_XAVIER_NX_EMMC: &str = "jetson-xavier-nx-devkit-emmc";
 
 pub const MAX_CONFIG_JSON: usize = 2048;
 pub const GZIP_MAGIC_COOKIE: u16 = 0x1f8b;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum DeviceType {
     BeagleboneGreen,
     BeagleboneBlack,
@@ -25,6 +28,8 @@ pub(crate) enum DeviceType {
     RaspberryPi3,
     RaspberryPi4,
     Dummy,
+    JetsonXavier,
+    JetsonXavierNX,
 }
 
 impl Display for DeviceType {
@@ -42,6 +47,8 @@ impl Display for DeviceType {
                 Self::RaspberryPi3 => "Raspberry Pi 3",
                 Self::RaspberryPi4 => "Raspberry Pi 4",
                 Self::Dummy => "Dummy",
+                Self::JetsonXavier => "Jetson Xavier AGX",
+                Self::JetsonXavierNX => "Jetson Xavier NX",
             }
         )
     }

@@ -13,6 +13,9 @@ publish = false
 [dependencies.libc]
 version = "0.2.70"
 
+[dependencies.finder]
+version = "0.1"
+
 [dependencies.reqwest]
 version = "0.11.24"
 features = ["blocking", "json"]
@@ -80,6 +83,7 @@ features = ["vendored"]
 raspberrypi3 = []
 raspberrypi4-64 = []
 intel-nuc = []
+jetson-xavier = []
 
 [dependencies.gptman]
 version = "1.0.2"

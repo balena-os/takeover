@@ -28,6 +28,7 @@ pub(crate) struct Stage2Config {
     pub image_path: PathBuf,
     pub config_path: PathBuf,
     pub backup_path: Option<PathBuf>,
+    pub device_type: String,
     pub tty: PathBuf,
 }
 

@@ -6,6 +6,7 @@ use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
+use finder::Finder;
 
 use log::{debug, error, trace, warn};
 
@@ -72,6 +73,21 @@ pub(crate) fn call(cmd: &str, args: &[&str], trim_stdout: bool) -> Result<CmdRes
             ))
         }
     }
+}
+
+// Helper function for finding a file inside directory
+pub(crate) fn find_file(file_name: &str, directory: &PathBuf) -> PathBuf {
+    let file_finder = Finder::new(directory.clone());
+    let mut file_path = PathBuf::new();
+
+    for i in file_finder.into_iter() {
+        if i.path().to_string_lossy().contains(file_name) {
+            file_path = i.path().to_path_buf();
+            break;
+        }
+    }
+
+    return file_path;
 }
 
 pub(crate) fn whereis(cmd: &str) -> Result<String> {

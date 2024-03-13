@@ -20,7 +20,7 @@ use crate::{
         api_calls::{get_os_image, get_os_versions, Versions},
         defs::{
             DEV_TYPE_BBB, DEV_TYPE_BBG, DEV_TYPE_GEN_X86_64, DEV_TYPE_INTEL_NUC, DEV_TYPE_RPI1,
-            DEV_TYPE_RPI2, DEV_TYPE_RPI3, DEV_TYPE_RPI4_64,
+            DEV_TYPE_RPI2, DEV_TYPE_RPI3, DEV_TYPE_RPI4_64, DEV_TYPE_JETSON_XAVIER,
         },
         migrate_info::balena_cfg_json::BalenaCfgJson,
     },
@@ -30,13 +30,14 @@ use crate::{
 use flate2::{Compression, GzBuilder};
 use nix::mount::{mount, umount, MsFlags};
 
-const FLASHER_DEVICES: [&str; 4] = [
+pub const FLASHER_DEVICES: [&str; 5] = [
     DEV_TYPE_INTEL_NUC,
     DEV_TYPE_GEN_X86_64,
     DEV_TYPE_BBG,
     DEV_TYPE_BBB,
+    DEV_TYPE_JETSON_XAVIER,
 ];
-const SUPPORTED_DEVICES: [&str; 8] = [
+const SUPPORTED_DEVICES: [&str; 9] = [
     DEV_TYPE_RPI3,
     DEV_TYPE_RPI2,
     DEV_TYPE_RPI4_64,
@@ -45,12 +46,14 @@ const SUPPORTED_DEVICES: [&str; 8] = [
     DEV_TYPE_GEN_X86_64,
     DEV_TYPE_BBG,
     DEV_TYPE_BBB,
+    DEV_TYPE_JETSON_XAVIER,
 ];
 
 const IMG_NAME_GEN_X86_64: &str = "resin-image-genericx86-64-ext.resinos-img";
 const IMG_NAME_INTEL_NUC: &str = "resin-image-genericx86-64.resinos-img";
 const IMG_NAME_BBG: &str = "resin-image-beaglebone-green.resinos-img";
 const IMG_NAME_BBB: &str = "resin-image-beaglebone-black.resinos-img";
+const IMG_NAME_JETSON_XAVIER: &str = "balena-image-jetson-xavier.balenaos-img";
 
 fn parse_versions(versions: &Versions) -> Vec<Version> {
     let mut sem_vers: Vec<Version> = versions
@@ -145,7 +148,7 @@ fn determine_version(ver_str: &str, versions: &Versions) -> Result<Version> {
     }
 }
 
-fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
+pub(crate) fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
     stream: Box<dyn Read>,
     image_file_name: P1,
     device_type: &str,
@@ -205,6 +208,7 @@ fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
             }
             DEV_TYPE_BBB => path_append(path_append(&mount_path, "opt"), IMG_NAME_BBB),
             DEV_TYPE_BBG => path_append(path_append(&mount_path, "opt"), IMG_NAME_BBG),
+            DEV_TYPE_JETSON_XAVIER => path_append(path_append(&mount_path, "opt"), IMG_NAME_JETSON_XAVIER),
             _ => {
                 return Err(Error::with_context(
                     ErrorKind::InvParam,
