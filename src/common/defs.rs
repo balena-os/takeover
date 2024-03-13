@@ -11,6 +11,11 @@ pub(crate) const BLKID_CMD: &str = "blkid";
 pub(crate) const EFIBOOTMGR_CMD: &str = "efibootmgr";
 pub(crate) const DD_CMD: &str = "dd";
 
+/* The mdtd_debug tool is used on Xavier NX devices to clear and write the QSPI
+   with the blob included in the target OS image
+*/
+pub(crate) const MTD_DEBUG_CMD: &str = "mtd_debug";
+
 pub(crate) const TAR_CMD: &str = "tar";
 
 pub(crate) const TAKEOVER_DIR: &str = "/balena-takeover";
@@ -26,14 +31,39 @@ pub const DISK_BY_LABEL_PATH: &str = "/dev/disk/by-label";
 pub const BALENA_BOOT_PART: &str = "resin-boot";
 pub const BALENA_BOOT_FSTYPE: &str = "vfat";
 
+pub const BALENA_ROOTA_PART: &str = "resin-rootA";
 pub const BALENA_DATA_PART: &str = "resin-data";
 pub const BALENA_DATA_FSTYPE: &str = "ext4";
+
+pub const BALENA_ROOTA_FSTYPE: &str = "ext4";
 
 pub const OLD_ROOT_MP: &str = "/mnt/old_root";
 pub const BALENA_BOOT_MP: &str = "/mnt/balena-boot";
 pub const BALENA_PART_MP: &str = "/mnt/balena-part";
 
 pub const SYSTEM_CONNECTIONS_DIR: &str = "system-connections";
+pub const SYSTEM_PROXY_DIR: &str = "system-proxy";
+
+pub const BALENA_DATA_MP: &str = "/mnt/data/";
+pub const BALENA_OS_NAME: &str = "balenaOS";
+
+pub const BALENA_SYSTEM_CONNECTIONS_BOOT_PATH: &str = "/mnt/boot/system-connections/";
+pub const BALENA_SYSTEM_PROXY_BOOT_PATH: &str = "/mnt/boot/system-proxy/";
+
+/* Enables writing to the hardware-defined boot partition on AGX Xavier */
+pub const JETSON_XAVIER_HW_PART_FORCE_RO_FILE: &str = "/sys/block/mmcblk0boot0/force_ro";
+
+/* Hardware-defined boot partition for Jetson AGX Xavier */
+pub const BOOT_BLOB_PARTITION_JETSON_XAVIER: &str = "/dev/mmcblk0boot0";
+
+/* QSPI device - Jetson Xavier NX SD and NX eMMC */
+pub const BOOT_BLOB_PARTITION_JETSON_XAVIER_NX: &str = "/dev/mtd0";
+
+/* Stage 2 boot blob file names on AGX Xavier and Xavier NX. These are used
+   for programming the QSPI
+ */
+pub const BOOT_BLOB_NAME_JETSON_XAVIER: &str = "boot0_mmcblk0boot0.img";
+pub const BOOT_BLOB_NAME_JETSON_XAVIER_NX: &str = "boot0_mtdblock0.img";
 
 pub const SYS_EFI_DIR: &str = "/sys/firmware/efi";
 pub const SYS_EFIVARS_DIR: &str = "/sys/firmware/efi/efivars";
