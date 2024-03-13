@@ -11,7 +11,7 @@ use crate::{
     stage1::{
         backup::config::backup_cfg_from_file,
         backup::{create, create_ext},
-        defs::{DEV_TYPE_GEN_X86_64, GZIP_MAGIC_COOKIE, MAX_CONFIG_JSON},
+        defs::{DEV_TYPE_GEN_X86_64, GZIP_MAGIC_COOKIE, MAX_CONFIG_JSON, DEV_TYPE_JETSON_XAVIER, DEV_TYPE_JETSON_XAVIER_NX},
         device::Device,
         device_impl::get_device,
         image_retrieval::download_image,
@@ -43,6 +43,7 @@ pub(crate) struct MigrateInfo {
     work_dir: PathBuf,
     wifis: Vec<WifiConfig>,
     nwmgr_files: Vec<PathBuf>,
+    system_proxy_files: Vec<PathBuf>,
     backup: Option<PathBuf>,
 }
 
@@ -50,10 +51,16 @@ pub(crate) struct MigrateInfo {
 impl MigrateInfo {
     pub fn new(opts: &Options) -> Result<MigrateInfo> {
         let device = get_device(opts)?;
-        info!("Detected device type: {}", device.get_device_type());
+        let os_name = get_os_name()?;
+        info!("Detected device type: {} running {}", device.get_device_type(), os_name);
 
+        /* If no config.json is passed in command line and we're running on balenaOS,
+         * we can preserve the existing config.json
+         */
         let mut config = if let Some(balena_cfg) = opts.config() {
             BalenaCfgJson::new(balena_cfg)?
+        } else if get_os_name()?.starts_with("balenaOS"){
+            BalenaCfgJson::new("/mnt/boot/config.json")?
         } else {
             match MigrateInfo::get_internal_cfg_json(&opts.work_dir()) {
                 Ok(balena_cfg_json) => balena_cfg_json,
@@ -112,6 +119,7 @@ impl MigrateInfo {
             ))?
         };
 
+
         if !opts.migrate() {
             return Err(Error::with_context(
                 ErrorKind::ImageDownloaded,
@@ -130,6 +138,7 @@ impl MigrateInfo {
         };
 
         let nwmgr_files = Vec::from(opts.nwmgr_cfg());
+        let system_proxy_files = Vec::new();
 
         if nwmgr_files.is_empty() && wifis.is_empty() {
             if opts.no_nwmgr_check() {
@@ -181,6 +190,7 @@ impl MigrateInfo {
             work_dir,
             wifis,
             nwmgr_files,
+            system_proxy_files,
             backup,
         })
     }
@@ -202,8 +212,20 @@ impl MigrateInfo {
         &self.to_dir
     }
 
+    pub fn get_device_type_name(&self) -> String {
+         self.device.to_string()
+    }
+
     pub fn is_x86(&self) -> bool {
         self.device.supports_device_type(DEV_TYPE_GEN_X86_64)
+    }
+
+    pub fn is_jetson_xavier(&self) -> bool {
+        self.device.supports_device_type(DEV_TYPE_JETSON_XAVIER)
+    }
+
+    pub fn is_jetson_xavier_nx(&self) -> bool {
+        self.device.supports_device_type(DEV_TYPE_JETSON_XAVIER_NX)
     }
 
     pub fn backup(&self) -> Option<&Path> {
@@ -214,6 +236,9 @@ impl MigrateInfo {
         }
     }
 
+    pub(crate) fn os_name(&self) -> &str {
+        self.os_name.as_ref()
+    }
     pub fn image_path(&self) -> &Path {
         self.image_path.as_path()
     }
@@ -232,6 +257,20 @@ impl MigrateInfo {
 
     pub fn nwmgr_files(&self) -> &Vec<PathBuf> {
         &self.nwmgr_files
+    }
+
+    pub fn system_proxy_files(&self) -> &Vec<PathBuf> {
+        &self.system_proxy_files
+    }
+
+    pub fn add_nwmgr_file<P: AsRef<Path>>(&mut self, nwmgr_file_path: P) {
+        self.nwmgr_files.push(nwmgr_file_path.as_ref().to_path_buf());
+        debug!("Adding network connection file to copy list: {}", nwmgr_file_path.as_ref().to_path_buf().display());
+    }
+
+    pub fn add_system_proxy_file<P: AsRef<Path>>(&mut self, system_proxy_file_path: P) {
+        self.system_proxy_files.push(system_proxy_file_path.as_ref().to_path_buf());
+        debug!("Adding system proxy configuration file to copy list: {}", system_proxy_file_path.as_ref().to_path_buf().display());
     }
 
     pub fn wifis(&self) -> &Vec<WifiConfig> {
