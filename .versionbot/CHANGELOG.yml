@@ -1,4 +1,17 @@
 - commits:
+    - subject: Document how takeover works
+      hash: 8d89d939d38cbfeaa384d026b0c82cf8870cf57d
+      body: ""
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Rahul Thakoor <rahul@balena.io>
+        signed-off-by: Rahul Thakoor <rahul@balena.io>
+      author: Rahul Thakoor
+  version: 0.4.4
+  title: ""
+  date: 2024-03-14T14:10:31.124Z
+- commits:
     - subject: Update building instructions
       hash: 2b9adff16dc6f01004c3a2e5d56246dec8ff78cf
       body: |
