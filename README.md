@@ -249,25 +249,33 @@ not allow you to do that -- unless you force it by using
 # sudo ./takeover --no-dt-check [...other options...]
 ```
 
-## Compiling takeover
+## Compiling *takeover*
 
-*takeover* needs to be compiled for the target platform. For Raspberry PI & beaglebone devices that is *armv7* and 
-for *intel-nuc* and *Generic X86-64* that is the X86-64 platform. 
+First off, if you are an end user you probably don't need to compile *takeover* yourself. Just visit our [releases page
+on Github](https://github.com/balena-os/takeover/releases) and download a precompiled binary for the desired
+architecture.
 
-Cross compiling takeover is easiest done using the  [rust-embedded cross](https://github.com/rust-embedded/cross) 
-cross compilation tools.  
-After installing cross and the appropriate targets for the target platform *takeover* 
-can be cross-compiled using
-```shell script
-cross build --target <target-tripple> --release 
-```   
-For arm v7 devices this could be 
-```
-cross build --release --target "armv7-unknown-linux-gnueabihf"
-```
-or 
-```
+That said, if you want to build *takeover*, the easiest route (and the one we recommend!) is to use Rust's [`cross`
+tool](https://github.com/cross-rs/cross). `cross` (along with the `Cross.toml` file we provide) will take care of the
+two main technicalities of the compilation:
+
+1. You need to compile for the architecture of the device you want to migrate away from.
+2. You need to compile to a statically linked binary.
+
+Once you have `cross` and its dependencies installed (see [instructions
+here](https://github.com/cross-rs/cross?tab=readme-ov-file#dependencies)), compiling *takeover* should be just a matter
+of running `cross build` passing the desired target platform. Here are some examples:
+
+```shell
+# To build a version of takeover that will run on an ARM device running a 32-bit
+# operating system. This would be the typical case for a Raspberry Pi running a
+# 32-bit version of Raspberry Pi OS.
 cross build --release --target "armv7-unknown-linux-musleabihf"
-```
 
-   
+# For an ARM device running a 64-bit operating system. Typical for a Raspberry
+# Pi running a 64-bit OS.
+cross build --release --target "aarch64-unknown-linux-musl"
+
+# For a device with an Intel CPU running a 64-bit operating system.
+cross build --release --target "x86_64-unknown-linux-musl"
+```
