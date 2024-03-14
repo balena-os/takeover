@@ -1,4 +1,22 @@
 - commits:
+    - subject: Update building instructions
+      hash: 2b9adff16dc6f01004c3a2e5d56246dec8ff78cf
+      body: |
+        Mainly taking care of:
+
+        1. Updating outdated links
+        2. Clarifying a few points, like the need to produce a static binary
+        3. Trying to use more relevant examples for this day and age
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+  version: 0.4.3
+  title: ""
+  date: 2024-03-14T09:50:53.404Z
+- commits:
     - subject: Enable the crt-static target feature
       hash: 072addb7f2abdd451296a5fd24d51360bb22fb1f
       body: >
