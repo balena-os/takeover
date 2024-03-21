@@ -45,6 +45,8 @@ use crate::common::{
 use regex::Regex;
 
 const DD_BLOCK_SIZE: usize = 128 * 1024; // 4_194_304;
+
+// QSPI flash storage size in bytes for Jetson Xavier NX
 const JETSON_XAVIER_NX_QSPI_SIZE: &str = "0x2000000";
 const VALIDATE_MAX_ERR: usize = 20;
 const DO_VALIDATE: bool = false;
@@ -190,7 +192,7 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<()> {
         info!("Copied backup to '{}'", to_path.display());
     }
 
-    /* Copy system connection and system proxy files over to the new install */
+    // Copy system-connections and system-proxy files over to the new install
     let system_config_dirs = vec![SYSTEM_CONNECTIONS_DIR, SYSTEM_PROXY_DIR];
 
     for system_config_dir in system_config_dirs.into_iter() {
@@ -395,7 +397,7 @@ fn unmount_partitions(mountpoints: &[UmountPart]) -> Result<()> {
 
 #[allow(dead_code)]
 fn part_reread(device: &Path) -> Result<()> {
-    // try ioctrl #define BLKRRPART  _IO(0x12,95)	/* re-read partition table */
+    // try ioctrl #define BLKRRPART  _IO(0x12,95) - re-read partition table
     let device_file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -520,6 +522,9 @@ fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo, PartInfo)> 
                 1 => {
                     boot_part = Some(partition);
                 }
+                // rootA partition is needed solely in the context of Jetson migrations,
+                // in which case we will mount it to extract the new Jetson specific boot blob
+                // to be written to the QSPI flash or boot partition.
                 2 => {
                     root_a_part = Some(partition);
                 }
@@ -675,6 +680,9 @@ fn efi_setup(device: &Path) -> Result<()> {
     Ok(())
 }
 
+// This functionality is specific to Jetson AGX Xavier and Xavier NX migration.
+// In the current format, the migration is expected to be performed from
+// a balenaOS install to another balenaOS install.
 fn write_boot_blob(s2_config: &Stage2Config, mount_path: PathBuf)
 {
     let img_path;
@@ -685,7 +693,7 @@ fn write_boot_blob(s2_config: &Stage2Config, mount_path: PathBuf)
         debug!("boot0_image_path is: '{}'", img_path.display());
         debug!("target device is: '{}'", BOOT_BLOB_PARTITION_JETSON_XAVIER);
 
-        /* Enable writing to /dev/mmcblk0boot0/ */
+        // Enable writing to /dev/mmcblk0boot0/
         let force_ro = "0";
         std::fs::write(JETSON_XAVIER_HW_PART_FORCE_RO_FILE, force_ro).expect("Could not set hw boot partition rw!");
 
@@ -773,10 +781,11 @@ fn raw_mount_balena(s2_cfg: &Stage2Config) -> Result<()> {
 
     info!("Unmounted boot partition from {}", BALENA_PART_MP);
 
-    /* After the internal storage is flashed with the new balenaOS image,
-       we mount the rootA partition, extract the Jetson boot blob from it
-       and the use it to program the QSPI or the boot partition of the device.
-     */
+    // After the internal storage is flashed with the new balenaOS image,
+    // we mount the rootA partition, extract the Jetson boot blob from it
+    // and the use it to program the QSPI or the boot partition of the device.
+    // The new Jetson balenaOS image is expected to include a pre-built boot blog
+    // taken from an provisioning made with jetson-flash.
     if s2_cfg.device_type.starts_with("Jetson Xavier AGX") || s2_cfg.device_type.starts_with("Jetson Xavier NX") {
         let mut loop_device = LoopDevice::get_free(true)?;
         info!("Create loop device: '{}'", loop_device.get_path().display());
@@ -1060,9 +1069,11 @@ fn validate(target_path: &Path, image_path: &Path) -> Result<bool> {
     Ok(err_count == 0)
 }
 
-fn flash_qspi(image_path: &Path/* boot blob path */) -> FlashState {
+// This function is used only for balenaOS to balenaOS
+// migration of Jetson Xavier AGX and Xavier NX
+fn flash_qspi(image_path: &Path) -> FlashState {
     let mut flash_qspi_res = FlashState::Success;
-    info!("entered flash_qspi");
+    debug!("entered flash_qspi");
 
     match call_command!(&format!("/bin/{}", MTD_DEBUG_CMD), &["erase", &format!("{}", BOOT_BLOB_PARTITION_JETSON_XAVIER_NX), "0", &format!("{}", JETSON_XAVIER_NX_QSPI_SIZE)], "Failed to execute mtdebug!") {
         Ok(cmd_stdout) => {

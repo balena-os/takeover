@@ -392,6 +392,7 @@ pub(crate) fn fuser<P: AsRef<Path>>(
         sleep(if let Some(wait_for_term) = wait_for_term {
             wait_for_term
         } else {
+            // balena-engine can take a bit longer to stop, compared to other processes
             Duration::from_millis(3000)
         });
         let mut kill_count = 0;

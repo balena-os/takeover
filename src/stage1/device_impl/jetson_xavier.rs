@@ -15,7 +15,7 @@ pub(crate) fn is_jetson_xavier(opts: &Options, model_string: &str) -> Result<Opt
         model_string
     );
 
-    /* Below strings have been taken from the AGX Xavier 8GB Devkit and the Xavier NX SD/eMMC Devkits */
+    // Below strings have been taken from the AGX Xavier 8GB Devkit and the Xavier NX SD/eMMC Devkits
     if model_string.eq("Jetson-AGX") {
         debug!("match found for Xavier AGX");
         Ok(Some(Box::new(JetsonXavier::from_config(opts)?)))

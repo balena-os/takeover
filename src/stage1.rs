@@ -89,9 +89,8 @@ fn prepare_configs<P1: AsRef<Path>>(
         nwmgr_path.display()
     ))?;
 
-    /* If migrating from balenaOS, copy all files from the system-connections file in /mnt/boot
-     * TODO: Check if we should copy them from the boot partition, or from the NM root overlay directory
-     */
+    // If migrating from balenaOS, copy all files from the system-connections file in /mnt/boot
+    // TODO: Check if we should copy them from the boot partition, or from the NM root overlay directory
     if mig_info.os_name().starts_with(BALENA_OS_NAME) {
         debug!("migrating from balenaOS - copying system-connections files");
         let  nwmgr_files = read_dir(BALENA_SYSTEM_CONNECTIONS_BOOT_PATH).unwrap();
@@ -126,7 +125,7 @@ fn prepare_configs<P1: AsRef<Path>>(
         nwmgr_cfgs += 1;
         let target_file ;
 
-        /* If migrating from balenaOS, preserve file names for all entries in system-connections/ */
+        // If migrating from balenaOS, preserve file names for all entries in system-connections/
         if !mig_info.os_name().starts_with("balenaOS") {
             target_file = path_append(&nwmgr_path, &format!("balena-{:02}", nwmgr_cfgs));
         } else {
@@ -279,7 +278,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     let mut req_space: u64 = 0;
     let mut copy_commands = vec![DD_CMD];
 
-    /* If device is a Jetson Xavier, don't copy over efibootmgr because the old L4T does not use EFI */
+    // If device is a Jetson Xavier, don't copy over efibootmgr because the old L4T does not use EFI
     if mig_info.is_x86() && !opts.no_efi_setup() && !mig_info.is_jetson_xavier() && dir_exists(SYS_EFI_DIR)? {
         copy_commands.push(EFIBOOTMGR_CMD)
     }

@@ -54,9 +54,8 @@ impl MigrateInfo {
         let os_name = get_os_name()?;
         info!("Detected device type: {} running {}", device.get_device_type(), os_name);
 
-        /* If no config.json is passed in command line and we're running on balenaOS,
-         * we can preserve the existing config.json
-         */
+        //If no config.json is passed in command line and we're running on balenaOS,
+        // we can preserve the existing config.json
         let mut config = if let Some(balena_cfg) = opts.config() {
             BalenaCfgJson::new(balena_cfg)?
         } else if get_os_name()?.starts_with("balenaOS"){
@@ -263,11 +262,14 @@ impl MigrateInfo {
         &self.system_proxy_files
     }
 
+    // Adds NetworkManager files to the list of connection files to be transferred to the new OS
     pub fn add_nwmgr_file<P: AsRef<Path>>(&mut self, nwmgr_file_path: P) {
         self.nwmgr_files.push(nwmgr_file_path.as_ref().to_path_buf());
         debug!("Adding network connection file to copy list: {}", nwmgr_file_path.as_ref().to_path_buf().display());
     }
 
+    // Adds redsocks proxy configuration files to the list of system-proxy files to be transferred to the new OS
+    // This is useful in the context of balenaOS to balenaOS migration
     pub fn add_system_proxy_file<P: AsRef<Path>>(&mut self, system_proxy_file_path: P) {
         self.system_proxy_files.push(system_proxy_file_path.as_ref().to_path_buf());
         debug!("Adding system proxy configuration file to copy list: {}", system_proxy_file_path.as_ref().to_path_buf().display());
