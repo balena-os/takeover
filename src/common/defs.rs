@@ -19,7 +19,8 @@ pub(crate) const MTD_DEBUG_CMD: &str = "mtd_debug";
 
 pub(crate) const TAR_CMD: &str = "tar";
 
-pub(crate) const TAKEOVER_DIR: &str = "/balena-takeover";
+// below path is used as the root mountpoint during migration
+pub(crate) const TAKEOVER_DIR: &str = "/tmp/balena-takeover";
 pub(crate) const STAGE2_CONFIG_NAME: &str = "stage2-config.yml";
 
 pub(crate) const BALENA_IMAGE_NAME: &str = "balena.img.gz";

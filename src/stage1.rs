@@ -323,16 +323,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     // *********************************************************
     // make mountpoint for tmpfs
-    let mut takeover_dir = PathBuf::from("");
-    if mig_info.os_name().starts_with(BALENA_OS_NAME) {
-        // base directory for mountpoint must be writeable
-        takeover_dir.push(BALENA_DATA_MP);
-    }
-    if TAKEOVER_DIR.starts_with("/") {
-        takeover_dir.push(TAKEOVER_DIR[1..].to_string());
-    } else {
-        takeover_dir.push(TAKEOVER_DIR);
-    }
+    let takeover_dir = PathBuf::from(TAKEOVER_DIR);
 
     match stat(&takeover_dir) {
         Ok(stat) => {

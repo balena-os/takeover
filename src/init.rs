@@ -1,6 +1,6 @@
 use crate::{
     common::{
-        call, defs::{BALENA_DATA_MP, BALENA_OS_NAME, MOUNT_CMD, NIX_NONE, PIVOT_ROOT_CMD, TAKEOVER_DIR}, get_mountpoint, get_os_name, path_append, whereis, Error, Result, ToError
+        call, defs::{MOUNT_CMD, NIX_NONE, PIVOT_ROOT_CMD, TAKEOVER_DIR}, get_mountpoint, path_append, whereis, Error, Result, ToError
     },
     stage2::{read_stage2_config, reboot},
     ErrorKind,
@@ -215,24 +215,7 @@ pub fn init() -> ! {
 
     info!("Init check pid success!");
 
-    let mut takeover_path = PathBuf::from("");
-    match get_os_name() {
-        Ok(name) => {
-            if name.starts_with(BALENA_OS_NAME) {
-                takeover_path.push(BALENA_DATA_MP);
-            }
-        }
-        Err(_) => {
-            error!("Can't determine operating system name");
-            reboot();
-        }
-    }
-    if TAKEOVER_DIR.starts_with("/") {
-        takeover_path.push(TAKEOVER_DIR[1..].to_string());
-    } else {
-        takeover_path.push(TAKEOVER_DIR);
-    }
-    let takeover_dir = takeover_path.to_str().unwrap_or(TAKEOVER_DIR);
+    let takeover_path = PathBuf::from(TAKEOVER_DIR);
 
     if let Err(why) = set_current_dir(&takeover_path) {
         error!(
@@ -261,7 +244,7 @@ pub fn init() -> ! {
         }
     }
 
-    let closed_fds = match close_fds(takeover_dir) {
+    let closed_fds = match close_fds(TAKEOVER_DIR) {
         Ok(fds) => fds,
         Err(_) => {
             error!("Failed close open files");
@@ -271,7 +254,7 @@ pub fn init() -> ! {
     info!("Stage 2 closed {} fd's", closed_fds);
 
     let ext_log = if let Some(log_dev) = s2_config.log_dev() {
-        match setup_log(log_dev, takeover_dir) {
+        match setup_log(log_dev, TAKEOVER_DIR) {
             Ok(_) => true,
             Err(why) => {
                 error!("Setup log failed, error: {:?}", why);
