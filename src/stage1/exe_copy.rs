@@ -1,5 +1,7 @@
 use crate::common::system::stat;
-use crate::common::{call, dir_exists, path_append, whereis, Error, ErrorKind, Result, ToError, options::Options};
+use crate::common::{
+    call, dir_exists, options::Options, path_append, whereis, Error, ErrorKind, Result, ToError,
+};
 
 use lazy_static::lazy_static;
 use log::{debug, info, trace, warn};
@@ -13,13 +15,12 @@ pub(crate) struct ExeCopy {
     req_space: u64,
     libraries: HashSet<String>,
     executables: HashSet<String>,
-    ldd_script_path: PathBuf
+    ldd_script_path: PathBuf,
 }
 
 impl ExeCopy {
     pub fn new(cmd_list: Vec<&str>, opts: &Options) -> Result<ExeCopy> {
         trace!("new: entered with {:?}", cmd_list);
-
 
         let mut executables: HashSet<String> = HashSet::new();
 
@@ -41,7 +42,7 @@ impl ExeCopy {
             req_space: 0,
             libraries: HashSet::new(),
             executables,
-            ldd_script_path: opts.ldd_path()
+            ldd_script_path: opts.ldd_path(),
         };
 
         efi_files.get_libs_for()?;
@@ -54,14 +55,16 @@ impl ExeCopy {
 
     fn get_libs_for(&mut self) -> Result<()> {
         trace!("get_libs_for: entered");
-        let ldd_path: String;
-        if self.ldd_script_path.is_empty() {
+
+        let ldd_path: String = if self.ldd_script_path.is_empty() {
             debug!("lld path was not provided, will use the one from current OS, if available");
-            ldd_path = whereis("ldd").upstream_with_context("Failed to locate ldd executable, please provide path to ldd manually")?;
+            whereis("ldd").upstream_with_context(
+                "Failed to locate ldd executable, please provide path to ldd manually",
+            )?
         } else {
             debug!("Provided ldd path: {}", self.ldd_script_path.display());
-            ldd_path = self.ldd_script_path.as_path().display().to_string();
-        }
+            self.ldd_script_path.as_path().display().to_string()
+        };
         let mut check_libs: HashSet<String> = HashSet::new();
 
         // TODO: this_path processing

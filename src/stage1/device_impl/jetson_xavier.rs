@@ -1,15 +1,21 @@
-use log::{debug, trace};
 use crate::stage1::device_impl::check_os;
 use crate::{
     common::{Error, Options, Result},
     // linux_common::is_secure_boot,
     stage1::{
-        defs::{DeviceType, DEV_TYPE_JETSON_XAVIER, DEV_TYPE_JETSON_XAVIER_NX, DEV_TYPE_JETSON_XAVIER_NX_EMMC},
+        defs::{
+            DeviceType, DEV_TYPE_JETSON_XAVIER, DEV_TYPE_JETSON_XAVIER_NX,
+            DEV_TYPE_JETSON_XAVIER_NX_EMMC,
+        },
         device::Device,
     },
 };
+use log::{debug, trace};
 
-pub(crate) fn is_jetson_xavier(opts: &Options, model_string: &str) -> Result<Option<Box<dyn Device>>> {
+pub(crate) fn is_jetson_xavier(
+    opts: &Options,
+    model_string: &str,
+) -> Result<Option<Box<dyn Device>>> {
     trace!(
         "JetsonXavier::is_jetson_xavier: entered with model string: '{}'",
         model_string
@@ -22,8 +28,11 @@ pub(crate) fn is_jetson_xavier(opts: &Options, model_string: &str) -> Result<Opt
     } else if model_string.eq("NVIDIA Jetson Xavier NX Developer Kit") {
         debug!("match found for Xavier NX Devkit");
         Ok(Some(Box::new(JetsonXavierNX::from_config(opts)?)))
-    } else  {
-        debug!("no match for Jetson-AGX or NVIDIA Jetson Xavier NX Developer Kit on: <{}>", model_string);
+    } else {
+        debug!(
+            "no match for Jetson-AGX or NVIDIA Jetson Xavier NX Developer Kit on: <{}>",
+            model_string
+        );
         Ok(None)
     }
 }
@@ -35,24 +44,19 @@ pub(crate) struct JetsonXavier;
 
 impl JetsonXavier {
     pub fn from_config(opts: &Options) -> Result<JetsonXavier> {
-        const SUPPORTED_OSSES: &[&str] = &[
-                   "balenaOS 5.1.20",
-                   "balenaOS 3.1.3+rev1",
-        ];
+        const SUPPORTED_OSSES: &[&str] = &["balenaOS 5.1.20", "balenaOS 3.1.3+rev1"];
 
-        if opts.migrate() {
-            if !check_os(SUPPORTED_OSSES, opts, "balenaOS 5.1.20")? {
-                return Err(Error::displayed());
-            }
-            // **********************************************************************
-            // ** Xavier AGX specific initialisation/checks
-            // **********************************************************************
+        if opts.migrate() && !check_os(SUPPORTED_OSSES, opts, "balenaOS 5.1.20")? {
+            return Err(Error::displayed());
         }
+        // **********************************************************************
+        // ** Xavier AGX specific initialisation/checks
+        // **********************************************************************
         Ok(JetsonXavier)
     }
 }
 
-impl<'a> Device for JetsonXavier {
+impl Device for JetsonXavier {
     fn supports_device_type(&self, dev_type: &str) -> bool {
         XAVIER_AGX_SLUGS.contains(&dev_type)
     }
@@ -65,24 +69,19 @@ pub(crate) struct JetsonXavierNX;
 
 impl JetsonXavierNX {
     pub fn from_config(opts: &Options) -> Result<JetsonXavierNX> {
-        const SUPPORTED_OSSES: &[&str] = &[
-                   "balenaOS 5.1.20",
-                   "balenaOS 3.1.3+rev1",
-        ];
+        const SUPPORTED_OSSES: &[&str] = &["balenaOS 5.1.20", "balenaOS 3.1.3+rev1"];
 
-        if opts.migrate() {
-            if !check_os(SUPPORTED_OSSES, opts, "balenaOS 5.1.20")? {
-                return Err(Error::displayed());
-            }
-            // **********************************************************************
-            // ** Xavier NX (SD and eMMC) specific initialisation/checks
-            // **********************************************************************
+        if opts.migrate() && !check_os(SUPPORTED_OSSES, opts, "balenaOS 5.1.20")? {
+            return Err(Error::displayed());
         }
+        // **********************************************************************
+        // ** Xavier NX (SD and eMMC) specific initialisation/checks
+        // **********************************************************************
         Ok(JetsonXavierNX)
     }
 }
 
-impl<'a> Device for JetsonXavierNX {
+impl Device for JetsonXavierNX {
     fn supports_device_type(&self, dev_type: &str) -> bool {
         XAVIER_NX_SLUGS.contains(&dev_type)
     }

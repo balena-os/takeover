@@ -1,6 +1,6 @@
 use libc::{
-    self, ino_t, mode_t, utsname, EACCES, EEXIST, ENOENT, ENXIO, EPERM, EIO, O_RDONLY, S_IFBLK, S_IFCHR,
-    S_IFDIR, S_IFIFO, S_IFLNK, S_IFMT, S_IFREG, S_IFSOCK,
+    self, ino_t, mode_t, utsname, EACCES, EEXIST, EIO, ENOENT, ENXIO, EPERM, O_RDONLY, S_IFBLK,
+    S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFMT, S_IFREG, S_IFSOCK,
 };
 
 use std::collections::HashMap;
@@ -55,7 +55,7 @@ fn sys_error(message: &str) -> Error {
         ENOENT => ErrorKind::FileNotFound,
         ENXIO => ErrorKind::DeviceNotFound,
         EEXIST => ErrorKind::FileExists,
-        EIO=> ErrorKind::CmdIo,
+        EIO => ErrorKind::CmdIo,
         _ => ErrorKind::Upstream,
     };
     Error::with_all(error_kind, message, Box::new(io::Error::last_os_error()))
@@ -358,7 +358,10 @@ pub(crate) fn fuser<P: AsRef<Path>>(
                                         } else {
                                             return Err(Error::with_context(
                                                 ErrorKind::InvState,
-                                                &format!("file '{}' is not a link", curr_path.display()),
+                                                &format!(
+                                                    "file '{}' is not a link",
+                                                    curr_path.display()
+                                                ),
                                             ));
                                         }
                                     }

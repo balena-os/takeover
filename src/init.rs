@@ -1,6 +1,8 @@
 use crate::{
     common::{
-        call, defs::{MOUNT_CMD, NIX_NONE, PIVOT_ROOT_CMD, TAKEOVER_DIR}, get_mountpoint, path_append, whereis, Error, Result, ToError
+        call,
+        defs::{MOUNT_CMD, NIX_NONE, PIVOT_ROOT_CMD, TAKEOVER_DIR},
+        get_mountpoint, path_append, whereis, Error, Result, ToError,
     },
     stage2::{read_stage2_config, reboot},
     ErrorKind,
@@ -19,11 +21,11 @@ use std::fs::create_dir_all;
 use std::io;
 use std::mem::MaybeUninit;
 use std::os::raw::c_int;
+use std::path::PathBuf;
 use std::process::Command;
 use std::str::FromStr;
 use std::thread::sleep;
 use std::time::Duration;
-use std::path::{PathBuf};
 
 use crate::common::stage2_config::LogDevice;
 use libc::{
@@ -220,7 +222,8 @@ pub fn init() -> ! {
     if let Err(why) = set_current_dir(&takeover_path) {
         error!(
             "Failed to change to directory '{}', error: {:?}",
-            takeover_path.display(), why
+            takeover_path.display(),
+            why
         );
         reboot();
     }

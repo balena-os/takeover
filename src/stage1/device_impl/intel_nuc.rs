@@ -5,7 +5,7 @@ use crate::{
     common::{Error, Options, Result},
     // linux_common::is_secure_boot,
     stage1::{
-        defs::{DeviceType, DEV_TYPE_GEN_X86_64, DEV_TYPE_INTEL_NUC, DEV_TYPE_GEN_AMD64},
+        defs::{DeviceType, DEV_TYPE_GEN_AMD64, DEV_TYPE_GEN_X86_64, DEV_TYPE_INTEL_NUC},
         device::Device,
         utils::is_secure_boot,
     },

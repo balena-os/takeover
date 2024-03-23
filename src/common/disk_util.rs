@@ -475,7 +475,6 @@ impl<'a> Read for PartitionReader<'a> {
             }
         }
     }
-
 }
 
 #[cfg(test)]

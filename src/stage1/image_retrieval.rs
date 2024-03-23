@@ -19,8 +19,8 @@ use crate::{
     stage1::{
         api_calls::{get_os_image, get_os_versions, Versions},
         defs::{
-            DEV_TYPE_BBB, DEV_TYPE_BBG, DEV_TYPE_GEN_X86_64, DEV_TYPE_INTEL_NUC, DEV_TYPE_RPI1,
-            DEV_TYPE_RPI2, DEV_TYPE_RPI3, DEV_TYPE_RPI4_64, DEV_TYPE_JETSON_XAVIER,
+            DEV_TYPE_BBB, DEV_TYPE_BBG, DEV_TYPE_GEN_X86_64, DEV_TYPE_INTEL_NUC,
+            DEV_TYPE_JETSON_XAVIER, DEV_TYPE_RPI1, DEV_TYPE_RPI2, DEV_TYPE_RPI3, DEV_TYPE_RPI4_64,
         },
         migrate_info::balena_cfg_json::BalenaCfgJson,
     },
@@ -208,7 +208,9 @@ pub(crate) fn extract_image<P1: AsRef<Path>, P2: AsRef<Path>>(
             }
             DEV_TYPE_BBB => path_append(path_append(&mount_path, "opt"), IMG_NAME_BBB),
             DEV_TYPE_BBG => path_append(path_append(&mount_path, "opt"), IMG_NAME_BBG),
-            DEV_TYPE_JETSON_XAVIER => path_append(path_append(&mount_path, "opt"), IMG_NAME_JETSON_XAVIER),
+            DEV_TYPE_JETSON_XAVIER => {
+                path_append(path_append(&mount_path, "opt"), IMG_NAME_JETSON_XAVIER)
+            }
             _ => {
                 return Err(Error::with_context(
                     ErrorKind::InvParam,

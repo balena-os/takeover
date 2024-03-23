@@ -10,8 +10,8 @@ use crate::{
 mod beaglebone;
 mod dummy;
 mod intel_nuc;
-mod raspberrypi;
 mod jetson_xavier;
+mod raspberrypi;
 
 const DEVICE_TREE_MODEL: &str = "/proc/device-tree/model";
 

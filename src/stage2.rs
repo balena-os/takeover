@@ -24,18 +24,19 @@ use crate::common::stage2_config::LogDevice;
 
 use crate::common::{
     call,
-    find_file,
     defs::{
         IoctlReq, BACKUP_ARCH_NAME, BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART,
-        BALENA_CONFIG_PATH, BALENA_DATA_FSTYPE, BALENA_DATA_PART, BALENA_ROOTA_PART, BALENA_ROOTA_FSTYPE, BALENA_IMAGE_NAME,
-        BALENA_IMAGE_PATH, BALENA_PART_MP, DD_CMD, DISK_BY_LABEL_PATH, EFIBOOTMGR_CMD, NIX_NONE,
-        OLD_ROOT_MP, STAGE2_CONFIG_NAME, SYSTEM_CONNECTIONS_DIR, SYS_EFI_DIR, JETSON_XAVIER_HW_PART_FORCE_RO_FILE, SYSTEM_PROXY_DIR,
-        BOOT_BLOB_NAME_JETSON_XAVIER, BOOT_BLOB_NAME_JETSON_XAVIER_NX, BOOT_BLOB_PARTITION_JETSON_XAVIER, BOOT_BLOB_PARTITION_JETSON_XAVIER_NX
+        BALENA_CONFIG_PATH, BALENA_DATA_FSTYPE, BALENA_DATA_PART, BALENA_IMAGE_NAME,
+        BALENA_IMAGE_PATH, BALENA_PART_MP, BALENA_ROOTA_FSTYPE, BALENA_ROOTA_PART,
+        BOOT_BLOB_NAME_JETSON_XAVIER, BOOT_BLOB_NAME_JETSON_XAVIER_NX,
+        BOOT_BLOB_PARTITION_JETSON_XAVIER, BOOT_BLOB_PARTITION_JETSON_XAVIER_NX, DD_CMD,
+        DISK_BY_LABEL_PATH, EFIBOOTMGR_CMD, JETSON_XAVIER_HW_PART_FORCE_RO_FILE, NIX_NONE,
+        OLD_ROOT_MP, STAGE2_CONFIG_NAME, SYSTEM_CONNECTIONS_DIR, SYSTEM_PROXY_DIR, SYS_EFI_DIR,
     },
     dir_exists,
     disk_util::{Disk, LabelType, PartInfo, PartitionIterator, DEF_BLOCK_SIZE},
     error::{Error, ErrorKind, Result, ToError},
-    file_exists, format_size_with_unit, get_mem_info,
+    file_exists, find_file, format_size_with_unit, get_mem_info,
     loop_device::LoopDevice,
     options::Options,
     path_append,
@@ -170,7 +171,11 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<()> {
         src_path.display(),
         &to_path.display()
     ))?;
-    info!("Copied image from {} to '{}'", src_path.display(), to_path.display());
+    info!(
+        "Copied image from {} to '{}'",
+        src_path.display(),
+        to_path.display()
+    );
 
     let src_path = path_append(OLD_ROOT_MP, &s2_cfg.config_path);
     let to_path = path_append(TRANSFER_DIR, BALENA_CONFIG_PATH);
@@ -433,7 +438,11 @@ fn transfer_boot_files<P: AsRef<Path>>(dev_root: P) -> Result<()> {
         src_path.display(),
         target_path.display()
     ))?;
-    debug!("Source config json is '{}', target config.json is '{}'", src_path.display(),  target_path.display());
+    debug!(
+        "Source config json is '{}', target config.json is '{}'",
+        src_path.display(),
+        target_path.display()
+    );
     info!("Successfully copied config.json to boot partition",);
 
     let boot_directories = vec![SYSTEM_CONNECTIONS_DIR, SYSTEM_PROXY_DIR];
@@ -549,44 +558,47 @@ fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo, PartInfo)> 
             Err(e) => {
                 return Err(Error::with_context(
                     ErrorKind::InvState,
-                    &format!("Failed to read GPT header, error: {} ", e)));
+                    &format!("Failed to read GPT header, error: {} ", e),
+                ));
             }
         };
         for (i, p) in gpt.iter() {
             if p.is_used() {
-                debug!("Partition #{}: type = {:?}, size = {} bytes, starting lba = {}, name = {}",
+                debug!(
+                    "Partition #{}: type = {:?}, size = {} bytes, starting lba = {}, name = {}",
                     i,
                     p.partition_type_guid,
                     p.size().unwrap() * gpt.sector_size,
                     p.starting_lba,
-                    p.partition_name.as_str());
+                    p.partition_name.as_str()
+                );
 
-                if  p.partition_name.as_str() == BALENA_BOOT_PART {
-                        boot_part = Some(PartInfo {
-                            index: i as usize,
-                            ptype: 0x83,  // MBR Linux byte; really this is the EFI system
-                                          // partition, but MBR doesn't define this type.
-                            status: 0,    // Not clear what this should be
-                            start_lba: p.starting_lba,
-                            num_sectors: p.size().unwrap()
-                        })
-                } else if  p.partition_name.as_str() == BALENA_ROOTA_PART {
-                            root_a_part = Some(PartInfo {
-                                index: i as usize,
-                                ptype: 0x83,  // MBR Linux byte; really this is the EFI system
-                                              // partition, but MBR doesn't define this type.
-                                status: 0,    // Not clear what this should be
-                                start_lba: p.starting_lba,
-                                num_sectors: p.size().unwrap()
-                            })
+                if p.partition_name.as_str() == BALENA_BOOT_PART {
+                    boot_part = Some(PartInfo {
+                        index: i as usize,
+                        ptype: 0x83, // MBR Linux byte; really this is the EFI system
+                        // partition, but MBR doesn't define this type.
+                        status: 0, // Not clear what this should be
+                        start_lba: p.starting_lba,
+                        num_sectors: p.size().unwrap(),
+                    })
+                } else if p.partition_name.as_str() == BALENA_ROOTA_PART {
+                    root_a_part = Some(PartInfo {
+                        index: i as usize,
+                        ptype: 0x83, // MBR Linux byte; really this is the EFI system
+                        // partition, but MBR doesn't define this type.
+                        status: 0, // Not clear what this should be
+                        start_lba: p.starting_lba,
+                        num_sectors: p.size().unwrap(),
+                    })
                 } else if p.partition_name.as_str() == BALENA_DATA_PART {
-                        data_part = Some(PartInfo {
-                            index: i as usize,
-                            ptype: 0x83,  // MBR Linux byte
-                            status: 0,    // not clear what this should be
-                            start_lba: p.starting_lba,
-                            num_sectors: p.size().unwrap()
-                        });
+                    data_part = Some(PartInfo {
+                        index: i as usize,
+                        ptype: 0x83, // MBR Linux byte
+                        status: 0,   // not clear what this should be
+                        start_lba: p.starting_lba,
+                        num_sectors: p.size().unwrap(),
+                    });
                 }
             }
         }
@@ -599,7 +611,10 @@ fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo, PartInfo)> 
             } else {
                 Err(Error::with_context(
                     ErrorKind::NotFound,
-                    &format!("RootA partition could not be found on '{}", device.display()),
+                    &format!(
+                        "RootA partition could not be found on '{}",
+                        device.display()
+                    ),
                 ))
             }
         } else {
@@ -683,8 +698,7 @@ fn efi_setup(device: &Path) -> Result<()> {
 // This functionality is specific to Jetson AGX Xavier and Xavier NX migration.
 // In the current format, the migration is expected to be performed from
 // a balenaOS install to another balenaOS install.
-fn write_boot_blob(s2_config: &Stage2Config, mount_path: PathBuf)
-{
+fn write_boot_blob(s2_config: &Stage2Config, mount_path: PathBuf) {
     let img_path;
 
     if s2_config.device_type.starts_with("Jetson Xavier AGX") {
@@ -695,22 +709,31 @@ fn write_boot_blob(s2_config: &Stage2Config, mount_path: PathBuf)
 
         // Enable writing to /dev/mmcblk0boot0/
         let force_ro = "0";
-        std::fs::write(JETSON_XAVIER_HW_PART_FORCE_RO_FILE, force_ro).expect("Could not set hw boot partition rw!");
+        std::fs::write(JETSON_XAVIER_HW_PART_FORCE_RO_FILE, force_ro)
+            .expect("Could not set hw boot partition rw!");
 
         let boot0_data = std::fs::read(img_path).unwrap();
         debug!("boot blob - bytes read from disk: '{}' ", boot0_data.len());
 
-        std::fs::write(BOOT_BLOB_PARTITION_JETSON_XAVIER, boot0_data).expect("Could not write hw boot partition!");
+        std::fs::write(BOOT_BLOB_PARTITION_JETSON_XAVIER, boot0_data)
+            .expect("Could not write hw boot partition!");
         debug!("Jetson Xavier AGX boot blob was written");
     } else if s2_config.device_type.starts_with("Jetson Xavier NX") {
         img_path = find_file(BOOT_BLOB_NAME_JETSON_XAVIER_NX, &mount_path);
 
         debug!("boot0_image_path is: '{}'", img_path.display());
-        debug!("boot0_image_dev is: '{}'", BOOT_BLOB_PARTITION_JETSON_XAVIER_NX);
+        debug!(
+            "boot0_image_dev is: '{}'",
+            BOOT_BLOB_PARTITION_JETSON_XAVIER_NX
+        );
 
         match flash_qspi(&img_path) {
-            FlashState::Success => {info!("Xavier NX QSPI written succesfully!")},
-            _ => {warn!("Failed to write QSPI!")}
+            FlashState::Success => {
+                info!("Xavier NX QSPI written succesfully!")
+            }
+            _ => {
+                warn!("Failed to write QSPI!")
+            }
         }
     }
 }
@@ -786,7 +809,9 @@ fn raw_mount_balena(s2_cfg: &Stage2Config) -> Result<()> {
     // and the use it to program the QSPI or the boot partition of the device.
     // The new Jetson balenaOS image is expected to include a pre-built boot blog
     // taken from an provisioning made with jetson-flash.
-    if s2_cfg.device_type.starts_with("Jetson Xavier AGX") || s2_cfg.device_type.starts_with("Jetson Xavier NX") {
+    if s2_cfg.device_type.starts_with("Jetson Xavier AGX")
+        || s2_cfg.device_type.starts_with("Jetson Xavier NX")
+    {
         let mut loop_device = LoopDevice::get_free(true)?;
         info!("Create loop device: '{}'", loop_device.get_path().display());
         let byte_offset = root_a_part.start_lba * DEF_BLOCK_SIZE as u64;
@@ -1075,36 +1100,52 @@ fn flash_qspi(image_path: &Path) -> FlashState {
     let mut flash_qspi_res = FlashState::Success;
     debug!("entered flash_qspi");
 
-    match call_command!(&format!("/bin/{}", MTD_DEBUG_CMD), &["erase", &format!("{}", BOOT_BLOB_PARTITION_JETSON_XAVIER_NX), "0", &format!("{}", JETSON_XAVIER_NX_QSPI_SIZE)], "Failed to execute mtdebug!") {
+    match call_command!(
+        &format!("/bin/{}", MTD_DEBUG_CMD),
+        &[
+            "erase",
+            BOOT_BLOB_PARTITION_JETSON_XAVIER_NX,
+            "0",
+            JETSON_XAVIER_NX_QSPI_SIZE
+        ],
+        "Failed to execute mtdebug!"
+    ) {
         Ok(cmd_stdout) => {
             for line in cmd_stdout.lines() {
-                    info!("line: {}", line);
-                    }
-                },
-        _ => { warn!("Error executing mtd_debug erase!")}
+                info!("line: {}", line);
+            }
+        }
+        _ => {
+            warn!("Error executing mtd_debug erase!")
+        }
     }
 
-    match call_command!(&format!("/bin/{}", MTD_DEBUG_CMD), &[
-        "write",
-        &format!("{}", BOOT_BLOB_PARTITION_JETSON_XAVIER_NX),
-        "0",
-        &format!("{}", JETSON_XAVIER_NX_QSPI_SIZE),
-        &image_path.to_string_lossy()
-    ], "Failed to execute mtdebug!") {
+    match call_command!(
+        &format!("/bin/{}", MTD_DEBUG_CMD),
+        &[
+            "write",
+            BOOT_BLOB_PARTITION_JETSON_XAVIER_NX,
+            "0",
+            JETSON_XAVIER_NX_QSPI_SIZE,
+            &image_path.to_string_lossy()
+        ],
+        "Failed to execute mtdebug!"
+    ) {
         Ok(cmd_stdout) => {
             for line in cmd_stdout.lines() {
-                    info!("line: {}", line);
-                    }
-                },
-        _ => { warn!("Error executing mtd_debug write!");
-                flash_qspi_res = FlashState::FailRecoverable; // TODO: try flash back old boot0 image as fallback
+                info!("line: {}", line);
+            }
+        }
+        _ => {
+            warn!("Error executing mtd_debug write!");
+            flash_qspi_res = FlashState::FailRecoverable; // TODO: try flash back old boot0 image as fallback
         }
     }
 
     info!("Executed mtd_debug");
 
     info!("leaving flash_qspi()");
-    return flash_qspi_res;
+    flash_qspi_res
 }
 
 fn flash_external(target_path: &Path, image_path: &Path, dd_cmd: &str) -> FlashState {
