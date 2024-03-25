@@ -19,7 +19,6 @@ use nix::{
 };
 
 use libc::MS_BIND;
-
 use log::{debug, error, info, warn, Level};
 
 use which::which;
@@ -42,11 +41,12 @@ use crate::{
     common::{
         call,
         defs::{
-            NIX_NONE, OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD, SYSTEM_CONNECTIONS_DIR,
-            SYS_EFIVARS_DIR, SYS_EFI_DIR, TELINIT_CMD,
+            BALENA_DATA_MP, BALENA_OS_NAME, BALENA_SYSTEM_CONNECTIONS_BOOT_PATH,
+            BALENA_SYSTEM_PROXY_BOOT_PATH, NIX_NONE, OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD,
+            SYSTEM_CONNECTIONS_DIR, SYSTEM_PROXY_DIR, SYS_EFIVARS_DIR, SYS_EFI_DIR, TELINIT_CMD,
         },
         error::{Error, ErrorKind, Result, ToError},
-        file_exists, format_size_with_unit, get_mem_info, is_admin,
+        file_exists, format_size_with_unit, get_mem_info, get_os_name, is_admin,
         options::Options,
         path_append,
         stage2_config::{Stage2Config, UmountPart},
@@ -58,7 +58,7 @@ use crate::{
     },
 };
 
-use crate::common::defs::{DD_CMD, EFIBOOTMGR_CMD, TAKEOVER_DIR};
+use crate::common::defs::{DD_CMD, EFIBOOTMGR_CMD, MTD_DEBUG_CMD, TAKEOVER_DIR};
 use crate::common::dir_exists;
 use crate::common::stage2_config::LogDevice;
 use crate::common::system::{is_dir, mkdir, stat};
@@ -76,17 +76,70 @@ fn prepare_configs<P1: AsRef<Path>>(
     mig_info.update_config()?;
 
     // *********************************************************
-    // write network_manager filess to tmpfs
+    // write network_manager files to tmpfs
     let mut nwmgr_cfgs: u64 = 0;
     let nwmgr_path = path_append(work_dir, SYSTEM_CONNECTIONS_DIR);
+    let sys_proxy_copy_path = path_append(work_dir, SYSTEM_PROXY_DIR);
     create_dir_all(&nwmgr_path).upstream_with_context(&format!(
         "Failed to create directory '{}",
         nwmgr_path.display()
     ))?;
 
+    create_dir_all(&sys_proxy_copy_path).upstream_with_context(&format!(
+        "Failed to create directory '{}",
+        nwmgr_path.display()
+    ))?;
+
+    // If migrating from balenaOS, copy all files from the system-connections file in /mnt/boot
+    // TODO: Check if we should copy them from the boot partition, or from the NM root overlay directory
+    if mig_info.os_name().starts_with(BALENA_OS_NAME) {
+        debug!("migrating from balenaOS - copying system-connections files");
+        let nwmgr_files = read_dir(BALENA_SYSTEM_CONNECTIONS_BOOT_PATH).unwrap();
+        for path in nwmgr_files {
+            mig_info.add_nwmgr_file(path.unwrap().path());
+        }
+
+        debug!("migrating from balenaOS - copying system-proxy files");
+        let system_proxy_files = read_dir(BALENA_SYSTEM_PROXY_BOOT_PATH).unwrap();
+        for sys_proxy_path in system_proxy_files {
+            mig_info.add_system_proxy_file(sys_proxy_path.unwrap().path());
+        }
+    }
+
+    for proxy_file in mig_info.system_proxy_files() {
+        let target_file_name = Path::new(&proxy_file)
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let target_file = path_append(&sys_proxy_copy_path, target_file_name);
+
+        copy(proxy_file, &target_file).upstream_with_context(&format!(
+            "Failed to copy '{}' to '{}'",
+            proxy_file.display(),
+            target_file.display()
+        ))?;
+        info!(
+            "Copied '{}' to '{}'",
+            proxy_file.display(),
+            target_file.display()
+        );
+    }
+
     for source_file in mig_info.nwmgr_files() {
         nwmgr_cfgs += 1;
-        let target_file = path_append(&nwmgr_path, &format!("balena-{:02}", nwmgr_cfgs));
+
+        // If migrating from balenaOS, preserve file names for all entries in system-connections/
+        let target_file = if !mig_info.os_name().starts_with("balenaOS") {
+            path_append(&nwmgr_path, &format!("balena-{:02}", nwmgr_cfgs))
+        } else {
+            let target_file_name = Path::new(source_file)
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap();
+            path_append(&nwmgr_path, target_file_name)
+        };
         copy(source_file, &target_file).upstream_with_context(&format!(
             "Failed to copy '{}' to '{}'",
             source_file.display(),
@@ -232,11 +285,21 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     let mut req_space: u64 = 0;
     let mut copy_commands = vec![DD_CMD];
-    if mig_info.is_x86() && !opts.no_efi_setup() && dir_exists(SYS_EFI_DIR)? {
+
+    // If device is a Jetson Xavier, don't copy over efibootmgr because the old L4T does not use EFI
+    if mig_info.is_x86()
+        && !opts.no_efi_setup()
+        && !mig_info.is_jetson_xavier()
+        && dir_exists(SYS_EFI_DIR)?
+    {
         copy_commands.push(EFIBOOTMGR_CMD)
     }
 
-    let commands = match ExeCopy::new(copy_commands) {
+    if mig_info.is_jetson_xavier_nx() {
+        copy_commands.push(MTD_DEBUG_CMD)
+    }
+
+    let commands = match ExeCopy::new(copy_commands, opts) {
         Ok(commands) => {
             let cmd_space = commands.get_req_space();
             debug!(
@@ -273,6 +336,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     // *********************************************************
     // make mountpoint for tmpfs
     let takeover_dir = PathBuf::from(TAKEOVER_DIR);
+
     match stat(&takeover_dir) {
         Ok(stat) => {
             if is_dir(&stat) {
@@ -314,7 +378,11 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 
     mig_info.set_to_dir(&takeover_dir);
 
-    info!("Using '{}' as takeover directory", takeover_dir.display());
+    info!(
+        "Using '{}' as takeover directory on '{}'",
+        takeover_dir.display(),
+        mig_info.os_name()
+    );
 
     mount_sys_filesystems(&takeover_dir, mig_info, opts)?;
 
@@ -344,7 +412,12 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     let new_init_path = path_append(&takeover_dir, format!("/bin/{}", env!("CARGO_PKG_NAME")));
     // Assets::write_stage2_script(&takeover_dir, &new_init_path, &tty, opts.get_s2_log_level())?;
 
-    let block_dev_info = BlockDeviceInfo::new()?;
+    let block_dev_info = if get_os_name()?.starts_with(BALENA_OS_NAME) {
+        // can't use default root dir due to overlayfs
+        BlockDeviceInfo::new_for_dir(BALENA_DATA_MP)?
+    } else {
+        BlockDeviceInfo::new()?
+    };
 
     let flash_dev = if let Some(flash_dev) = opts.flash_to() {
         if let Some(flash_dev) = block_dev_info.get_devices().get(flash_dev) {
@@ -426,6 +499,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         image_path: mig_info.image_path().to_path_buf(),
         config_path: mig_info.balena_cfg().get_path().to_path_buf(),
         backup_path: mig_info.backup().map(|backup_path| backup_path.to_owned()),
+        device_type: mig_info.get_device_type_name().to_string(),
         tty: read_link("/proc/self/fd/1")
             .upstream_with_context("Failed to read tty from '/proc/self/fd/1'")?,
     };

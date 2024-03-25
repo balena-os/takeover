@@ -1,6 +1,6 @@
 use libc::{
-    self, ino_t, mode_t, utsname, EACCES, EEXIST, ENOENT, ENXIO, EPERM, O_RDONLY, S_IFBLK, S_IFCHR,
-    S_IFDIR, S_IFIFO, S_IFLNK, S_IFMT, S_IFREG, S_IFSOCK,
+    self, ino_t, mode_t, utsname, EACCES, EEXIST, EIO, ENOENT, ENXIO, EPERM, O_RDONLY, S_IFBLK,
+    S_IFCHR, S_IFDIR, S_IFIFO, S_IFLNK, S_IFMT, S_IFREG, S_IFSOCK,
 };
 
 use std::collections::HashMap;
@@ -55,6 +55,7 @@ fn sys_error(message: &str) -> Error {
         ENOENT => ErrorKind::FileNotFound,
         ENXIO => ErrorKind::DeviceNotFound,
         EEXIST => ErrorKind::FileExists,
+        EIO => ErrorKind::CmdIo,
         _ => ErrorKind::Upstream,
     };
     Error::with_all(error_kind, message, Box::new(io::Error::last_os_error()))
@@ -324,40 +325,49 @@ pub(crate) fn fuser<P: AsRef<Path>>(
                                         curr_path.display()
                                     ))?;
 
-                                let stat_info = lstat(curr_path.as_path())?;
-                                if is_lnk(&stat_info) {
-                                    let link_data = read_link(curr_path.as_path())
-                                        .upstream_with_context(&format!(
-                                            "Failed to read link '{}'",
-                                            curr_path.display()
-                                        ))?;
-                                    debug!(
-                                        "looking at pid: {}, fd {}, file: '{}' -> '{}'",
-                                        curr_pid,
-                                        curr_fd,
-                                        curr_path.display(),
-                                        link_data.display()
-                                    );
-
-                                    if link_data.starts_with(path.as_ref()) {
-                                        debug!("sending signal {} to {}", signal, curr_pid,);
-                                        if unsafe { libc::kill(curr_pid, signal) } != 0 {
-                                            warn!(
-                                                "Failed to send signal {} to pid {}, error: {}",
-                                                signal,
+                                match lstat(curr_path.as_path()) {
+                                    Ok(stat_info) => {
+                                        if is_lnk(&stat_info) {
+                                            let link_data = read_link(curr_path.as_path())
+                                                .upstream_with_context(&format!(
+                                                    "Failed to read link '{}'",
+                                                    curr_path.display()
+                                                ))?;
+                                            debug!(
+                                                "looking at pid: {}, fd {}, file: '{}' -> '{}'",
                                                 curr_pid,
-                                                io::Error::last_os_error()
+                                                curr_fd,
+                                                curr_path.display(),
+                                                link_data.display()
                                             );
+
+                                            if link_data.starts_with(path.as_ref()) {
+                                                debug!("sending signal {} to {}", signal, curr_pid,);
+                                                if unsafe { libc::kill(curr_pid, signal) } != 0 {
+                                                    warn!(
+                                                        "Failed to send signal {} to pid {}, error: {}",
+                                                        signal,
+                                                        curr_pid,
+                                                        io::Error::last_os_error()
+                                                    );
+                                                } else {
+                                                    sent_signals.push(curr_pid);
+                                                }
+                                                break;
+                                            }
                                         } else {
-                                            sent_signals.push(curr_pid);
+                                            return Err(Error::with_context(
+                                                ErrorKind::InvState,
+                                                &format!(
+                                                    "file '{}' is not a link",
+                                                    curr_path.display()
+                                                ),
+                                            ));
                                         }
-                                        break;
                                     }
-                                } else {
-                                    return Err(Error::with_context(
-                                        ErrorKind::InvState,
-                                        &format!("file '{}' is not a link", curr_path.display()),
-                                    ));
+                                    Err(_) => {
+                                        debug!("continue after lstat error");
+                                    }
                                 }
                             }
                         }
@@ -385,7 +395,8 @@ pub(crate) fn fuser<P: AsRef<Path>>(
         sleep(if let Some(wait_for_term) = wait_for_term {
             wait_for_term
         } else {
-            Duration::from_millis(500)
+            // balena-engine can take a bit longer to stop, compared to other processes
+            Duration::from_millis(3000)
         });
         let mut kill_count = 0;
         for pid in sent_signals {

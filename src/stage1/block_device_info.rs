@@ -112,8 +112,15 @@ pub(crate) struct BlockDeviceInfo {
 }
 
 impl BlockDeviceInfo {
+    /// Create a BlockDeviceInfo based on the storage device used for the root directory.
     pub fn new() -> Result<BlockDeviceInfo> {
-        let stat_res = stat("/").upstream_with_context("Failed to stat root")?;
+        BlockDeviceInfo::new_for_dir("/")
+    }
+
+    /// Create a BlockDeviceInfo based on the storage device used for the provided
+    /// directory.
+    pub fn new_for_dir(dir: &str) -> Result<BlockDeviceInfo> {
+        let stat_res = stat(dir).upstream_with_context(&format!("Failed to stat for {}", dir))?;
         let root_number = DeviceNum::new(stat_res.st_dev);
         let mounts = Mount::from_mtab()?;
 
