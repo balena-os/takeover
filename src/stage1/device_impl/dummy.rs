@@ -14,7 +14,10 @@ impl Dummy {
 
 impl Device for Dummy {
     fn supports_device_type(&self, _dev_type: &str) -> bool {
-        true
+        // When using the Dummy device type, we want to skip all DT-specific
+        // code. We achieve that by saying that the Dummy device type does not
+        // support any device type.
+        false
     }
     fn get_device_type(&self) -> DeviceType {
         DeviceType::Dummy
