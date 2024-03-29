@@ -73,10 +73,15 @@ impl BalenaCfgJson {
         info!("Configured for fleet id: {}", self.get_app_id()?);
 
         let device_type = self.get_device_type()?;
-        if !device.supports_device_type(device_type.as_str()) {
-            error!("The devicetype configured in config.json ({}) is not supported by the detected device type {:?}",
+        if opts.dt_check() {
+            if !device.supports_device_type(device_type.as_str()) {
+                error!("The device type configured in config.json ({}) is not supported by the detected device type {:?}",
                    device_type, device.get_device_type());
-            return Err(Error::displayed());
+                return Err(Error::displayed());
+            }
+        } else {
+            info!("Device type configured in config.json is {}; skipping compatibility check due to --no-dt-check option",
+            device_type)
         }
 
         if opts.api_check() {
