@@ -85,6 +85,9 @@ version = "6.0.0"
 version = "0.10.63"
 features = ["vendored"]
 
+[dependencies.lddtree]
+version = "0.3.4"
+
 [features]
 raspberrypi3 = []
 raspberrypi4-64 = []
