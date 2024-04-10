@@ -1,10 +1,13 @@
 use log::{debug, error, info, warn};
 use nix::mount::umount;
-use std::fs::{read_to_string, remove_dir_all, OpenOptions};
+use std::fs::{read_dir, read_to_string, remove_dir_all, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::ptr::read_volatile;
 
-use crate::common::defs::BACKUP_ARCH_NAME;
+use crate::common::defs::{
+    BACKUP_ARCH_NAME, BALENA_OS_NAME, BALENA_SYSTEM_CONNECTIONS_BOOT_PATH,
+    BALENA_SYSTEM_PROXY_BOOT_PATH,
+};
 use crate::common::path_append;
 use crate::{
     common::{file_exists, get_os_name, options::Options, Error, ErrorKind, Result, ToError},
@@ -142,8 +145,21 @@ impl MigrateInfo {
             Vec::new()
         };
 
-        let nwmgr_files = Vec::from(opts.nwmgr_cfg());
-        let system_proxy_files = Vec::new();
+        let mut nwmgr_files = Vec::from(opts.nwmgr_cfg());
+
+        // If migrating from balenaOS, copy all files from /mnt/boot/system-connections
+        // TODO: Check if we should copy them from the boot partition, or from the NM root overlay directory
+        if os_name.starts_with(BALENA_OS_NAME) {
+            debug!("migrating from balenaOS - copying system-connections files");
+            let nwmgr_dir_entries = read_dir(BALENA_SYSTEM_CONNECTIONS_BOOT_PATH)
+                .upstream_with_context(&format!(
+                    "Getting NetworkManager connections from '{}'",
+                    BALENA_SYSTEM_CONNECTIONS_BOOT_PATH
+                ))?;
+            for path in nwmgr_dir_entries {
+                nwmgr_files.push(path?.path());
+            }
+        }
 
         if nwmgr_files.is_empty() && wifis.is_empty() {
             if opts.no_nwmgr_check() {
@@ -155,6 +171,22 @@ impl MigrateInfo {
                     "No Network manager files were found, the device might not be able to come online"
                 );
                 return Err(Error::displayed());
+            }
+        }
+
+        let mut system_proxy_files = Vec::new();
+
+        // If migrating from balenaOS, copy all files from /mnt/boot/system-proxy
+        if os_name.starts_with(BALENA_OS_NAME) {
+            debug!("migrating from balenaOS - copying system-proxy files");
+            let system_proxy_dir_entries = read_dir(BALENA_SYSTEM_PROXY_BOOT_PATH)
+                .upstream_with_context(&format!(
+                    "Getting system proxy connections from '{}'",
+                    BALENA_SYSTEM_PROXY_BOOT_PATH
+                ))?;
+
+            for sys_proxy_path in system_proxy_dir_entries {
+                system_proxy_files.push(sys_proxy_path?.path());
             }
         }
 

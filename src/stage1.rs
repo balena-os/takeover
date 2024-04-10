@@ -41,8 +41,7 @@ use crate::{
     common::{
         call,
         defs::{
-            BALENA_DATA_MP, BALENA_OS_NAME, BALENA_SYSTEM_CONNECTIONS_BOOT_PATH,
-            BALENA_SYSTEM_PROXY_BOOT_PATH, NIX_NONE, OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD,
+            BALENA_DATA_MP, BALENA_OS_NAME, NIX_NONE, OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD,
             SYSTEM_CONNECTIONS_DIR, SYSTEM_PROXY_DIR, SYS_EFIVARS_DIR, SYS_EFI_DIR, TELINIT_CMD,
         },
         error::{Error, ErrorKind, Result, ToError},
@@ -89,22 +88,6 @@ fn prepare_configs<P1: AsRef<Path>>(
         "Failed to create directory '{}",
         nwmgr_path.display()
     ))?;
-
-    // If migrating from balenaOS, copy all files from the system-connections file in /mnt/boot
-    // TODO: Check if we should copy them from the boot partition, or from the NM root overlay directory
-    if mig_info.os_name().starts_with(BALENA_OS_NAME) {
-        debug!("migrating from balenaOS - copying system-connections files");
-        let nwmgr_files = read_dir(BALENA_SYSTEM_CONNECTIONS_BOOT_PATH).unwrap();
-        for path in nwmgr_files {
-            mig_info.add_nwmgr_file(path.unwrap().path());
-        }
-
-        debug!("migrating from balenaOS - copying system-proxy files");
-        let system_proxy_files = read_dir(BALENA_SYSTEM_PROXY_BOOT_PATH).unwrap();
-        for sys_proxy_path in system_proxy_files {
-            mig_info.add_system_proxy_file(sys_proxy_path.unwrap().path());
-        }
-    }
 
     for proxy_file in mig_info.system_proxy_files() {
         let target_file_name = Path::new(&proxy_file)
