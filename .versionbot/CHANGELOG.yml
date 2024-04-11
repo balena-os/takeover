@@ -1,4 +1,38 @@
 - commits:
+    - subject: "stage1/stage2: Add support for migrating Jetson Xavier AGX, NX SD and
+        NX eMMC devices"
+      hash: 09e0df98384d364402ecd64e088cd2c7bfac9ee7
+      body: >
+        from balenaOS to balenaOS.
+
+
+        In this commit we:
+          - ensure the existing config.json is preserved during the migration
+          - all connection files in /mnt/boot/system-connections are transferred from the old OS
+          - all system-proxy files in /mnt/boot/system-proxy are transferred as well
+          - the eMMC or SD-card of the above-mentioned devices is flashed with the new OS
+          - the QSPI or eMMC boot partition is flashed with the boot blob from the new OS
+      footer:
+        Signed-off-by: Alexandru Costache <alexandru@balena.io>
+        signed-off-by: Alexandru Costache <alexandru@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Alexandru Costache
+    - subject: Add working balenaOS to balenaOS migration
+      hash: ec3fde22c1086ac82620970e9dc851faeeb1b2a3
+      body: |
+        Converts intel-nuc device type to generic-amd64 (GPT). Includes
+        fixes to get this migration working. Does not retain device UUID.
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Ken Bannister <kb2ma@runbox.com>
+        signed-off-by: Ken Bannister <kb2ma@runbox.com>
+      author: Ken Bannister
+  version: 0.4.5
+  title: ""
+  date: 2024-04-11T14:29:55.620Z
+- commits:
     - subject: Document how takeover works
       hash: 8d89d939d38cbfeaa384d026b0c82cf8870cf57d
       body: ""
