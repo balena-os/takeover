@@ -21,6 +21,7 @@ use std::fs::create_dir_all;
 use std::io;
 use std::mem::MaybeUninit;
 use std::os::raw::c_int;
+use std::path::PathBuf;
 use std::process::Command;
 use std::str::FromStr;
 use std::thread::sleep;
@@ -34,7 +35,7 @@ use libc::{
 
 const INITIAL_LOG_LEVEL: Level = Level::Trace;
 
-fn setup_log(log_dev: &LogDevice) -> Result<()> {
+fn setup_log(log_dev: &LogDevice, takeover_dir: &str) -> Result<()> {
     trace!(
         "setup_log entered with '{}', fs type: {}",
         log_dev.dev_name.display(),
@@ -54,7 +55,7 @@ fn setup_log(log_dev: &LogDevice) -> Result<()> {
             }
         }
 
-        let mountpoint = path_append(TAKEOVER_DIR, "/mnt/log");
+        let mountpoint = path_append(takeover_dir, "/mnt/log");
         create_dir_all(&mountpoint)
             .upstream_with_context("Failed to create log mount directory /mnt/log")?;
 
@@ -106,7 +107,7 @@ fn redirect_fd(file_name: &str, old_fd: c_int, mode: c_int) -> Result<()> {
         .into_raw();
 
     let new_fd = unsafe { open(filename, mode) };
-    let _ = unsafe { CString::from_raw(filename) };
+
     if new_fd >= 0 {
         let res = unsafe { dup2(new_fd, old_fd) };
         if res >= 0 {
@@ -134,7 +135,7 @@ fn redirect_fd(file_name: &str, old_fd: c_int, mode: c_int) -> Result<()> {
     }
 }
 
-fn close_fds() -> Result<i32> {
+fn close_fds(takeover_dir: &str) -> Result<i32> {
     let mut pipe_fds: [c_int; 2] = [0; 2];
     let sys_rc = unsafe { pipe(pipe_fds.as_mut_ptr()) };
 
@@ -162,12 +163,12 @@ fn close_fds() -> Result<i32> {
     }
 
     redirect_fd(
-        &format!("{}/stdout.log", TAKEOVER_DIR),
+        &format!("{}/stdout.log", takeover_dir),
         STDOUT_FILENO,
         O_WRONLY | O_CREAT | O_TRUNC,
     )?;
     redirect_fd(
-        &format!("{}/stderr.log", TAKEOVER_DIR),
+        &format!("{}/stderr.log", takeover_dir),
         STDERR_FILENO,
         O_WRONLY | O_CREAT | O_TRUNC,
     )?;
@@ -216,15 +217,18 @@ pub fn init() -> ! {
 
     info!("Init check pid success!");
 
-    if let Err(why) = set_current_dir(TAKEOVER_DIR) {
+    let takeover_path = PathBuf::from(TAKEOVER_DIR);
+
+    if let Err(why) = set_current_dir(&takeover_path) {
         error!(
             "Failed to change to directory '{}', error: {:?}",
-            TAKEOVER_DIR, why
+            takeover_path.display(),
+            why
         );
         reboot();
     }
 
-    let s2_config = match read_stage2_config(Some(TAKEOVER_DIR)) {
+    let s2_config = match read_stage2_config(Some(&takeover_path)) {
         Ok(s2_config) => s2_config,
         Err(why) => {
             error!("Failed to read stage2 configuration, error: {:?}", why);
@@ -243,7 +247,7 @@ pub fn init() -> ! {
         }
     }
 
-    let closed_fds = match close_fds() {
+    let closed_fds = match close_fds(TAKEOVER_DIR) {
         Ok(fds) => fds,
         Err(_) => {
             error!("Failed close open files");
@@ -253,7 +257,7 @@ pub fn init() -> ! {
     info!("Stage 2 closed {} fd's", closed_fds);
 
     let ext_log = if let Some(log_dev) = s2_config.log_dev() {
-        match setup_log(log_dev) {
+        match setup_log(log_dev, TAKEOVER_DIR) {
             Ok(_) => true,
             Err(why) => {
                 error!("Setup log failed, error: {:?}", why);

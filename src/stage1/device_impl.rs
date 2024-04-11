@@ -10,6 +10,7 @@ use crate::{
 mod beaglebone;
 mod dummy;
 mod intel_nuc;
+mod jetson_xavier;
 mod raspberrypi;
 
 const DEVICE_TREE_MODEL: &str = "/proc/device-tree/model";
@@ -68,6 +69,10 @@ pub(crate) fn get_device(opts: &Options) -> Result<Box<dyn Device>> {
             }
 
             if let Some(device) = beaglebone::is_bb(opts, &dev_tree_model)? {
+                return Ok(device);
+            }
+
+            if let Some(device) = jetson_xavier::is_jetson_xavier(opts, &dev_tree_model)? {
                 return Ok(device);
             }
 

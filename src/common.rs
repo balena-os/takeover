@@ -1,3 +1,4 @@
+use finder::Finder;
 use std::cmp::min;
 use std::ffi::{CStr, CString, OsString};
 use std::fs::{read_to_string, OpenOptions};
@@ -72,6 +73,21 @@ pub(crate) fn call(cmd: &str, args: &[&str], trim_stdout: bool) -> Result<CmdRes
             ))
         }
     }
+}
+
+// Helper function for finding a file inside directory
+pub(crate) fn find_file(file_name: &str, directory: &Path) -> PathBuf {
+    let file_finder = Finder::new(directory);
+    let mut file_path = PathBuf::new();
+
+    for i in file_finder.into_iter() {
+        if i.path().to_string_lossy().contains(file_name) {
+            file_path = i.path().to_path_buf();
+            break;
+        }
+    }
+
+    file_path
 }
 
 pub(crate) fn whereis(cmd: &str) -> Result<String> {

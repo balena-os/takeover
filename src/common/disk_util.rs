@@ -1,8 +1,11 @@
 use log::{debug, error, trace};
+use std::fs::File;
 use std::io::{self, Read};
 use std::mem;
 use std::path::{Path, PathBuf};
 use std::result;
+
+use gptman::GPT;
 
 use crate::common::{Error, ErrorKind, Result};
 
@@ -28,7 +31,7 @@ pub(crate) use plain_file::PlainFile;
 pub(crate) const DEF_BLOCK_SIZE: usize = 512;
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum LabelType {
     GPT,
     Dos,
@@ -215,6 +218,12 @@ impl Disk {
 
         Ok(mbr)
     }
+
+    pub fn read_gpt(&mut self) -> gptman::Result<GPT> {
+        let mut f = File::open(self.get_image_file())?;
+        //let len = f.seek(SeekFrom::End(0))?;
+        GPT::find_from(&mut f)
+    }
 }
 
 pub(crate) struct PartitionIterator<'a> {
@@ -277,7 +286,7 @@ impl<'a> PartitionIterator<'a> {
                     self.part_idx = 4;
                     self.get_extended_partition()
                 }
-                PartitionType::Fat | PartitionType::Linux => {
+                PartitionType::Fat | PartitionType::Linux | PartitionType::GPT => {
                     // return regular partition
                     self.index += 1;
                     self.part_idx += 1;
@@ -483,7 +492,7 @@ mod test {
 
         // iterate up the path to find project root
         let ancestors: Vec<&Path> = test_path.ancestors().collect();
-        test_path = test_path.parent().unwrap();
+        //test_path = test_path.parent().unwrap();
 
         ancestors.iter().rev().find(|dir| {
             test_path = test_path.parent().unwrap();

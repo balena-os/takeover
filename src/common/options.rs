@@ -26,6 +26,13 @@ pub struct Options {
     )]
     image: Option<PathBuf>,
     #[clap(
+        long = "ldd-path",
+        value_name = "LDD_PATH",
+        value_parser,
+        help = "Path to ldd script"
+    )]
+    ldd_path: Option<PathBuf>,
+    #[clap(
         short,
         long,
         value_name = "VERSION",
@@ -168,6 +175,14 @@ impl Options {
 
     pub fn image(&self) -> &Option<PathBuf> {
         &self.image
+    }
+
+    pub fn ldd_path(&self) -> PathBuf {
+        if let Some(ldd_path) = &self.ldd_path {
+            ldd_path.clone()
+        } else {
+            PathBuf::from("")
+        }
     }
 
     pub fn version(&self) -> &str {

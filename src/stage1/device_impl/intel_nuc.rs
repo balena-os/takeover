@@ -5,13 +5,13 @@ use crate::{
     common::{Error, Options, Result},
     // linux_common::is_secure_boot,
     stage1::{
-        defs::{DeviceType, DEV_TYPE_GEN_X86_64, DEV_TYPE_INTEL_NUC},
+        defs::{DeviceType, DEV_TYPE_GEN_AMD64, DEV_TYPE_GEN_X86_64, DEV_TYPE_INTEL_NUC},
         device::Device,
         utils::is_secure_boot,
     },
 };
 
-const X86_SLUGS: [&str; 2] = [DEV_TYPE_INTEL_NUC, DEV_TYPE_GEN_X86_64];
+const X86_SLUGS: [&str; 3] = [DEV_TYPE_INTEL_NUC, DEV_TYPE_GEN_X86_64, DEV_TYPE_GEN_AMD64];
 
 pub(crate) struct IntelNuc;
 
@@ -28,6 +28,7 @@ impl IntelNuc {
             "Ubuntu 14.04.5 LTS",
             "Ubuntu 14.04.6 LTS",
             "Manjaro Linux",
+            "balenaOS 4.0.23",
         ];
 
         if opts.migrate() {

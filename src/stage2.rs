@@ -2,7 +2,6 @@ use std::fs::{
     copy, create_dir, create_dir_all, read_dir, read_to_string, remove_dir, File, OpenOptions,
 };
 use std::io::{self, Read, Write};
-
 use std::os::unix::io::AsRawFd;
 use std::process::{exit, Command, Stdio};
 use std::thread::sleep;
@@ -20,19 +19,24 @@ use libc::{ioctl, LINUX_REBOOT_CMD_RESTART, MS_RDONLY, MS_REMOUNT, SIGKILL, SIGT
 use log::{debug, error, info, trace, warn, Level};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
+use crate::common::defs::MTD_DEBUG_CMD;
 use crate::common::stage2_config::LogDevice;
+
 use crate::common::{
     call,
     defs::{
         IoctlReq, BACKUP_ARCH_NAME, BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART,
         BALENA_CONFIG_PATH, BALENA_DATA_FSTYPE, BALENA_DATA_PART, BALENA_IMAGE_NAME,
-        BALENA_IMAGE_PATH, BALENA_PART_MP, DD_CMD, DISK_BY_LABEL_PATH, EFIBOOTMGR_CMD, NIX_NONE,
-        OLD_ROOT_MP, STAGE2_CONFIG_NAME, SYSTEM_CONNECTIONS_DIR, SYS_EFI_DIR,
+        BALENA_IMAGE_PATH, BALENA_PART_MP, BALENA_ROOTA_FSTYPE, BALENA_ROOTA_PART,
+        BOOT_BLOB_NAME_JETSON_XAVIER, BOOT_BLOB_NAME_JETSON_XAVIER_NX,
+        BOOT_BLOB_PARTITION_JETSON_XAVIER, BOOT_BLOB_PARTITION_JETSON_XAVIER_NX, DD_CMD,
+        DISK_BY_LABEL_PATH, EFIBOOTMGR_CMD, JETSON_XAVIER_HW_PART_FORCE_RO_FILE, NIX_NONE,
+        OLD_ROOT_MP, STAGE2_CONFIG_NAME, SYSTEM_CONNECTIONS_DIR, SYSTEM_PROXY_DIR, SYS_EFI_DIR,
     },
     dir_exists,
-    disk_util::{Disk, PartInfo, PartitionIterator, DEF_BLOCK_SIZE},
+    disk_util::{Disk, LabelType, PartInfo, PartitionIterator, DEF_BLOCK_SIZE},
     error::{Error, ErrorKind, Result, ToError},
-    file_exists, format_size_with_unit, get_mem_info,
+    file_exists, find_file, format_size_with_unit, get_mem_info,
     loop_device::LoopDevice,
     options::Options,
     path_append,
@@ -43,6 +47,8 @@ use regex::Regex;
 
 const DD_BLOCK_SIZE: usize = 128 * 1024; // 4_194_304;
 
+// QSPI flash storage size in bytes for Jetson Xavier NX
+const JETSON_XAVIER_NX_QSPI_SIZE: &str = "0x2000000";
 const VALIDATE_MAX_ERR: usize = 20;
 const DO_VALIDATE: bool = false;
 const VALIDATE_BLOCK_SIZE: usize = 64 * 1024; // 4_194_304;
@@ -165,7 +171,11 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<()> {
         src_path.display(),
         &to_path.display()
     ))?;
-    info!("Copied image to '{}'", to_path.display());
+    info!(
+        "Copied image from {} to '{}'",
+        src_path.display(),
+        to_path.display()
+    );
 
     let src_path = path_append(OLD_ROOT_MP, &s2_cfg.config_path);
     let to_path = path_append(TRANSFER_DIR, BALENA_CONFIG_PATH);
@@ -187,51 +197,56 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<()> {
         info!("Copied backup to '{}'", to_path.display());
     }
 
-    let nwmgr_path = path_append(
-        OLD_ROOT_MP,
-        path_append(&s2_cfg.work_dir, SYSTEM_CONNECTIONS_DIR),
-    );
+    // Copy system-connections and system-proxy files over to the new install
+    let system_config_dirs = vec![SYSTEM_CONNECTIONS_DIR, SYSTEM_PROXY_DIR];
 
-    let to_dir = path_append(TRANSFER_DIR, SYSTEM_CONNECTIONS_DIR);
-    if !dir_exists(&to_dir)? {
-        create_dir_all(&to_dir).upstream_with_context(&format!(
-            "Failed to create directory: '{}'",
-            to_dir.display()
-        ))?;
-    }
+    for system_config_dir in system_config_dirs.into_iter() {
+        let config_file_path = path_append(
+            OLD_ROOT_MP,
+            path_append(&s2_cfg.work_dir, system_config_dir),
+        );
 
-    for dir_entry in read_dir(&nwmgr_path).upstream_with_context(&format!(
-        "Failed to read drectory '{}'",
-        nwmgr_path.display()
-    ))? {
-        match dir_entry {
-            Ok(dir_entry) => {
-                if let Some(filename) = dir_entry.path().file_name() {
-                    let to_path = path_append(&to_dir, filename);
-                    copy(dir_entry.path(), &to_path).upstream_with_context(&format!(
-                        "Failed to copy '{}' to '{}'",
-                        dir_entry.path().display(),
-                        to_path.display()
-                    ))?;
-                    info!("Copied network config to '{}'", to_path.display());
-                } else {
-                    return Err(Error::with_context(
-                        ErrorKind::InvParam,
+        let to_dir = path_append(TRANSFER_DIR, system_config_dir);
+        if !dir_exists(&to_dir)? {
+            create_dir_all(&to_dir).upstream_with_context(&format!(
+                "Failed to create directory: '{}'",
+                to_dir.display()
+            ))?;
+        }
+
+        for dir_entry in read_dir(&config_file_path).upstream_with_context(&format!(
+            "Failed to read drectory '{}'",
+            config_file_path.display()
+        ))? {
+            match dir_entry {
+                Ok(dir_entry) => {
+                    if let Some(filename) = dir_entry.path().file_name() {
+                        let to_path = path_append(&to_dir, filename);
+                        copy(dir_entry.path(), &to_path).upstream_with_context(&format!(
+                            "Failed to copy '{}' to '{}'",
+                            dir_entry.path().display(),
+                            to_path.display()
+                        ))?;
+                        info!("Copied network config to '{}'", to_path.display());
+                    } else {
+                        return Err(Error::with_context(
+                            ErrorKind::InvParam,
+                            &format!(
+                                "Failed to extract filename from path: '{}'",
+                                dir_entry.path().display()
+                            ),
+                        ));
+                    }
+                }
+                Err(why) => {
+                    return Err(Error::from_upstream(
+                        Box::new(why),
                         &format!(
-                            "Failed to extract filename from path: '{}'",
-                            dir_entry.path().display()
+                            "Failed to retrieve directory entry for '{}'",
+                            config_file_path.display()
                         ),
                     ));
                 }
-            }
-            Err(why) => {
-                return Err(Error::from_upstream(
-                    Box::new(why),
-                    &format!(
-                        "Failed to retrieve directory entry for '{}'",
-                        nwmgr_path.display()
-                    ),
-                ));
             }
         }
     }
@@ -387,7 +402,7 @@ fn unmount_partitions(mountpoints: &[UmountPart]) -> Result<()> {
 
 #[allow(dead_code)]
 fn part_reread(device: &Path) -> Result<()> {
-    // try ioctrl #define BLKRRPART  _IO(0x12,95)	/* re-read partition table */
+    // try ioctrl #define BLKRRPART  _IO(0x12,95) - re-read partition table
     let device_file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -423,61 +438,69 @@ fn transfer_boot_files<P: AsRef<Path>>(dev_root: P) -> Result<()> {
         src_path.display(),
         target_path.display()
     ))?;
-
+    debug!(
+        "Source config json is '{}', target config.json is '{}'",
+        src_path.display(),
+        target_path.display()
+    );
     info!("Successfully copied config.json to boot partition",);
 
-    let src_path = path_append(TRANSFER_DIR, SYSTEM_CONNECTIONS_DIR);
-    let dir_list = read_dir(&src_path).upstream_with_context(&format!(
-        "Failed to read directory '{}'",
-        src_path.display()
-    ))?;
+    let boot_directories = vec![SYSTEM_CONNECTIONS_DIR, SYSTEM_PROXY_DIR];
 
-    let target_dir = path_append(dev_root.as_ref(), SYSTEM_CONNECTIONS_DIR);
-    debug!(
-        "Transfering files from '{}' to '{}'",
-        src_path.display(),
-        target_dir.display()
-    );
+    for boot_directory in boot_directories.into_iter() {
+        let src_path = path_append(TRANSFER_DIR, boot_directory);
+        let dir_list = read_dir(&src_path).upstream_with_context(&format!(
+            "Failed to read directory '{}'",
+            src_path.display()
+        ))?;
 
-    for entry in dir_list {
-        match entry {
-            Ok(entry) => {
-                let curr_file = entry.path();
-                debug!("Found source file '{}'", curr_file.display());
-                if entry
-                    .metadata()
-                    .upstream_with_context(&format!(
-                        "Failed to read metadata from file '{}'",
-                        curr_file.display()
-                    ))?
-                    .is_file()
-                {
-                    if let Some(filename) = curr_file.file_name() {
-                        let target_path = path_append(&target_dir, filename);
-                        copy(&curr_file, &target_path).upstream_with_context(&format!(
-                            "Failed to copy '{}' to '{}'",
-                            curr_file.display(),
-                            target_path.display()
-                        ))?;
-                        info!(
-                            "Successfully copied '{}' to boot partition as '{}",
-                            curr_file.display(),
-                            target_path.display()
-                        );
-                    } else {
-                        warn!(
-                            "Failed to extract filename from path '{}'",
+        let target_dir = path_append(dev_root.as_ref(), boot_directory);
+        debug!(
+            "Transfering files from '{}' to '{}'",
+            src_path.display(),
+            target_dir.display()
+        );
+
+        for entry in dir_list {
+            match entry {
+                Ok(entry) => {
+                    let curr_file = entry.path();
+                    debug!("Found source file '{}'", curr_file.display());
+                    if entry
+                        .metadata()
+                        .upstream_with_context(&format!(
+                            "Failed to read metadata from file '{}'",
                             curr_file.display()
-                        );
+                        ))?
+                        .is_file()
+                    {
+                        if let Some(filename) = curr_file.file_name() {
+                            let target_path = path_append(&target_dir, filename);
+                            copy(&curr_file, &target_path).upstream_with_context(&format!(
+                                "Failed to copy '{}' to '{}'",
+                                curr_file.display(),
+                                target_path.display()
+                            ))?;
+                            info!(
+                                "Successfully copied '{}' to boot partition as '{}",
+                                curr_file.display(),
+                                target_path.display()
+                            );
+                        } else {
+                            warn!(
+                                "Failed to extract filename from path '{}'",
+                                curr_file.display()
+                            );
+                        }
                     }
                 }
-            }
-            Err(why) => {
-                return Err(Error::with_all(
-                    ErrorKind::Upstream,
-                    "Failed to read directory entry",
-                    Box::new(why),
-                ));
+                Err(why) => {
+                    return Err(Error::with_all(
+                        ErrorKind::Upstream,
+                        "Failed to read directory entry",
+                        Box::new(why),
+                    ));
+                }
             }
         }
     }
@@ -485,39 +508,115 @@ fn transfer_boot_files<P: AsRef<Path>>(dev_root: P) -> Result<()> {
     Ok(())
 }
 
-fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo)> {
+fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo, PartInfo)> {
     let mut disk = Disk::from_drive_file(device, None)?;
-    let part_iterator = PartitionIterator::new(&mut disk)?;
+
     let mut boot_part: Option<PartInfo> = None;
+    let mut root_a_part: Option<PartInfo> = None;
     let mut data_part: Option<PartInfo> = None;
 
-    for partition in part_iterator {
-        debug!(
-            "partition: {}, start: {}, sectors: {}",
-            partition.index, partition.start_lba, partition.num_sectors
-        );
+    // GPT provides a 'protective MBR' at LBA 0 to identify itself in a backward
+    // compatible way. So, read the GPT header if so.
+    let is_gpt = disk.get_label()? == LabelType::GPT;
 
-        match partition.index {
-            1 => {
-                boot_part = Some(partition);
+    if !is_gpt {
+        let part_iterator = PartitionIterator::new(&mut disk)?;
+        for partition in part_iterator {
+            debug!(
+                "partition: {}, start: {}, sectors: {}",
+                partition.index, partition.start_lba, partition.num_sectors
+            );
+
+            match partition.index {
+                1 => {
+                    boot_part = Some(partition);
+                }
+                // rootA partition is needed solely in the context of Jetson migrations,
+                // in which case we will mount it to extract the new Jetson specific boot blob
+                // to be written to the QSPI flash or boot partition.
+                2 => {
+                    root_a_part = Some(partition);
+                }
+                3..=5 => debug!("Skipping partition {}", partition.index),
+                6 => {
+                    data_part = Some(partition);
+                    break;
+                }
+                _ => {
+                    return Err(Error::with_context(
+                        ErrorKind::InvParam,
+                        &format!("Invalid partition index encountered: {}", partition.index),
+                    ));
+                }
             }
-            2..=5 => debug!("Skipping partition {}", partition.index),
-            6 => {
-                data_part = Some(partition);
-                break;
-            }
-            _ => {
+        }
+    } else {
+        // Use the iterator built into gptman and populate the PartInfo structs
+        // for the boot and data partitions as best we can.
+        let gpt = match disk.read_gpt() {
+            Ok(gpt_res) => gpt_res,
+            Err(e) => {
                 return Err(Error::with_context(
-                    ErrorKind::InvParam,
-                    &format!("Invalid partition index encountered: {}", partition.index),
+                    ErrorKind::InvState,
+                    &format!("Failed to read GPT header, error: {} ", e),
                 ));
+            }
+        };
+        for (i, p) in gpt.iter() {
+            if p.is_used() {
+                debug!(
+                    "Partition #{}: type = {:?}, size = {} bytes, starting lba = {}, name = {}",
+                    i,
+                    p.partition_type_guid,
+                    p.size().unwrap() * gpt.sector_size,
+                    p.starting_lba,
+                    p.partition_name.as_str()
+                );
+
+                if p.partition_name.as_str() == BALENA_BOOT_PART {
+                    boot_part = Some(PartInfo {
+                        index: i as usize,
+                        ptype: 0x83, // MBR Linux byte; really this is the EFI system
+                        // partition, but MBR doesn't define this type.
+                        status: 0, // Not clear what this should be
+                        start_lba: p.starting_lba,
+                        num_sectors: p.size().unwrap(),
+                    })
+                } else if p.partition_name.as_str() == BALENA_ROOTA_PART {
+                    root_a_part = Some(PartInfo {
+                        index: i as usize,
+                        ptype: 0x83, // MBR Linux byte; really this is the EFI system
+                        // partition, but MBR doesn't define this type.
+                        status: 0, // Not clear what this should be
+                        start_lba: p.starting_lba,
+                        num_sectors: p.size().unwrap(),
+                    })
+                } else if p.partition_name.as_str() == BALENA_DATA_PART {
+                    data_part = Some(PartInfo {
+                        index: i as usize,
+                        ptype: 0x83, // MBR Linux byte
+                        status: 0,   // not clear what this should be
+                        start_lba: p.starting_lba,
+                        num_sectors: p.size().unwrap(),
+                    });
+                }
             }
         }
     }
 
     if let Some(boot_part) = boot_part {
         if let Some(data_part) = data_part {
-            Ok((boot_part, data_part))
+            if let Some(root_a_part) = root_a_part {
+                Ok((boot_part, root_a_part, data_part))
+            } else {
+                Err(Error::with_context(
+                    ErrorKind::NotFound,
+                    &format!(
+                        "RootA partition could not be found on '{}",
+                        device.display()
+                    ),
+                ))
+            }
         } else {
             Err(Error::with_context(
                 ErrorKind::NotFound,
@@ -596,7 +695,51 @@ fn efi_setup(device: &Path) -> Result<()> {
     Ok(())
 }
 
-fn raw_mount_balena(device: &Path) -> Result<()> {
+// This functionality is specific to Jetson AGX Xavier and Xavier NX migration.
+// In the current format, the migration is expected to be performed from
+// a balenaOS install to another balenaOS install.
+fn write_boot_blob(s2_config: &Stage2Config, mount_path: PathBuf) {
+    let img_path;
+
+    if s2_config.device_type.starts_with("Jetson Xavier AGX") {
+        img_path = find_file(BOOT_BLOB_NAME_JETSON_XAVIER, &mount_path);
+
+        debug!("boot0_image_path is: '{}'", img_path.display());
+        debug!("target device is: '{}'", BOOT_BLOB_PARTITION_JETSON_XAVIER);
+
+        // Enable writing to /dev/mmcblk0boot0/
+        let force_ro = "0";
+        std::fs::write(JETSON_XAVIER_HW_PART_FORCE_RO_FILE, force_ro)
+            .expect("Could not set hw boot partition rw!");
+
+        let boot0_data = std::fs::read(img_path).unwrap();
+        debug!("boot blob - bytes read from disk: '{}' ", boot0_data.len());
+
+        std::fs::write(BOOT_BLOB_PARTITION_JETSON_XAVIER, boot0_data)
+            .expect("Could not write hw boot partition!");
+        debug!("Jetson Xavier AGX boot blob was written");
+    } else if s2_config.device_type.starts_with("Jetson Xavier NX") {
+        img_path = find_file(BOOT_BLOB_NAME_JETSON_XAVIER_NX, &mount_path);
+
+        debug!("boot0_image_path is: '{}'", img_path.display());
+        debug!(
+            "boot0_image_dev is: '{}'",
+            BOOT_BLOB_PARTITION_JETSON_XAVIER_NX
+        );
+
+        match flash_qspi(&img_path) {
+            FlashState::Success => {
+                info!("Xavier NX QSPI written succesfully!")
+            }
+            _ => {
+                warn!("Failed to write QSPI!")
+            }
+        }
+    }
+}
+
+fn raw_mount_balena(s2_cfg: &Stage2Config) -> Result<()> {
+    let device = &s2_cfg.flash_dev;
     debug!("raw_mount_balena called");
 
     if !dir_exists(BALENA_PART_MP)? {
@@ -606,7 +749,7 @@ fn raw_mount_balena(device: &Path) -> Result<()> {
         ))?;
     }
 
-    let (boot_part, data_part) = get_partition_infos(device)?;
+    let (boot_part, root_a_part, data_part) = get_partition_infos(device)?;
 
     let mut loop_device = LoopDevice::get_free(true)?;
     info!("Create loop device: '{}'", loop_device.get_path().display());
@@ -648,6 +791,7 @@ fn raw_mount_balena(device: &Path) -> Result<()> {
         loop_device.get_path().display(),
         BALENA_PART_MP
     );
+
     // TODO: copy files
 
     transfer_boot_files(BALENA_PART_MP)?;
@@ -659,6 +803,64 @@ fn raw_mount_balena(device: &Path) -> Result<()> {
     umount(BALENA_PART_MP).upstream_with_context("Failed to unmount boot partition")?;
 
     info!("Unmounted boot partition from {}", BALENA_PART_MP);
+
+    // After the internal storage is flashed with the new balenaOS image,
+    // we mount the rootA partition, extract the Jetson boot blob from it
+    // and the use it to program the QSPI or the boot partition of the device.
+    // The new Jetson balenaOS image is expected to include a pre-built boot blog
+    // taken from an provisioning made with jetson-flash.
+    if s2_cfg.device_type.starts_with("Jetson Xavier AGX")
+        || s2_cfg.device_type.starts_with("Jetson Xavier NX")
+    {
+        let mut loop_device = LoopDevice::get_free(true)?;
+        info!("Create loop device: '{}'", loop_device.get_path().display());
+        let byte_offset = root_a_part.start_lba * DEF_BLOCK_SIZE as u64;
+        let size_limit = root_a_part.num_sectors * DEF_BLOCK_SIZE as u64;
+
+        debug!(
+            "Setting up device '{}' with offset {}, sizelimit {} on '{}'",
+            device.display(),
+            byte_offset,
+            size_limit,
+            loop_device.get_path().display()
+        );
+
+        loop_device.setup(device, Some(byte_offset), Some(size_limit))?;
+        info!(
+            "Setup device '{}' with offset {}, sizelimit {} on '{}'",
+            device.display(),
+            byte_offset,
+            size_limit,
+            loop_device.get_path().display()
+        );
+
+        mount(
+            Some(loop_device.get_path()),
+            BALENA_PART_MP,
+            Some(BALENA_ROOTA_FSTYPE.as_bytes()),
+            MsFlags::empty(),
+            NIX_NONE,
+        )
+        .upstream_with_context(&format!(
+            "Failed to mount {} on {}",
+            loop_device.get_path().display(),
+            BALENA_PART_MP
+        ))?;
+
+        info!(
+            "Mounted resin-rootA partition as {} on {}",
+            loop_device.get_path().display(),
+            BALENA_PART_MP
+        );
+
+        write_boot_blob(s2_cfg, PathBuf::from(BALENA_PART_MP));
+
+        sync();
+
+        umount(BALENA_PART_MP).upstream_with_context("Failed to unmount boot partition")?;
+
+        info!("Unmounted resin-rootA partition from {}", BALENA_PART_MP);
+    }
 
     let backup_path = path_append(TRANSFER_DIR, BACKUP_ARCH_NAME);
 
@@ -892,6 +1094,60 @@ fn validate(target_path: &Path, image_path: &Path) -> Result<bool> {
     Ok(err_count == 0)
 }
 
+// This function is used only for balenaOS to balenaOS
+// migration of Jetson Xavier AGX and Xavier NX
+fn flash_qspi(image_path: &Path) -> FlashState {
+    let mut flash_qspi_res = FlashState::Success;
+    debug!("entered flash_qspi");
+
+    match call_command!(
+        &format!("/bin/{}", MTD_DEBUG_CMD),
+        &[
+            "erase",
+            BOOT_BLOB_PARTITION_JETSON_XAVIER_NX,
+            "0",
+            JETSON_XAVIER_NX_QSPI_SIZE
+        ],
+        "Failed to execute mtdebug!"
+    ) {
+        Ok(cmd_stdout) => {
+            for line in cmd_stdout.lines() {
+                info!("line: {}", line);
+            }
+        }
+        _ => {
+            warn!("Error executing mtd_debug erase!")
+        }
+    }
+
+    match call_command!(
+        &format!("/bin/{}", MTD_DEBUG_CMD),
+        &[
+            "write",
+            BOOT_BLOB_PARTITION_JETSON_XAVIER_NX,
+            "0",
+            JETSON_XAVIER_NX_QSPI_SIZE,
+            &image_path.to_string_lossy()
+        ],
+        "Failed to execute mtdebug!"
+    ) {
+        Ok(cmd_stdout) => {
+            for line in cmd_stdout.lines() {
+                info!("line: {}", line);
+            }
+        }
+        _ => {
+            warn!("Error executing mtd_debug write!");
+            flash_qspi_res = FlashState::FailRecoverable; // TODO: try flash back old boot0 image as fallback
+        }
+    }
+
+    info!("Executed mtd_debug");
+
+    info!("leaving flash_qspi()");
+    flash_qspi_res
+}
+
 fn flash_external(target_path: &Path, image_path: &Path, dd_cmd: &str) -> FlashState {
     let mut fail_res = FlashState::FailRecoverable;
 
@@ -1013,7 +1269,7 @@ pub fn stage2(opts: &Options) -> ! {
     info!("Stage 2 migrate_worker entered");
 
     const NO_PREFIX: Option<&Path> = None;
-    let s2_config = match read_stage2_config(NO_PREFIX) {
+    let s2_config: Stage2Config = match read_stage2_config(NO_PREFIX) {
         Ok(s2_config) => s2_config,
         Err(why) => {
             error!("Failed to read stage2 configuration, error: {:?}", why);
@@ -1057,6 +1313,7 @@ pub fn stage2(opts: &Options) -> ! {
     sync();
 
     let image_path = path_append(TRANSFER_DIR, BALENA_IMAGE_PATH);
+    debug!("OS image exists - {}", image_path.exists());
 
     match flash_external(
         &s2_config.flash_dev,
@@ -1095,14 +1352,13 @@ pub fn stage2(opts: &Options) -> ! {
         check_loop_control("Stage2 after flash", "/dev");
     }
 
-    if let Err(why) = raw_mount_balena(&s2_config.flash_dev) {
+    if let Err(why) = raw_mount_balena(&s2_config) {
         error!("Failed to transfer files to balena OS, error: {:?}", why);
     } else {
         info!("Migration completed successfully");
     }
 
     sync();
-
     reboot();
 }
 
