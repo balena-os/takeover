@@ -105,7 +105,7 @@ fn get_required_space(s2_cfg: &Stage2Config) -> Result<u64> {
     );
 
     for dir_entry in read_dir(&nwmgr_path).upstream_with_context(&format!(
-        "Failed to read drectory '{}'",
+        "Failed to read directory '{}'",
         nwmgr_path.display()
     ))? {
         match dir_entry {
@@ -215,7 +215,7 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<()> {
         }
 
         for dir_entry in read_dir(&config_file_path).upstream_with_context(&format!(
-            "Failed to read drectory '{}'",
+            "Failed to read directory '{}'",
             config_file_path.display()
         ))? {
             match dir_entry {
