@@ -1,4 +1,23 @@
 - commits:
+    - subject: "stage1: Compare system-connection files and their contents"
+      hash: c9be315f0482e07495b5e67531c0c120014b45da
+      body: |
+        ... and abort the migration if there's any difference between
+        the files in /mnt/boot/system-connections and the ones in
+        the bind-mounted path /etc/NetworkManager/system-connections.
+
+        This comparison is performed only during balenaOS to balenaOS
+        migrations.
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Alexandru Costache <alexandru@balena.io>
+        signed-off-by: Alexandru Costache <alexandru@balena.io>
+      author: Alexandru Costache
+  version: 0.4.6
+  title: ""
+  date: 2024-04-15T16:31:32.803Z
+- commits:
     - subject: "stage1/stage2: Add support for migrating Jetson Xavier AGX, NX SD and
         NX eMMC devices"
       hash: 09e0df98384d364402ecd64e088cd2c7bfac9ee7
