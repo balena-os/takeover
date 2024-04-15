@@ -59,6 +59,9 @@ pub const SYSTEM_CONNECTIONS_DIR: &str = "system-connections";
 // balena directory which holds redsocks proxy configuration files
 pub const SYSTEM_PROXY_DIR: &str = "system-proxy";
 
+// default mountpoint for the balenaOS boot partition
+pub const BALENA_OS_BOOT_MP: &str = "/mnt/boot/";
+
 // default mountpoint for the balenaOS data partition
 pub const BALENA_DATA_MP: &str = "/mnt/data/";
 pub const BALENA_OS_NAME: &str = "balenaOS";
@@ -66,6 +69,7 @@ pub const BALENA_OS_NAME: &str = "balenaOS";
 pub const BALENA_SYSTEM_CONNECTIONS_BOOT_PATH: &str = "/mnt/boot/system-connections/";
 pub const BALENA_SYSTEM_PROXY_BOOT_PATH: &str = "/mnt/boot/system-proxy/";
 
+pub const BALENA_NETWORK_MANAGER_BIND_MOUNT: &str = "/etc/NetworkManager/";
 // Enables writing to the hardware-defined boot partition on AGX Xavier.
 // For details on boot partitions access in Linux,
 // see https://www.kernel.org/doc/Documentation/mmc/mmc-dev-parts.txt

@@ -19,6 +19,9 @@ version = "0.2.70"
 [dependencies.finder]
 version = "0.1"
 
+[dependencies.file_diff]
+version = "1.0.0"
+
 [dependencies.reqwest]
 version = "0.11.24"
 features = ["blocking", "json"]
