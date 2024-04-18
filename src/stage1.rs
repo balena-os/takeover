@@ -413,7 +413,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         copy_commands.push(MTD_DEBUG_CMD)
     }
 
-    let commands = match ExeCopy::new(copy_commands, opts) {
+    let commands = match ExeCopy::new(copy_commands) {
         Ok(commands) => {
             let cmd_space = commands.get_req_space();
             debug!(

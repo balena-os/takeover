@@ -1,12 +1,8 @@
 use crate::common::system::stat;
-use crate::common::{
-    call, dir_exists, options::Options, path_append, whereis, Error, ErrorKind, Result, ToError,
-};
+use crate::common::{dir_exists, path_append, whereis, Error, ErrorKind, Result, ToError};
 
-use lazy_static::lazy_static;
-use log::{debug, info, trace, warn};
-use nix::NixPath;
-use regex::Regex;
+use lddtree::DependencyAnalyzer;
+use log::{debug, error, info, trace};
 use std::collections::HashSet;
 use std::fs::{copy, create_dir, create_dir_all, read_link};
 use std::path::{Path, PathBuf};
@@ -15,11 +11,10 @@ pub(crate) struct ExeCopy {
     req_space: u64,
     libraries: HashSet<String>,
     executables: HashSet<String>,
-    ldd_script_path: PathBuf,
 }
 
 impl ExeCopy {
-    pub fn new(cmd_list: Vec<&str>, opts: &Options) -> Result<ExeCopy> {
+    pub fn new(cmd_list: Vec<&str>) -> Result<ExeCopy> {
         trace!("new: entered with {:?}", cmd_list);
 
         let mut executables: HashSet<String> = HashSet::new();
@@ -42,7 +37,6 @@ impl ExeCopy {
             req_space: 0,
             libraries: HashSet::new(),
             executables,
-            ldd_script_path: opts.ldd_path(),
         };
 
         efi_files.get_libs_for()?;
@@ -55,34 +49,23 @@ impl ExeCopy {
 
     fn get_libs_for(&mut self) -> Result<()> {
         trace!("get_libs_for: entered");
-
-        let ldd_path: String = if self.ldd_script_path.is_empty() {
-            debug!("lld path was not provided, will use the one from current OS, if available");
-            whereis("ldd").upstream_with_context(
-                "Failed to locate ldd executable, please provide path to ldd manually",
-            )?
-        } else {
-            debug!("Provided ldd path: {}", self.ldd_script_path.display());
-            self.ldd_script_path.as_path().display().to_string()
-        };
         let mut check_libs: HashSet<String> = HashSet::new();
-
-        // TODO: this_path processing
 
         for curr_path in &self.executables {
             let stat = stat(curr_path)
                 .upstream_with_context(&format!("Failed to stat '{}'", curr_path))?;
             self.req_space += stat.st_size as u64;
-            self.get_libs(curr_path, ldd_path.as_str(), &mut check_libs)?;
+            self.get_libs(curr_path, &mut check_libs)?;
         }
 
+        // This goes down the dependency tree and check sub-dependencies
         while !check_libs.is_empty() {
             let mut unchecked_libs: HashSet<String> = HashSet::new();
             for curr in &check_libs {
                 self.add_lib(curr)?;
             }
             for curr in &check_libs {
-                self.get_libs(curr, ldd_path.as_str(), &mut unchecked_libs)?;
+                self.get_libs(curr, &mut unchecked_libs)?;
             }
             check_libs = unchecked_libs;
         }
@@ -108,69 +91,30 @@ impl ExeCopy {
         }
     }
 
-    fn get_libs(&self, file: &str, ldd_path: &str, found: &mut HashSet<String>) -> Result<()> {
+    fn get_libs(&self, file: &str, found: &mut HashSet<String>) -> Result<()> {
         trace!("get_libs: entered with '{}'", file);
-        let ldd_res = match call(ldd_path, &[file], true) {
-            Ok(cmd_res) => {
-                if cmd_res.status.success() {
-                    cmd_res.stdout
-                } else if cmd_res.stderr.contains("not a dynamic executable")
-                    || cmd_res.stdout.contains("not a dynamic executable")
-                {
-                    return Ok(());
-                } else {
-                    return Err(Error::with_context(
-                        ErrorKind::ExecProcess,
-                        &format!(
-                            "Failed to retrieve dynamic libs for '{}', error: {}",
-                            file, cmd_res.stderr
-                        ),
-                    ));
+        let analyzer = DependencyAnalyzer::new(PathBuf::from("/"));
+
+        match analyzer.analyze(file) {
+            Ok(dependencies) => {
+                trace!("Dependency Tree for {file}:\n {:#?}", dependencies);
+                for (_libname, library) in dependencies.libraries.iter() {
+                    let path = library.path.to_str().unwrap();
+
+                    if !self.libraries.contains(path) {
+                        found.insert(path.to_owned());
+                    }
                 }
+                Ok(())
             }
             Err(why) => {
-                return Err(Error::with_all(
-                    ErrorKind::ExecProcess,
-                    &format!("2failed to retrieve dynamic libs for '{}'", file),
-                    Box::new(why),
-                ));
-            }
-        };
-
-        lazy_static! {
-            static ref LIB_REGEX: Regex = Regex::new(
-                r#"^\s*(\S+)\s+(=>\s+(\S+)\s+)?(\(0x[0-9,a-f,A-F]+\))|statically linked$"#
-            )
-            .unwrap();
-        }
-
-        for lib_str in ldd_res.lines() {
-            if let Some(captures) = LIB_REGEX.captures(lib_str) {
-                if let Some(lib_name) = captures.get(1) {
-                    let lib_name = lib_name.as_str();
-                    if let Some(lib_path) = captures.get(3) {
-                        let lib_path = lib_path.as_str();
-                        if !self.libraries.contains(lib_path) {
-                            found.insert(lib_path.to_owned());
-                        }
-                    } else {
-                        let lib_path = PathBuf::from(lib_name);
-                        if !self.libraries.contains(lib_name) {
-                            if lib_path.is_absolute() && lib_path.exists() {
-                                found.insert(lib_name.to_owned());
-                            } else {
-                                debug!("get_libs: no path for {}", lib_name);
-                            }
-                        }
-                    }
-                } else {
-                    debug!("get_libs: lib is statically linked: '{}'", file);
-                }
-            } else {
-                warn!("get_libs: no match for {}", lib_str);
+                error!("Error analysing dependency for: '{}': {:?}", file, why);
+                Err(Error::with_context(
+                    ErrorKind::Upstream,
+                    &format!("Error analysing dependency for: '{}': {:?}", file, why),
+                ))
             }
         }
-        Ok(())
     }
 
     fn copy_file<P1: AsRef<Path>, P2: AsRef<Path>>(src_path: P1, takeover_dir: P2) -> Result<()> {
