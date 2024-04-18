@@ -151,49 +151,15 @@ impl MigrateInfo {
         // Migration of system connections has some special handling when
         // migrating from balenaOS.
         if os_name.starts_with(BALENA_OS_NAME) {
-            // Check if the files in /etc/NetworkManager/system-connections also exist in /mnt/boot/system-connections
-            // and if they have the same contents
-            let mut compare_result = compare_files(
-                PathBuf::from(BALENA_NETWORK_MANAGER_BIND_MOUNT).join(SYSTEM_CONNECTIONS_DIR),
-                PathBuf::from(BALENA_OS_BOOT_MP).join(SYSTEM_CONNECTIONS_DIR),
-            );
-
-            match compare_result {
-                Ok(()) => {
-                    info!(
-                    "OK: Bind-mounted path connection files match the ones in the boot partition."
-                );
-                }
-                Err(why) => {
-                    return Err(Error::from_upstream_error(
-                    Box::new(why),
-                    "Bind-mounted path connection files don't match the ones in the boot partition.",
-                ));
-                }
+            // To avoid any surprises (like a device unable to come online after
+            // migration), we abort the process if we detect any difference
+            // between the two balenaOS locations that can contain
+            // NetworkManager connection files.
+            if let Some(error) = compare_system_connection_locations() {
+                return Err(error);
             }
 
-            // Check if the files in /mnt/boot/system-connections also exist in /etc/NetworkManager/system-connections
-            // and if they have the same contents
-            compare_result = compare_files(
-                PathBuf::from(BALENA_OS_BOOT_MP).join(SYSTEM_CONNECTIONS_DIR),
-                PathBuf::from(BALENA_NETWORK_MANAGER_BIND_MOUNT).join(SYSTEM_CONNECTIONS_DIR),
-            );
-
-            match compare_result {
-                Ok(()) => {
-                    info!(
-                    "OK: Boot partition connection files match the ones in the bind-mounted path."
-                );
-                }
-                Err(why) => {
-                    return Err(Error::from_upstream_error(
-                    Box::new(why),
-                    "Boot partition connection files don't match the ones in the bind-mounted path.",
-                ));
-                }
-            }
-
-            // If migrating from balenaOS, copy all files from /mnt/boot/system-connections
+            // Copy all files from /mnt/boot/system-connections
             if os_name.starts_with(BALENA_OS_NAME) {
                 debug!("migrating from balenaOS - marking system-connections files for copying");
                 let nwmgr_dir_entries = read_dir(BALENA_SYSTEM_CONNECTIONS_BOOT_PATH)
@@ -466,6 +432,56 @@ impl MigrateInfo {
             ))
         }
     }
+}
+
+/// Compares the two locations of balenaOS that contain NetworkManager
+/// connection files:
+///
+/// 1. The bind-mounted path `/etc/NetworkManager/system-connections`
+/// 2. The boot partition path `/mnt/boot/system-connections`
+///
+/// Returns an error if any difference between the locations is detected.
+///
+/// For context, check the [balenaOS networking
+/// docs](https://docs.balena.io/reference/OS/network/).
+fn compare_system_connection_locations() -> Option<Error> {
+    // Check if the files in /etc/NetworkManager/system-connections also exist in /mnt/boot/system-connections
+    // and if they have the same contents
+    let mut compare_result = compare_files(
+        PathBuf::from(BALENA_NETWORK_MANAGER_BIND_MOUNT).join(SYSTEM_CONNECTIONS_DIR),
+        PathBuf::from(BALENA_OS_BOOT_MP).join(SYSTEM_CONNECTIONS_DIR),
+    );
+    match compare_result {
+        Ok(()) => {
+            info!("OK: Bind-mounted path connection files match the ones in the boot partition.");
+        }
+        Err(why) => {
+            return Some(Error::from_upstream_error(
+                Box::new(why),
+                "Bind-mounted path connection files don't match the ones in the boot partition.",
+            ));
+        }
+    }
+    compare_result = compare_files(
+        PathBuf::from(BALENA_OS_BOOT_MP).join(SYSTEM_CONNECTIONS_DIR),
+        PathBuf::from(BALENA_NETWORK_MANAGER_BIND_MOUNT).join(SYSTEM_CONNECTIONS_DIR),
+    );
+
+    // Check if the files in /mnt/boot/system-connections also exist in /etc/NetworkManager/system-connections
+    // and if they have the same contents
+    match compare_result {
+        Ok(()) => {
+            info!("OK: Boot partition connection files match the ones in the bind-mounted path.");
+        }
+        Err(why) => {
+            return Some(Error::from_upstream_error(
+                Box::new(why),
+                "Boot partition connection files don't match the ones in the bind-mounted path.",
+            ));
+        }
+    }
+
+    None
 }
 
 // Compares the contents of the files in dir1
