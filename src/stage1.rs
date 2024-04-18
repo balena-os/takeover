@@ -2,7 +2,7 @@ mod backup;
 
 use std::env::set_current_dir;
 use std::fs::{
-    copy, create_dir, create_dir_all, read_dir, read_link, remove_dir_all, symlink_metadata, File,
+    copy, create_dir, create_dir_all, read_dir, read_link, remove_dir_all, symlink_metadata,
     OpenOptions,
 };
 use std::io::Write;
@@ -37,16 +37,12 @@ mod image_retrieval;
 mod utils;
 mod wifi_config;
 
-use file_diff::diff_files;
-
 use crate::{
     common::{
         call,
         defs::{
-            BALENA_DATA_MP, BALENA_NETWORK_MANAGER_BIND_MOUNT, BALENA_OS_BOOT_MP, BALENA_OS_NAME,
-            BALENA_SYSTEM_CONNECTIONS_BOOT_PATH, BALENA_SYSTEM_PROXY_BOOT_PATH, NIX_NONE,
-            OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD, SYSTEM_CONNECTIONS_DIR, SYSTEM_PROXY_DIR,
-            SYS_EFIVARS_DIR, SYS_EFI_DIR, TELINIT_CMD,
+            BALENA_DATA_MP, BALENA_OS_NAME, NIX_NONE, OLD_ROOT_MP, STAGE2_CONFIG_NAME, SWAPOFF_CMD,
+            SYSTEM_CONNECTIONS_DIR, SYSTEM_PROXY_DIR, SYS_EFIVARS_DIR, SYS_EFI_DIR, TELINIT_CMD,
         },
         error::{Error, ErrorKind, Result, ToError},
         file_exists, format_size_with_unit, get_mem_info, get_os_name, is_admin,
@@ -68,75 +64,6 @@ use crate::common::system::{is_dir, mkdir, stat};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
 const S1_XTRA_FS_SIZE: u64 = 10 * 1024 * 1024; // const XTRA_MEM_FREE: u64 = 10 * 1024 * 1024; // 10 MB
-
-// Compares the contents of the files in dir1
-// to the contents of the files that have the same name in dir2.
-fn compare_files(dir1: PathBuf, dir2: PathBuf) -> Result<()> {
-    let files_dir1 = read_dir(dir1).unwrap();
-
-    for dir1_entry in files_dir1 {
-        let file = dir1_entry?;
-        let metadata = file.metadata()?;
-
-        // skip any directories or symlinks
-        if !metadata.is_file() {
-            continue;
-        }
-
-        let dir2_file_path = Path::new(&dir2).join(Path::new(
-            file.path().file_name().unwrap().to_str().as_ref().unwrap(),
-        ));
-
-        let mut dir2_file = match File::open(dir2_file_path.clone()) {
-            Ok(f) => f,
-            Err(e) => {
-                return Err(Error::with_context(
-                    ErrorKind::InvState,
-                    &format!(
-                        "Failed to open {} for comparison - {}",
-                        dir2_file_path.as_path().display(),
-                        e
-                    ),
-                ));
-            }
-        };
-
-        let mut dir1_file = match File::open(file.path()) {
-            Ok(f) => f,
-            Err(e) => {
-                return Err(Error::with_context(
-                    ErrorKind::InvState,
-                    &format!(
-                        "Failed to open {} for comparison - {}",
-                        file.path().display(),
-                        e
-                    ),
-                ));
-            }
-        };
-
-        if diff_files(&mut dir2_file, &mut dir1_file) {
-            debug!(
-                "Files {} and {} have matching contents",
-                dir2_file_path.as_path().display(),
-                file.path().display()
-            );
-        } else {
-            error!(
-                "Files {} and {} don't have matching contents!",
-                dir2_file_path.as_path().display(),
-                file.path().display()
-            );
-            return Err(Error::with_context(
-                ErrorKind::InvState,
-                "Connection files contents mistmatch detected. Aborting.",
-            ));
-        }
-    }
-
-    // No mismatch found, or directory is empty
-    Ok(())
-}
 
 fn prepare_configs<P1: AsRef<Path>>(
     work_dir: P1,
@@ -161,64 +88,6 @@ fn prepare_configs<P1: AsRef<Path>>(
         "Failed to create directory '{}",
         nwmgr_path.display()
     ))?;
-
-    // If migrating from balenaOS, copy all files from the system-connections file in /mnt/boot
-    if mig_info.os_name().starts_with(BALENA_OS_NAME) {
-        // Check if the files in /etc/NetworkManager/system-connections also exist in /mnt/boot/system-connections
-        // and if they have the same contents
-        let mut compare_result = compare_files(
-            PathBuf::from(BALENA_NETWORK_MANAGER_BIND_MOUNT).join(SYSTEM_CONNECTIONS_DIR),
-            PathBuf::from(BALENA_OS_BOOT_MP).join(SYSTEM_CONNECTIONS_DIR),
-        );
-
-        match compare_result {
-            Ok(()) => {
-                info!(
-                    "OK: Bind-mounted path connection files match the ones in the boot partition."
-                );
-            }
-            Err(why) => {
-                return Err(Error::from_upstream_error(
-                    Box::new(why),
-                    "Bind-mounted path connection files don't match the ones in the boot partition.",
-                ));
-            }
-        }
-
-        // Check if the files in /mnt/boot/system-connections also exist in /etc/NetworkManager/system-connections
-        // and if they have the same contents
-        compare_result = compare_files(
-            PathBuf::from(BALENA_OS_BOOT_MP).join(SYSTEM_CONNECTIONS_DIR),
-            PathBuf::from(BALENA_NETWORK_MANAGER_BIND_MOUNT).join(SYSTEM_CONNECTIONS_DIR),
-        );
-
-        match compare_result {
-            Ok(()) => {
-                info!(
-                    "OK: Boot partition connection files match the ones in the bind-mounted path."
-                );
-            }
-            Err(why) => {
-                return Err(Error::from_upstream_error(
-                    Box::new(why),
-                    "Boot partition connection files don't match the ones in the bind-mounted path.",
-                ));
-            }
-        }
-
-        debug!("migrating from balenaOS - copying system-connections files");
-
-        let nwmgr_files = read_dir(BALENA_SYSTEM_CONNECTIONS_BOOT_PATH).unwrap();
-        for path in nwmgr_files {
-            mig_info.add_nwmgr_file(path.unwrap().path());
-        }
-
-        debug!("migrating from balenaOS - copying system-proxy files");
-        let system_proxy_files = read_dir(BALENA_SYSTEM_PROXY_BOOT_PATH).unwrap();
-        for sys_proxy_path in system_proxy_files {
-            mig_info.add_system_proxy_file(sys_proxy_path.unwrap().path());
-        }
-    }
 
     for proxy_file in mig_info.system_proxy_files() {
         let target_file_name = Path::new(&proxy_file)
