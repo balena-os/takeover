@@ -61,11 +61,11 @@ impl MigrateInfo {
             os_name
         );
 
-        //If no config.json is passed in command line and we're running on balenaOS,
+        // If no config.json is passed in command line and we're running on balenaOS,
         // we can preserve the existing config.json
         let mut config = if let Some(balena_cfg) = opts.config() {
             BalenaCfgJson::new(balena_cfg)?
-        } else if get_os_name()?.starts_with("balenaOS") {
+        } else if get_os_name()?.starts_with(BALENA_OS_NAME) {
             BalenaCfgJson::new("/mnt/boot/config.json")?
         } else {
             match MigrateInfo::get_internal_cfg_json(&opts.work_dir()) {
