@@ -1,4 +1,25 @@
 - commits:
+    - subject: Use lddtree to check dependencies
+      hash: 3c5e2ab4f2682281fca3ab16ff678504e28277c4
+      body: >
+        - we currently rely on the OS from which we are migrating from to have
+        `ldd` utility
+
+        - `ldd` is used to check for dependencies for other
+        executables/utilities that takeover requires (e.g `dd`)
+
+        - we remove the runtime dependency on `ldd` and use the `lddtree` crate
+        to find dependencies tree
+      footer:
+        Change-type: minor
+        change-type: minor
+        Signed-off-by: Rahul Thakoor <rahul@balena.io>
+        signed-off-by: Rahul Thakoor <rahul@balena.io>
+      author: Rahul Thakoor
+  version: 0.5.0
+  title: ""
+  date: 2024-04-18T14:09:10.315Z
+- commits:
     - subject: "stage1: Compare system-connection files and their contents"
       hash: c9be315f0482e07495b5e67531c0c120014b45da
       body: |
