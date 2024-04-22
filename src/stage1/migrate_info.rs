@@ -1,10 +1,14 @@
+use file_diff::diff_files;
 use log::{debug, error, info, warn};
 use nix::mount::umount;
-use std::fs::{read_to_string, remove_dir_all, OpenOptions};
+use std::fs::{read_dir, read_to_string, remove_dir_all, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::ptr::read_volatile;
 
-use crate::common::defs::BACKUP_ARCH_NAME;
+use crate::common::defs::{
+    BACKUP_ARCH_NAME, BALENA_NETWORK_MANAGER_BIND_MOUNT, BALENA_OS_BOOT_MP, BALENA_OS_NAME,
+    BALENA_SYSTEM_CONNECTIONS_BOOT_PATH, BALENA_SYSTEM_PROXY_BOOT_PATH, SYSTEM_CONNECTIONS_DIR,
+};
 use crate::common::path_append;
 use crate::{
     common::{file_exists, get_os_name, options::Options, Error, ErrorKind, Result, ToError},
@@ -61,11 +65,11 @@ impl MigrateInfo {
             os_name
         );
 
-        //If no config.json is passed in command line and we're running on balenaOS,
+        // If no config.json is passed in command line and we're running on balenaOS,
         // we can preserve the existing config.json
         let mut config = if let Some(balena_cfg) = opts.config() {
             BalenaCfgJson::new(balena_cfg)?
-        } else if get_os_name()?.starts_with("balenaOS") {
+        } else if get_os_name()?.starts_with(BALENA_OS_NAME) {
             BalenaCfgJson::new("/mnt/boot/config.json")?
         } else {
             match MigrateInfo::get_internal_cfg_json(&opts.work_dir()) {
@@ -142,8 +146,32 @@ impl MigrateInfo {
             Vec::new()
         };
 
-        let nwmgr_files = Vec::from(opts.nwmgr_cfg());
-        let system_proxy_files = Vec::new();
+        let mut nwmgr_files = Vec::from(opts.nwmgr_cfg());
+
+        // Migration of system connections has some special handling when
+        // migrating from balenaOS.
+        if os_name.starts_with(BALENA_OS_NAME) {
+            // To avoid any surprises (like a device unable to come online after
+            // migration), we abort the process if we detect any difference
+            // between the two balenaOS locations that can contain
+            // NetworkManager connection files.
+            if let Some(error) = compare_system_connection_locations() {
+                return Err(error);
+            }
+
+            // Copy all files from /mnt/boot/system-connections
+            if os_name.starts_with(BALENA_OS_NAME) {
+                debug!("migrating from balenaOS - marking system-connections files for copying");
+                let nwmgr_dir_entries = read_dir(BALENA_SYSTEM_CONNECTIONS_BOOT_PATH)
+                    .upstream_with_context(&format!(
+                        "Getting NetworkManager connections from '{}'",
+                        BALENA_SYSTEM_CONNECTIONS_BOOT_PATH
+                    ))?;
+                for path in nwmgr_dir_entries {
+                    nwmgr_files.push(path?.path());
+                }
+            }
+        }
 
         if nwmgr_files.is_empty() && wifis.is_empty() {
             if opts.no_nwmgr_check() {
@@ -155,6 +183,22 @@ impl MigrateInfo {
                     "No Network manager files were found, the device might not be able to come online"
                 );
                 return Err(Error::displayed());
+            }
+        }
+
+        let mut system_proxy_files = Vec::new();
+
+        // If migrating from balenaOS, copy all files from /mnt/boot/system-proxy
+        if os_name.starts_with(BALENA_OS_NAME) {
+            debug!("migrating from balenaOS - marking system-proxy files for copying");
+            let system_proxy_dir_entries = read_dir(BALENA_SYSTEM_PROXY_BOOT_PATH)
+                .upstream_with_context(&format!(
+                    "Getting system proxy connections from '{}'",
+                    BALENA_SYSTEM_PROXY_BOOT_PATH
+                ))?;
+
+            for sys_proxy_path in system_proxy_dir_entries {
+                system_proxy_files.push(sys_proxy_path?.path());
             }
         }
 
@@ -388,4 +432,123 @@ impl MigrateInfo {
             ))
         }
     }
+}
+
+/// Compares the two locations of balenaOS that contain NetworkManager
+/// connection files:
+///
+/// 1. The bind-mounted path `/etc/NetworkManager/system-connections`
+/// 2. The boot partition path `/mnt/boot/system-connections`
+///
+/// Returns an error if any difference between the locations is detected.
+///
+/// For context, check the [balenaOS networking
+/// docs](https://docs.balena.io/reference/OS/network/).
+fn compare_system_connection_locations() -> Option<Error> {
+    // Check if the files in /etc/NetworkManager/system-connections also exist in /mnt/boot/system-connections
+    // and if they have the same contents
+    let mut compare_result = compare_files(
+        PathBuf::from(BALENA_NETWORK_MANAGER_BIND_MOUNT).join(SYSTEM_CONNECTIONS_DIR),
+        PathBuf::from(BALENA_OS_BOOT_MP).join(SYSTEM_CONNECTIONS_DIR),
+    );
+    match compare_result {
+        Ok(()) => {
+            info!("OK: Bind-mounted path connection files match the ones in the boot partition.");
+        }
+        Err(why) => {
+            return Some(Error::from_upstream_error(
+                Box::new(why),
+                "Bind-mounted path connection files don't match the ones in the boot partition.",
+            ));
+        }
+    }
+    compare_result = compare_files(
+        PathBuf::from(BALENA_OS_BOOT_MP).join(SYSTEM_CONNECTIONS_DIR),
+        PathBuf::from(BALENA_NETWORK_MANAGER_BIND_MOUNT).join(SYSTEM_CONNECTIONS_DIR),
+    );
+
+    // Check if the files in /mnt/boot/system-connections also exist in /etc/NetworkManager/system-connections
+    // and if they have the same contents
+    match compare_result {
+        Ok(()) => {
+            info!("OK: Boot partition connection files match the ones in the bind-mounted path.");
+        }
+        Err(why) => {
+            return Some(Error::from_upstream_error(
+                Box::new(why),
+                "Boot partition connection files don't match the ones in the bind-mounted path.",
+            ));
+        }
+    }
+
+    None
+}
+
+// Compares the contents of the files in dir1
+// to the contents of the files that have the same name in dir2.
+fn compare_files(dir1: PathBuf, dir2: PathBuf) -> Result<()> {
+    let files_dir1 = read_dir(dir1).unwrap();
+
+    for dir1_entry in files_dir1 {
+        let file = dir1_entry?;
+        let metadata = file.metadata()?;
+
+        // skip any directories or symlinks
+        if !metadata.is_file() {
+            continue;
+        }
+
+        let dir2_file_path = Path::new(&dir2).join(Path::new(
+            file.path().file_name().unwrap().to_str().as_ref().unwrap(),
+        ));
+
+        let mut dir2_file = match File::open(dir2_file_path.clone()) {
+            Ok(f) => f,
+            Err(e) => {
+                return Err(Error::with_context(
+                    ErrorKind::InvState,
+                    &format!(
+                        "Failed to open {} for comparison - {}",
+                        dir2_file_path.as_path().display(),
+                        e
+                    ),
+                ));
+            }
+        };
+
+        let mut dir1_file = match File::open(file.path()) {
+            Ok(f) => f,
+            Err(e) => {
+                return Err(Error::with_context(
+                    ErrorKind::InvState,
+                    &format!(
+                        "Failed to open {} for comparison - {}",
+                        file.path().display(),
+                        e
+                    ),
+                ));
+            }
+        };
+
+        if diff_files(&mut dir2_file, &mut dir1_file) {
+            debug!(
+                "Files {} and {} have matching contents",
+                dir2_file_path.as_path().display(),
+                file.path().display()
+            );
+        } else {
+            error!(
+                "Files {} and {} don't have matching contents!",
+                dir2_file_path.as_path().display(),
+                file.path().display()
+            );
+            return Err(Error::with_context(
+                ErrorKind::InvState,
+                "Connection files contents mistmatch detected. Aborting.",
+            ));
+        }
+    }
+
+    // No mismatch found, or directory is empty
+    Ok(())
 }
