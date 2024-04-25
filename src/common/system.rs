@@ -157,7 +157,6 @@ pub(crate) struct ProcessInfo {
     process_id: i32,
     status: HashMap<String, String>,
     executable: Option<PathBuf>,
-    root: PathBuf,
 }
 
 impl ProcessInfo {
@@ -173,11 +172,6 @@ impl ProcessInfo {
     }
     pub fn status(&self) -> &HashMap<String, String> {
         &self.status
-    }
-
-    #[allow(dead_code)]
-    pub fn root(&self) -> &Path {
-        &self.root
     }
 }
 
@@ -221,23 +215,7 @@ pub(crate) fn get_process_info_for(pid: i32, directory: Option<&Path>) -> Result
     let exec_path = path_append(directory, "exe");
     let executable = match read_link(&exec_path) {
         Ok(link_path) => Some(link_path),
-        Err(why) => {
-            if why.kind() == io::ErrorKind::NotFound {
-                None
-            } else {
-                return Err(Error::from_upstream(
-                    Box::new(why),
-                    &format!(
-                        "Failed to read link to executable: '{}'",
-                        exec_path.display()
-                    ),
-                ));
-            }
-        }
-    };
-    let root_path = path_append(directory, "root");
-    let root = match read_link(root_path) {
-        Ok(link_path) => link_path,
+        Err(why) if why.kind() == io::ErrorKind::NotFound => None,
         Err(why) => {
             return Err(Error::from_upstream(
                 Box::new(why),
@@ -253,7 +231,6 @@ pub(crate) fn get_process_info_for(pid: i32, directory: Option<&Path>) -> Result
         process_id: pid,
         status: parse_status(directory)?,
         executable,
-        root,
     })
 }
 
