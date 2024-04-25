@@ -364,10 +364,17 @@ pub(crate) fn fuser<P: AsRef<Path>>(
                                                 ),
                                             ));
                                         }
-                                    }
-                                    Err(_) => {
-                                        debug!("continue after lstat error");
-                                    }
+                                    },
+                                    // Files do get removed from the /proc filesystem as processes exit, so we can
+                                    // safely ignore "file not found" errors here. Other errors may indicate something
+                                    // serious, so we report them.
+                                    Err(why) if why.kind() == ErrorKind::FileNotFound =>
+                                        debug!("continue after harmless lstat error: {}", why),
+                                    Err(why) => return Err(Error::from_upstream_error(
+                                        Box::new(why),
+                                        &format!("lstat failed for {} when iterating over processes and file descriptors",
+                                        curr_path.display()),
+                                    ))
                                 }
                             }
                         }
