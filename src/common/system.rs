@@ -196,6 +196,13 @@ fn parse_status(base_path: &Path) -> Result<HashMap<String, String>> {
             }
             Ok(result)
         }
+        // Files do get removed from the /proc filesystem as processes exit, so
+        // we can safely ignore "file not found" errors here. Other errors may
+        // indicate something serious, so we report them.
+        Err(why) if why.kind() == io::ErrorKind::NotFound => {
+            debug!("continue after harmless read_to_string error: {}", why);
+            Ok(HashMap::new())
+        }
         Err(why) => Err(Error::from_upstream(
             Box::new(why),
             &format!("Failed to read process status: '{}'", status_path.display()),
