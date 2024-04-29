@@ -1,4 +1,91 @@
 - commits:
+    - subject: "Handle race: when reading /proc/PID/status"
+      hash: 5386618f02927bf952ffea2fc5ab0a1b7aa3d7d8
+      body: |
+        Iterating over /proc and doing some operation over its entries is
+        inherently racy, because entries on the /proc filesystem can vanish at
+        any time as processes die.
+
+        In order to take this into account, this commit changes the error
+        handling of a `read_to_string()` call we make while iterating over
+        `/proc` to print a list of processes.
+
+        We now simply ignore "file not found" errors, which is fine because the
+        status information about a process that has already exited will not be
+        used in any meaningful way.
+
+        Other errors may represent something serious, so they are reported and
+        cause the migration to be aborted.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+    - subject: "Handle race: reading /proc/PID/root"
+      hash: 132d7f9419c93401b611e7e25bba6e5cc135405d
+      body: |
+        Short story: the value read from `/proc/PID/root` wasn't being used
+        anywhere, so this commit just got rid of this reading, and of the value
+        itself.
+
+        Longer story: the initial motivation for this change was a race
+        condition when doing this reading. Iterating over /proc and doing some
+        operation over its entries is inherently racy, because entries on the
+        /proc filesystem can vanish at any time as processes die. Therefore, the
+        reading would sometimes fail with "file not found", which would
+        needlessly and unfortunately abort the migration process.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+    - subject: "Handle race: read_link when iterating over /proc/PID/fd/FD"
+      hash: 3ea2efac201f397a1eb9f6376010fe4aafe2889a
+      body: |
+        Iterating over /proc and doing some operation over its entries is
+        inherently racy, because entries on the /proc filesystem can vanish at
+        any time as processes die.
+
+        In order to take this into account, this commit changes the error
+        handling of a `read_link()` call we make while iterating over the
+        processes. If the error is a "file not found", we now simply ignore it.
+        This is safe to do, because we are only skipping code that would try to
+        kill the process (which doesn't exist anymore anyway).
+
+        Other errors may represent something serious, so they are reported and
+        cause the migration to be aborted.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+    - subject: "Handle race: lstat when iterating over /proc/PID/fd/FD"
+      hash: ed4e57285256f7ebc82c3f1a8c27b2b15048a088
+      body: |
+        Iterating over /proc and doing some operation over its entries is
+        inherently racy, because entries on the /proc filesystem can vanish at
+        any time as processes die.
+
+        We previously had some code to ignore `lstat()` errors that could happen
+        for this reason. However, that code was ignoring *any* `lstat()` error,
+        not just "file not found".
+
+        This commit makes sure we ignore only "file not found" errors when
+        calling `lstat()`. Other errors may represent something serious, so they
+        are reported and cause the migration to be aborted.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+  version: 0.5.2
+  title: ""
+  date: 2024-04-29T17:26:04.315Z
+- commits:
     - subject: Refactor comparison of system connection locations
       hash: 7fa2121b28309c5365c6a58479f1410f31120df2
       body: |
