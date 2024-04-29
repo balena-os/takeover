@@ -157,7 +157,6 @@ pub(crate) struct ProcessInfo {
     process_id: i32,
     status: HashMap<String, String>,
     executable: Option<PathBuf>,
-    root: PathBuf,
 }
 
 impl ProcessInfo {
@@ -173,11 +172,6 @@ impl ProcessInfo {
     }
     pub fn status(&self) -> &HashMap<String, String> {
         &self.status
-    }
-
-    #[allow(dead_code)]
-    pub fn root(&self) -> &Path {
-        &self.root
     }
 }
 
@@ -202,6 +196,13 @@ fn parse_status(base_path: &Path) -> Result<HashMap<String, String>> {
             }
             Ok(result)
         }
+        // Files do get removed from the /proc filesystem as processes exit, so
+        // we can safely ignore "file not found" errors here. Other errors may
+        // indicate something serious, so we report them.
+        Err(why) if why.kind() == io::ErrorKind::NotFound => {
+            debug!("continue after harmless read_to_string error: {}", why);
+            Ok(HashMap::new())
+        }
         Err(why) => Err(Error::from_upstream(
             Box::new(why),
             &format!("Failed to read process status: '{}'", status_path.display()),
@@ -221,23 +222,7 @@ pub(crate) fn get_process_info_for(pid: i32, directory: Option<&Path>) -> Result
     let exec_path = path_append(directory, "exe");
     let executable = match read_link(&exec_path) {
         Ok(link_path) => Some(link_path),
-        Err(why) => {
-            if why.kind() == io::ErrorKind::NotFound {
-                None
-            } else {
-                return Err(Error::from_upstream(
-                    Box::new(why),
-                    &format!(
-                        "Failed to read link to executable: '{}'",
-                        exec_path.display()
-                    ),
-                ));
-            }
-        }
-    };
-    let root_path = path_append(directory, "root");
-    let root = match read_link(root_path) {
-        Ok(link_path) => link_path,
+        Err(why) if why.kind() == io::ErrorKind::NotFound => None,
         Err(why) => {
             return Err(Error::from_upstream(
                 Box::new(why),
@@ -253,7 +238,6 @@ pub(crate) fn get_process_info_for(pid: i32, directory: Option<&Path>) -> Result
         process_id: pid,
         status: parse_status(directory)?,
         executable,
-        root,
     })
 }
 
@@ -328,32 +312,46 @@ pub(crate) fn fuser<P: AsRef<Path>>(
                                 match lstat(curr_path.as_path()) {
                                     Ok(stat_info) => {
                                         if is_lnk(&stat_info) {
-                                            let link_data = read_link(curr_path.as_path())
-                                                .upstream_with_context(&format!(
-                                                    "Failed to read link '{}'",
-                                                    curr_path.display()
-                                                ))?;
-                                            debug!(
-                                                "looking at pid: {}, fd {}, file: '{}' -> '{}'",
-                                                curr_pid,
-                                                curr_fd,
-                                                curr_path.display(),
-                                                link_data.display()
-                                            );
-
-                                            if link_data.starts_with(path.as_ref()) {
-                                                debug!("sending signal {} to {}", signal, curr_pid,);
-                                                if unsafe { libc::kill(curr_pid, signal) } != 0 {
-                                                    warn!(
-                                                        "Failed to send signal {} to pid {}, error: {}",
-                                                        signal,
+                                            match read_link(curr_path.as_path()) {
+                                                Ok(link_data) => {
+                                                    debug!(
+                                                        "looking at pid: {}, fd {}, file: '{}' -> '{}'",
                                                         curr_pid,
-                                                        io::Error::last_os_error()
+                                                        curr_fd,
+                                                        curr_path.display(),
+                                                        link_data.display()
                                                     );
-                                                } else {
-                                                    sent_signals.push(curr_pid);
-                                                }
-                                                break;
+
+                                                    if link_data.starts_with(path.as_ref()) {
+                                                        debug!(
+                                                            "sending signal {} to {}",
+                                                            signal, curr_pid,
+                                                        );
+                                                        if unsafe { libc::kill(curr_pid, signal) } != 0 {
+                                                            warn!(
+                                                                "Failed to send signal {} to pid {}, error: {}",
+                                                                signal,
+                                                                curr_pid,
+                                                                io::Error::last_os_error()
+                                                            );
+                                                        } else {
+                                                            sent_signals.push(curr_pid);
+                                                        }
+                                                        break;
+                                                    }
+                                                },
+                                                // Files do get removed from the /proc filesystem as processes exit, so
+                                                // we can safely ignore "file not found" errors here. Other errors may
+                                                // indicate something serious, so we report them.
+                                                Err(why) if why.kind() == io::ErrorKind::NotFound =>
+                                                    debug!("continue after harmless read_link error: {}", why),
+                                                Err(why) => return Err(Error::from_upstream_error(
+                                                    Box::new(why),
+                                                    &format!(
+                                                        "Failed to read link '{}'",
+                                                        curr_path.display()
+                                                    ),
+                                                ))
                                             }
                                         } else {
                                             return Err(Error::with_context(
@@ -364,10 +362,17 @@ pub(crate) fn fuser<P: AsRef<Path>>(
                                                 ),
                                             ));
                                         }
-                                    }
-                                    Err(_) => {
-                                        debug!("continue after lstat error");
-                                    }
+                                    },
+                                    // Files do get removed from the /proc filesystem as processes exit, so we can
+                                    // safely ignore "file not found" errors here. Other errors may indicate something
+                                    // serious, so we report them.
+                                    Err(why) if why.kind() == ErrorKind::FileNotFound =>
+                                        debug!("continue after harmless lstat error: {}", why),
+                                    Err(why) => return Err(Error::from_upstream_error(
+                                        Box::new(why),
+                                        &format!("lstat failed for {} when iterating over processes and file descriptors",
+                                        curr_path.display()),
+                                    ))
                                 }
                             }
                         }
