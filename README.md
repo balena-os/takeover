@@ -16,44 +16,37 @@ balena application.
 
 ```shell script
 > takeover --help
-takeover 0.3.0
-balena.io
-Brownfield device migration tool to balenaOS and balenaCloud
 
-USAGE:
-    takeover [FLAGS] [OPTIONS]
-
-FLAGS:
-    -d, --download-only     Download image only, do not check device and migrate
-    -h, --help              Prints help information
-        --no-ack            Scripted mode - no interactive acknowledgement of takeover
-        --no-api-check      Do not check if balena API is available
-        --no-cleanup        Debug - do not cleanup after stage1 failure
-        --no-dt-check       Do not check if the target device type is valid
-        --no-efi-setup      Do not setup EFI boot
-        --no-keep-name      Do not migrate host-name
-        --no-nwmgr-check    Do not check network manager files exist
-        --no-os-check       Do not check if OS is supported
-        --no-vpn-check      Do not check if balena VPN is available
-        --no-wifis          Do not create network manager configurations for configured wifis
-        --pretend           Pretend mode, do not flash device
-        --stage2            Internal - stage2 invocation
-        --tar-internal      Use internal tar instead of external command
-
-OPTIONS:
-        --backup-cfg <BACKUP-CONFIG>     Backup configuration file
-        --check-timeout <TIMEOUT>        API/VPN check timeout in seconds.
-    -c, --config <CONFIG_JSON>           Path to balena config.json
-    -f, --flash-to <INSTALL_DEVICE>      Use INSTALL_DEVICE to flash balena to
-    -i, --image <IMAGE>                  Path to balena-os image
-        --log-file <LOG_FILE>            Set stage1 log file name
-        --log-level <log-level>          Set log level, one of [error,warn,info,debug,trace] [default: info]
-    -l, --log-to <LOG_DEVICE>            Write stage2 log to LOG_DEVICE
-        --nwmgr-cfg <NWMGR_FILE>...      Supply a network manager file to inject into balena-os
-        --s2-log-level <s2-log-level>    Set stage2 log level, one of [error,warn,info,debug,trace]
-    -v, --version <VERSION>              Version of balena-os image to download
-        --wifi <SSID>...                 Create a network manager configuration for configured wifi with SSID
-    -w, --work-dir <DIRECTORY>           Path to working directory
+Options:
+  -w, --work-dir <DIRECTORY>         Path to working directory
+  -i, --image <IMAGE>                Path to balena-os image
+  -v, --version <VERSION>            Version of balena-os image to download
+  -c, --config <CONFIG_JSON>         Path to balena config.json
+      --log-level <LOG_LEVEL>        Set log level, one of [error,warn,info,debug,trace] [default: info]
+      --log-file <LOG_FILE>          Set stage1 log file name
+      --backup-cfg <BACKUP-CONFIG>   Backup configuration file
+      --s2-log-level <S2_LOG_LEVEL>  Set stage2 log level, one of [error,warn,info,debug,trace]
+      --no-ack                       Scripted mode - no interactive acknowledgement of takeover
+      --pretend                      Pretend mode, do not flash device
+      --stage2                       Internal - stage2 invocation
+      --tar-internal                 Use internal tar instead of external command
+      --no-cleanup                   Debug - do not cleanup after stage1 failure
+      --no-os-check                  Do not check if OS is supported
+      --no-dt-check                  Do not check if the target device type is valid
+      --no-api-check                 Do not check if balena API is available
+      --no-vpn-check                 Do not check if balena VPN is available
+      --no-efi-setup                 Do not setup EFI boot
+      --no-nwmgr-check               Do not check network manager files exist
+      --no-keep-name                 Do not migrate host-name
+  -d, --download-only                Download image only, do not check device and migrate
+      --check-timeout <TIMEOUT>      API/VPN check timeout in seconds.
+  -l, --log-to <LOG_DEVICE>          Write stage2 log to LOG_DEVICE
+  -f, --flash-to <INSTALL_DEVICE>    Use INSTALL_DEVICE to flash balena to
+      --no-wifis                     Do not create network manager configurations for configured wifis
+      --wifi <SSID>                  Create a network manager configuration for configured wifi with SSID
+      --nwmgr-cfg <NWMGR_FILE>       Supply a network manager file to inject into balena-os
+      --change-dt-to <DT_SLUG>       Device Type slug to change to
+  -h, --help                         Print help
 ```
 
 To download a config.json, please direct your browser to  the [balena dashboard](https://balena.io), logging in to to your user 
@@ -248,6 +241,18 @@ not allow you to do that -- unless you force it by using
 ```sh
 # sudo ./takeover --no-dt-check [...other options...]
 ```
+
+### `--change_dt_to`
+
+There are certain scenarios where devices are migrated from one device type to another. E.g From an Intel NUC(`intel-nuc`) to Generic x86_64 (`generic-amd64`). Passing `--change-dt-to` followed by the device type slug will change the device type of the device in balenaCloud.
+
+E.g:
+
+```sh
+# sudo ./takeover --change-dt-to generic-amd64 [...other options...]
+```
+
+You can find the device type slug for each device type in [our docs](https://docs.balena.io/reference/base-images/devicetypes/) in the `BALENA_MACHINE_NAME` name.
 
 ## Compiling *takeover*
 
