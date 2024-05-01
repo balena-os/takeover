@@ -33,6 +33,7 @@ mod device_impl;
 
 mod exe_copy;
 
+mod checks;
 mod image_retrieval;
 mod utils;
 mod wifi_config;
@@ -45,7 +46,7 @@ use crate::{
             SYSTEM_CONNECTIONS_DIR, SYSTEM_PROXY_DIR, SYS_EFIVARS_DIR, SYS_EFI_DIR, TELINIT_CMD,
         },
         error::{Error, ErrorKind, Result, ToError},
-        file_exists, format_size_with_unit, get_mem_info, get_os_name, is_admin,
+        file_exists, format_size_with_unit, get_mem_info, get_os_name,
         options::Options,
         path_append,
         stage2_config::{Stage2Config, UmountPart},
@@ -62,6 +63,8 @@ use crate::common::dir_exists;
 use crate::common::stage2_config::LogDevice;
 use crate::common::system::{is_dir, mkdir, stat};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
+
+use self::checks::do_early_checks;
 
 const S1_XTRA_FS_SIZE: u64 = 10 * 1024 * 1024; // const XTRA_MEM_FREE: u64 = 10 * 1024 * 1024; // 10 MB
 
@@ -582,9 +585,16 @@ pub fn stage1(opts: &Options) -> Result<()> {
         }
     };
 
-    if !is_admin()? {
-        error!("please run this program as root");
-        return Err(Error::displayed());
+    match do_early_checks(opts) {
+        Ok(_) => {
+            info!("Early checks passed");
+        }
+        Err(why) => {
+            return Err(Error::from_upstream(
+                Box::new(why),
+                "Failed early checks, exiting",
+            ));
+        }
     }
 
     if !opts.no_ack() {
