@@ -1,4 +1,25 @@
 - commits:
+    - subject: Add option to change device type
+      hash: 2bfb52c339ad9a48bfed9c64c734516d5db435af
+      body: >
+        - add a command line option `change_dt_to` which accepts a device type
+        slug
+
+        - if this option is passed, we change the device type value being used
+        in the parsed `config.json`
+          this allows further migration workflows to use the correct target device type
+        - we also PATCH the device type in the API so further hostOS updates are
+        consistent with the new device type
+      footer:
+        Change-type: minor
+        change-type: minor
+        Signed-off-by: Rahul Thakoor <rahul@balena.io>
+        signed-off-by: Rahul Thakoor <rahul@balena.io>
+      author: Rahul Thakoor
+  version: 0.6.0
+  title: ""
+  date: 2024-05-02T18:17:52.094Z
+- commits:
     - subject: "Handle race: when reading /proc/PID/status"
       hash: 5386618f02927bf952ffea2fc5ab0a1b7aa3d7d8
       body: |
