@@ -10,6 +10,7 @@ use crate::common::defs::{
     BALENA_SYSTEM_CONNECTIONS_BOOT_PATH, BALENA_SYSTEM_PROXY_BOOT_PATH, SYSTEM_CONNECTIONS_DIR,
 };
 use crate::common::path_append;
+use crate::stage1::api_calls::patch_device_type;
 use crate::{
     common::{file_exists, get_os_name, options::Options, Error, ErrorKind, Result, ToError},
     stage1::{
@@ -116,13 +117,27 @@ impl MigrateInfo {
                 return Err(Error::displayed());
             }
         } else {
+            // check if option `--change-dt-to` is passed
+            // override the deviceType that image is downloaded for
+            let device_type = match opts.change_dt_to() {
+                // TODO : validate dt slug
+                Some(change_to) => {
+                    info!(
+                        "Overriding deviceType image is downloaded for because option --change_dt_to was passed",
+                    );
+                    change_to.to_owned()
+                }
+                None => config.get_device_type()?,
+            };
+
             let image_path = download_image(
                 opts,
                 &config,
                 &work_dir,
-                config.get_device_type()?.as_str(),
+                device_type.as_str(),
                 opts.version(),
             )?;
+
             image_path.canonicalize().upstream_with_context(&format!(
                 "Failed to canonicalize path '{}'",
                 image_path.display()
@@ -226,6 +241,27 @@ impl MigrateInfo {
 
             info!("Writing hostname to config.json: '{}'", hostname);
             config.set_host_name(&hostname);
+        }
+
+        // If --change-dt_to was passed, override the deviceType in config.json
+        // and PATCH the API to new device type
+        if let Some(change_to) = opts.change_dt_to() {
+            info!("Changing deviceType in config.json to: '{}' because --change_dt_to option was passed", change_to);
+            config.override_device_type(change_to);
+
+            let uuid = config.get_uuid()?;
+            let api_key = config.get_api_key()?;
+            let api_endpoint = config.get_api_endpoint()?;
+            debug!("Device UUID: {uuid} API Key : {api_key}");
+
+            info!("Changing device {uuid} device type to {change_to}...");
+
+            match patch_device_type(&api_endpoint, &api_key, change_to, &uuid) {
+                Ok(_) => {
+                    info!("Successfully changed device type to: {change_to} for device {uuid}")
+                }
+                Err(why) => error!("Failed to change device type, error: {:?}", why),
+            }
         }
 
         Ok(MigrateInfo {

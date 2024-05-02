@@ -177,7 +177,21 @@ impl BalenaCfgJson {
     }
 
     pub fn get_api_key(&self) -> Result<String> {
-        self.get_str_val("apiKey")
+        // The API Key required can exist with key `apiKey` or in case of an already provisioned device, `deviceApikey`
+        match self.get_str_val("apiKey") {
+            Ok(value) => Ok(value),
+            Err(e) => {
+                if let ErrorKind::NotFound = e.kind() {
+                    // If the error kind is NotFound, try "deviceApiKey"
+                    match self.get_str_val("deviceApiKey") {
+                        Ok(value) => Ok(value),
+                        Err(e) => Err(e), // Propagate any errors from the second attempt
+                    }
+                } else {
+                    Err(e) // Propagate any other kinds of errors
+                }
+            }
+        }
     }
 
     pub fn get_api_endpoint(&self) -> Result<String> {
@@ -198,6 +212,21 @@ impl BalenaCfgJson {
 
     pub fn get_path(&self) -> &Path {
         &self.file
+    }
+
+    pub fn override_device_type(&mut self, change_to: &str) -> Option<String> {
+        self.modified = true;
+
+        self.config
+            .insert(
+                "deviceType".to_string(),
+                Value::String(change_to.to_string()),
+            )
+            .map(|value| value.to_string())
+    }
+
+    pub fn get_uuid(&self) -> Result<String> {
+        self.get_str_val("uuid")
     }
 }
 
@@ -229,5 +258,47 @@ fn check_api(api_endpoint: &str) -> Result<()> {
                 &ping_endpoint, &response
             ),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_get_api_key_found_as_api_key() {
+        let mut config: HashMap<String, Value> = HashMap::new();
+        config.insert("apiKey".to_string(), "abcd".into());
+        let balena_cfg = BalenaCfgJson {
+            config,
+            file: PathBuf::new(),
+            modified: false,
+        };
+        assert_eq!(balena_cfg.get_api_key().unwrap(), "abcd");
+    }
+
+    #[test]
+    fn test_get_api_key_found_as_device_api_key() {
+        let mut config: HashMap<String, Value> = HashMap::new();
+        config.insert("deviceApiKey".to_string(), "abcd".into());
+        let balena_cfg = BalenaCfgJson {
+            config,
+            file: PathBuf::new(),
+            modified: false,
+        };
+        assert_eq!(balena_cfg.get_api_key().unwrap(), "abcd");
+    }
+
+    #[test]
+    fn test_get_api_key_not_found() {
+        let config = HashMap::new(); // No API keys present
+        let balena_cfg = BalenaCfgJson {
+            config,
+            file: PathBuf::new(),
+            modified: false,
+        };
+        assert!(balena_cfg.get_api_key().is_err());
     }
 }

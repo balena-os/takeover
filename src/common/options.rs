@@ -139,6 +139,8 @@ pub struct Options {
         help = "Supply a network manager file to inject into balena-os"
     )]
     nwmgr_cfg: Option<Vec<PathBuf>>,
+    #[clap(long, value_name = "DT_SLUG", help = "Device Type slug to change to")]
+    change_dt_to: Option<String>,
 }
 
 impl Options {
@@ -278,5 +280,9 @@ impl Options {
 
     pub fn cleanup(&self) -> bool {
         !self.no_cleanup
+    }
+
+    pub fn change_dt_to(&self) -> &Option<String> {
+        &self.change_dt_to
     }
 }

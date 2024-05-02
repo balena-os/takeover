@@ -4,12 +4,15 @@ use log::debug;
 
 use reqwest::{blocking::Client, header};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use crate::common::{Error, ErrorKind, Result, ToError};
 
 const OS_VERSION_URL_ENDPOINT: &str = "/v6/release";
 
 const OS_IMG_URL: &str = "/download";
+
+const DEVICE__TYPE_URL_ENDPOINT: &str = "/v6/device_type";
 
 pub(crate) type Versions = Vec<String>;
 
@@ -30,6 +33,17 @@ struct ReleasesApiResponse {
 #[derive(Serialize, Deserialize, Debug)]
 struct VersionEntry {
     raw_version: String,
+}
+
+/// Structs corresponding to API response for endpoint /v6/device_type and with $select=id
+#[derive(Serialize, Deserialize, Debug)]
+struct DeviceTypeIdApiResponse {
+    d: Vec<DeviceIdEntry>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct DeviceIdEntry {
+    id: u32,
 }
 
 pub(crate) fn get_os_versions(api_endpoint: &str, api_key: &str, device: &str) -> Result<Versions> {
@@ -131,4 +145,100 @@ pub(crate) fn get_os_image(
     debug!("Result = {:?}", res);
 
     Ok(Box::new(res))
+}
+
+pub(crate) fn patch_device_type(
+    api_endpoint: &str,
+    api_key: &str,
+    dt_slug: &str,
+    uuid: &str,
+) -> Result<()> {
+    let mut headers = header::HeaderMap::new();
+    headers.insert(
+        header::AUTHORIZATION,
+        header::HeaderValue::from_str(format!("Bearer {api_key}").as_str())
+            .upstream_with_context("Failed to create auth header")?,
+    );
+
+    // Before we can patch the deviceType, we need to get the deviceId corresponding to the slug
+    let dt_id_request_url =  format!("{api_endpoint}{DEVICE__TYPE_URL_ENDPOINT}?$orderby=name%20asc&$top=1&$select=id&$filter=device_type_alias/any(dta:dta/is_referenced_by__alias%20eq%20%27{dt_slug}%27)");
+
+    debug!(
+        "patch_device_type: dt_id_request_url: '{}'",
+        dt_id_request_url
+    );
+
+    let res = Client::builder()
+        .default_headers(headers.clone())
+        .build()
+        .upstream_with_context("Failed to create https client")?
+        .get(&dt_id_request_url)
+        .send()
+        .upstream_with_context(&format!(
+            "Failed to send https request url: '{}'",
+            dt_id_request_url
+        ))?;
+
+    debug!("dt_id_request Result = {:?}", res);
+
+    let status = res.status();
+    if status.is_success() {
+        // The API call returns a response with the following structure:
+        // {
+        //     "d": [
+        //         {
+        //             "id": 24
+        //         }
+        //     ]
+        // }
+        // Deserialize the JSON string into the ApiResponse struct
+        let parsed_id_resp = res
+            .json::<DeviceTypeIdApiResponse>()
+            .upstream_with_context("Failed to parse request results")?;
+
+        // Extract the device type id
+        let id = &parsed_id_resp.d[0].id;
+        debug!("device type {dt_slug} has id: {id}");
+
+        // PATCH deviceType
+        let patch_url = format!("{api_endpoint}/v6/device(uuid='{uuid}')");
+        let patch_data = json!({
+            "is_of__device_type": id
+        });
+
+        let patch_res = Client::builder()
+            .default_headers(headers)
+            .build()
+            .upstream_with_context("Failed to create https client")?
+            .patch(&patch_url)
+            .json(&patch_data)
+            .send()
+            .upstream_with_context(&format!(
+                "Failed to send https request url: '{}'",
+                patch_url
+            ))?;
+
+        debug!("PATCH request Result = {:?}", patch_res);
+
+        if patch_res.status().is_success() {
+            debug!("Device type successfully patched to {dt_slug}");
+            Ok(())
+        } else {
+            Err(Error::with_context(
+                ErrorKind::InvState,
+                &format!(
+                    "Balena API request failed with status: {}",
+                    patch_res.status()
+                ),
+            ))
+        }
+    } else {
+        Err(Error::with_context(
+            ErrorKind::InvState,
+            &format!(
+                "Balena API GET Device Type id request failed with status: {}",
+                status
+            ),
+        ))
+    }
 }
