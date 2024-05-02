@@ -157,7 +157,7 @@ impl LoopDevice {
             }
         }
     }
-
+    #[allow(dead_code)]
     /// create a loop device associated with the given file
     pub fn for_file<P: AsRef<Path>>(
         file: P,
