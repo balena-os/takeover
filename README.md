@@ -244,7 +244,7 @@ not allow you to do that -- unless you force it by using
 
 ### `--change_dt_to`
 
-There are certain scenarios where devices are migrated from one device type to another. E.g From an Intel NUC(`intel-nuc`) to Generic x86_64 (`generic-amd64`). Passing `--change-dt-to` followed by the device type slug will change the device type of the device in balenaCloud.
+There are certain scenarios where devices are migrated from one device type to another. E.g From an Intel NUC (`intel-nuc`) to Generic x86_64 (`generic-amd64`). Passing `--change-dt-to` followed by the device type slug will change the device type of the device in balenaCloud.
 
 E.g:
 
@@ -252,7 +252,7 @@ E.g:
 # sudo ./takeover --change-dt-to generic-amd64 [...other options...]
 ```
 
-You can find the device type slug for each device type in [our docs](https://docs.balena.io/reference/base-images/devicetypes/) in the `BALENA_MACHINE_NAME` name.
+You can find the device type slug for each device type in [our docs](https://docs.balena.io/reference/base-images/devicetypes/) in the `BALENA_MACHINE_NAME` column.
 
 ## Compiling *takeover*
 

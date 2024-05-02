@@ -186,9 +186,9 @@ pub(crate) fn patch_device_type(
         // The API call returns a response with the following structure:
         // {
         //     "d": [
-        //     {
-        //     "id": 24
-        //     }
+        //         {
+        //             "id": 24
+        //         }
         //     ]
         // }
         // Deserialize the JSON string into the ApiResponse struct
@@ -220,7 +220,7 @@ pub(crate) fn patch_device_type(
 
         debug!("PATCH request Result = {:?}", patch_res);
 
-        if patch_res.status() == 200 {
+        if patch_res.status().is_success() {
             debug!("Device type successfully patched to {dt_slug}");
             Ok(())
         } else {
@@ -236,7 +236,7 @@ pub(crate) fn patch_device_type(
         Err(Error::with_context(
             ErrorKind::InvState,
             &format!(
-                "Balena API Device Type PATCH request failed with status: {}",
+                "Balena API GET Device Type id request failed with status: {}",
                 status
             ),
         ))
