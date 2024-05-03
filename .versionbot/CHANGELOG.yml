@@ -1,4 +1,39 @@
 - commits:
+    - subject: Check for log device before starting the migration
+      hash: 34febb5d80b45df6134b9d868194016a30126d49
+      body: |
+        Previously, we'd check for the log device (passed with `--log-to`) only
+        after the user confirmed to proceed with the migration. And then, if the
+        device was not valid, takeover would keep running without storing the
+        stage 2 logs anywhere.
+
+        In other words, a mistake in the command-line arguments could cause
+        important logs to be lost.
+
+        With this commit, we check the the log device at a much earlier point
+        (before asking the user for confirmation to proceed), and if the device
+        provided is no good, we log an error message and exit. This allows the
+        user to fix the command-line arguments and run again.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: minor
+        change-type: minor
+      author: Leandro Motta Barros
+    - subject: Refactor early checks to a separate module
+      hash: 87cc52465ebefb791f2bf35a30d8587841fabeb3
+      body: |
+        This is in preparation for a bigger change that will come next.
+      footer:
+        Signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        signed-off-by: Leandro Motta Barros <leandro@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Leandro Motta Barros
+  version: 0.7.0
+  title: ""
+  date: 2024-05-03T04:47:12.120Z
+- commits:
     - subject: Add option to change device type
       hash: 2bfb52c339ad9a48bfed9c64c734516d5db435af
       body: >
