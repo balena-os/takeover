@@ -33,6 +33,7 @@ mod device_impl;
 
 mod exe_copy;
 
+mod checks;
 mod image_retrieval;
 mod utils;
 mod wifi_config;
@@ -45,7 +46,7 @@ use crate::{
             SYSTEM_CONNECTIONS_DIR, SYSTEM_PROXY_DIR, SYS_EFIVARS_DIR, SYS_EFI_DIR, TELINIT_CMD,
         },
         error::{Error, ErrorKind, Result, ToError},
-        file_exists, format_size_with_unit, get_mem_info, get_os_name, is_admin,
+        file_exists, format_size_with_unit, get_mem_info, get_os_name,
         options::Options,
         path_append,
         stage2_config::{Stage2Config, UmountPart},
@@ -62,6 +63,8 @@ use crate::common::dir_exists;
 use crate::common::stage2_config::LogDevice;
 use crate::common::system::{is_dir, mkdir, stat};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
+
+use self::checks::do_early_checks;
 
 const S1_XTRA_FS_SIZE: u64 = 10 * 1024 * 1024; // const XTRA_MEM_FREE: u64 = 10 * 1024 * 1024; // 10 MB
 
@@ -395,12 +398,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     let new_init_path = path_append(&takeover_dir, format!("/bin/{}", env!("CARGO_PKG_NAME")));
     // Assets::write_stage2_script(&takeover_dir, &new_init_path, &tty, opts.get_s2_log_level())?;
 
-    let block_dev_info = if get_os_name()?.starts_with(BALENA_OS_NAME) {
-        // can't use default root dir due to overlayfs
-        BlockDeviceInfo::new_for_dir(BALENA_DATA_MP)?
-    } else {
-        BlockDeviceInfo::new()?
-    };
+    let block_dev_info = get_block_dev_info()?;
 
     let flash_dev = if let Some(flash_dev) = opts.flash_to() {
         if let Some(flash_dev) = block_dev_info.get_devices().get(flash_dev) {
@@ -428,41 +426,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         ));
     }
 
-    let log_device = if let Some(log_dev_path) = opts.log_to() {
-        if let Some(log_dev) = block_dev_info.get_devices().get(log_dev_path) {
-            if let Some(partition_info) = log_dev.get_partition_info() {
-                if let Some(fs_type) = partition_info.fs_type() {
-                    const SUPPORTED_LOG_FS_TYPES: [&str; 3] = ["vfat", "ext3", "ext4"];
-                    if SUPPORTED_LOG_FS_TYPES.iter().any(|val| *val == fs_type) {
-                        Some(LogDevice {
-                            dev_name: log_dev_path.clone(),
-                            fs_type: fs_type.to_owned(),
-                        })
-                    } else {
-                        warn!("The log device's ('{}') files system type '{}' is not in the list of supported file systems: {:?}. Your device will not be able to write stage2 logs",
-                              log_dev_path.display(),
-                                fs_type,
-                            SUPPORTED_LOG_FS_TYPES);
-                        None
-                    }
-                } else {
-                    warn!("We could not detect the filesystemm type for the log device '{}'. Your device will not be able to write stage2 logs",
-                          log_dev_path.display());
-                    None
-                }
-            } else {
-                warn!("The log device '{}' is not a partition. Your device will not be able to write stage2 logs",
-                      log_dev_path.display());
-                None
-            }
-        } else {
-            warn!("The log device '{}' could not be found. Your device will not be able to write stage2 logs",
-                  log_dev_path.display());
-            None
-        }
-    } else {
-        None
-    };
+    let log_device = get_log_device(opts, &block_dev_info);
 
     // collect partitions that need to be unmounted
 
@@ -544,6 +508,73 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     Ok(())
 }
 
+/// Returns information about the block devices on the system.
+fn get_block_dev_info() -> Result<BlockDeviceInfo> {
+    let block_dev_info = if get_os_name()?.starts_with(BALENA_OS_NAME) {
+        // can't use default root dir due to overlayfs
+        BlockDeviceInfo::new_for_dir(BALENA_DATA_MP)?
+    } else {
+        BlockDeviceInfo::new()?
+    };
+    Ok(block_dev_info)
+}
+
+/// Gets the log device to use for stage 2 logs. Returns `None` if the user
+/// didn't request a log device, or if the requested log device is not usable.
+/// If the log device is not usable, an error message is logged.
+fn get_log_device(opts: &Options, block_dev_info: &BlockDeviceInfo) -> Option<LogDevice> {
+    let log_dev_path = if let Some(path) = opts.log_to() {
+        path
+    } else {
+        info!("No stage 2 log device requested");
+        return None;
+    };
+
+    let log_dev = if let Some(dev) = block_dev_info.get_devices().get(log_dev_path) {
+        dev
+    } else {
+        error!(
+            "The log device '{}' could not be found, so it can't be used for stage 2 logs",
+            log_dev_path.display()
+        );
+        return None;
+    };
+
+    let partition_info = if let Some(partition_info) = log_dev.get_partition_info() {
+        partition_info
+    } else {
+        error!(
+            "The log device '{}' is not a partition, so it can't be used for stage 2 logs",
+            log_dev_path.display()
+        );
+        return None;
+    };
+
+    let fs_type = if let Some(fs_type) = partition_info.fs_type() {
+        fs_type
+    } else {
+        error!(
+            "We could not detect the filesystem type for the log device '{}', so it can't be used for stage 2 logs",
+            log_dev_path.display()
+        );
+        return None;
+    };
+
+    const SUPPORTED_LOG_FS_TYPES: [&str; 3] = ["vfat", "ext3", "ext4"];
+    if !SUPPORTED_LOG_FS_TYPES.contains(&fs_type) {
+        error!("The log device's ('{}') files system type '{}' is not one of the supported file systems: {:?}. It can't be used for stage 2 logs",
+            log_dev_path.display(),
+            fs_type,
+            SUPPORTED_LOG_FS_TYPES);
+        return None;
+    }
+
+    Some(LogDevice {
+        dev_name: log_dev_path.clone(),
+        fs_type: fs_type.to_owned(),
+    })
+}
+
 pub fn stage1(opts: &Options) -> Result<()> {
     Logger::set_default_level(opts.log_level());
     Logger::set_brief_info(true);
@@ -582,9 +613,16 @@ pub fn stage1(opts: &Options) -> Result<()> {
         }
     };
 
-    if !is_admin()? {
-        error!("please run this program as root");
-        return Err(Error::displayed());
+    match do_early_checks(opts) {
+        Ok(_) => {
+            info!("Early checks passed");
+        }
+        Err(why) => {
+            return Err(Error::from_upstream(
+                Box::new(why),
+                "Failed early checks, exiting",
+            ));
+        }
     }
 
     if !opts.no_ack() {
