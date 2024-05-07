@@ -82,12 +82,7 @@ struct DeviceContractInfoApiResponse {
 }
 
 pub(crate) fn get_os_versions(api_endpoint: &str, api_key: &str, device: &str) -> Result<Versions> {
-    let mut headers = header::HeaderMap::new();
-    headers.insert(
-        header::AUTHORIZATION,
-        header::HeaderValue::from_str(api_key)
-            .upstream_with_context("Failed to create auth header")?,
-    );
+    let headers = get_header(api_key)?;
 
     // We currently default to non-ESR releases and use a percent-encoded template
     // TODO: Improve in the future by percent-encoding in code here
@@ -141,19 +136,23 @@ pub(crate) fn get_os_versions(api_endpoint: &str, api_key: &str, device: &str) -
     }
 }
 
+fn get_header(api_key: &str) -> Result<header::HeaderMap> {
+    let mut headers = header::HeaderMap::new();
+    headers.insert(
+        header::AUTHORIZATION,
+        header::HeaderValue::from_str(format!("Bearer {api_key}").as_str())
+            .upstream_with_context("Failed to create auth header")?,
+    );
+    Ok(headers)
+}
+
 pub(crate) fn get_os_image(
     api_endpoint: &str,
     api_key: &str,
     device: &str,
     version: &str,
 ) -> Result<Box<dyn Read>> {
-    let mut headers = header::HeaderMap::new();
-    headers.insert(
-        header::AUTHORIZATION,
-        header::HeaderValue::from_str(api_key)
-            .upstream_with_context("Failed to create auth header")?,
-    );
-
+    let headers = get_header(api_key)?;
     let request_url = format!("{}{}", api_endpoint, OS_IMG_URL);
 
     let post_data = if is_device_image_flasher(api_endpoint, api_key, device)? {
@@ -199,12 +198,7 @@ pub(crate) fn patch_device_type(
     dt_slug: &str,
     uuid: &str,
 ) -> Result<()> {
-    let mut headers = header::HeaderMap::new();
-    headers.insert(
-        header::AUTHORIZATION,
-        header::HeaderValue::from_str(format!("Bearer {api_key}").as_str())
-            .upstream_with_context("Failed to create auth header")?,
-    );
+    let headers = get_header(api_key)?;
 
     // Before we can patch the deviceType, we need to get the deviceId corresponding to the slug
     let dt_id_request_url = get_device_type_info_url(api_endpoint, "id", dt_slug);
@@ -290,12 +284,8 @@ pub(crate) fn patch_device_type(
 }
 
 fn is_device_image_flasher(api_endpoint: &str, api_key: &str, device: &str) -> Result<bool> {
-    let mut headers = header::HeaderMap::new();
-    headers.insert(
-        header::AUTHORIZATION,
-        header::HeaderValue::from_str(format!("Bearer {api_key}").as_str())
-            .upstream_with_context("Failed to create auth header")?,
-    );
+    let headers = get_header(api_key)?;
+
     let dt_contract_request_url = get_device_type_info_url(api_endpoint, "contract", device);
     let res = Client::builder()
         .default_headers(headers.clone())
