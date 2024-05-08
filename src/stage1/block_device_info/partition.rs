@@ -102,7 +102,11 @@ impl PartitionInfo {
         } else {
             Err(Error::with_context(
                 ErrorKind::InvParam,
-                &format!("Could not parse blkid output: '{}'", cmd_res),
+                &format!(
+                    "Empty or unexpected blkid output '{}' for path '{}'",
+                    cmd_res,
+                    &*device.as_ref().to_string_lossy()
+                ),
             ))
         }
     }
