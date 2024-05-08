@@ -23,6 +23,8 @@ struct ImageRequestData {
     version: String,
     #[serde(rename = "fileType")]
     file_type: String,
+    #[serde(rename = "imageType")]
+    image_type: Option<String>,
 }
 /// Structs corresponding to API response for endpoint /v6/releases
 #[derive(Serialize, Deserialize, Debug)]
@@ -44,6 +46,39 @@ struct DeviceTypeIdApiResponse {
 #[derive(Serialize, Deserialize, Debug)]
 struct DeviceIdEntry {
     id: u32,
+}
+
+/// Structs corresponding to API response for DeviceType Contract
+#[derive(Debug, Deserialize)]
+struct ContractData {
+    media: Media,
+    #[serde(default)]
+    #[serde(rename = "flashProtocol")]
+    flash_protocol: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Media {
+    #[serde(default)]
+    #[serde(rename = "altBoot")]
+    alt_boot: Option<Vec<String>>,
+    #[serde(rename = "defaultBoot")]
+    default_boot: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct Contract {
+    data: ContractData,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeviceTypeContractInfo {
+    contract: Contract,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeviceContractInfoApiResponse {
+    d: Vec<DeviceTypeContractInfo>,
 }
 
 pub(crate) fn get_os_versions(api_endpoint: &str, api_key: &str, device: &str) -> Result<Versions> {
@@ -121,10 +156,21 @@ pub(crate) fn get_os_image(
 
     let request_url = format!("{}{}", api_endpoint, OS_IMG_URL);
 
-    let post_data = ImageRequestData {
-        device_type: String::from(device),
-        version: String::from(version),
-        file_type: String::from(".gz"),
+    let post_data = if is_device_image_flasher(api_endpoint, api_key, device)? {
+        debug!("Downloading raw image for device type {device}");
+        ImageRequestData {
+            device_type: String::from(device),
+            version: String::from(version),
+            file_type: String::from(".gz"),
+            image_type: Some(String::from("raw")),
+        }
+    } else {
+        ImageRequestData {
+            device_type: String::from(device),
+            version: String::from(version),
+            file_type: String::from(".gz"),
+            image_type: None,
+        }
     };
 
     debug!("get_os_image: request_url: '{}'", request_url);
@@ -161,7 +207,7 @@ pub(crate) fn patch_device_type(
     );
 
     // Before we can patch the deviceType, we need to get the deviceId corresponding to the slug
-    let dt_id_request_url =  format!("{api_endpoint}{DEVICE__TYPE_URL_ENDPOINT}?$orderby=name%20asc&$top=1&$select=id&$filter=device_type_alias/any(dta:dta/is_referenced_by__alias%20eq%20%27{dt_slug}%27)");
+    let dt_id_request_url = get_device_type_info_url(api_endpoint, "id", dt_slug);
 
     debug!(
         "patch_device_type: dt_id_request_url: '{}'",
@@ -241,4 +287,66 @@ pub(crate) fn patch_device_type(
             ),
         ))
     }
+}
+
+fn is_device_image_flasher(api_endpoint: &str, api_key: &str, device: &str) -> Result<bool> {
+    let mut headers = header::HeaderMap::new();
+    headers.insert(
+        header::AUTHORIZATION,
+        header::HeaderValue::from_str(format!("Bearer {api_key}").as_str())
+            .upstream_with_context("Failed to create auth header")?,
+    );
+    let dt_contract_request_url = get_device_type_info_url(api_endpoint, "contract", device);
+    let res = Client::builder()
+        .default_headers(headers.clone())
+        .build()
+        .upstream_with_context("Failed to create https client")?
+        .get(&dt_contract_request_url)
+        .send()
+        .upstream_with_context(&format!(
+            "Failed to send https request url: '{}'",
+            dt_contract_request_url
+        ))?;
+
+    debug!("dt_contract_request Result = {:?}", res);
+
+    let status = res.status();
+    if status.is_success() {
+        let parsed_contract_resp = res
+            .json::<DeviceContractInfoApiResponse>()
+            .upstream_with_context("Failed to parse request results")?;
+
+        // determine if device type's OS image is of flasher type
+        // ref: https://github.com/balena-io/contracts/blob/d06ad25196f67c4d20ad309941192fdddf80e307/README.md?plain=1#L81
+        let device_contract = &parsed_contract_resp.d[0];
+        debug!("Device contract for {device} is {:?}", device_contract);
+
+        // If the defaultBoot is internal and there is an alternative boot method like sdcard and no flashProtocol defined -> flasher
+        if device_contract.contract.data.media.default_boot == "internal"
+            && device_contract
+                .contract
+                .data
+                .media
+                .alt_boot
+                .as_ref()
+                .is_some_and(|alt_boot_vec| !alt_boot_vec.is_empty())
+            && device_contract.contract.data.flash_protocol.is_none()
+        {
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    } else {
+        Err(Error::with_context(
+            ErrorKind::InvState,
+            &format!(
+                "Balena API GET Device Type contract request failed with status: {}",
+                status
+            ),
+        ))
+    }
+}
+
+fn get_device_type_info_url(api_endpoint: &str, select: &str, device: &str) -> String {
+    format!("{api_endpoint}{DEVICE__TYPE_URL_ENDPOINT}?$orderby=name%20asc&$top=1&$select={select}&$filter=device_type_alias/any(dta:dta/is_referenced_by__alias%20eq%20%27{device}%27)")
 }
