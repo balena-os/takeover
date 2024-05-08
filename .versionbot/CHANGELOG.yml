@@ -1,4 +1,24 @@
 - commits:
+    - subject: "stage1/block_device_info: Improve failure logs for partitions without
+        filesystems"
+      hash: 2062c29547fe3eb720d3d5976d5a1cbf5235cea4
+      body: |
+        If the system contains an empty partition, one that has no filesystem
+        or for which blkid returns an empty output or error, let's log
+        that.
+
+        This can be reproduced by trying to provision with a balenaOS
+        flasher image which has no filesystem on /dev/sda5.
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Alexandru Costache <alexandru@balena.io>
+        signed-off-by: Alexandru Costache <alexandru@balena.io>
+      author: Alexandru Costache
+  version: 0.8.1
+  title: ""
+  date: 2024-05-08T13:17:23.948Z
+- commits:
     - subject: Download raw images for flasher type device types
       hash: c2ee65ca2e0134d8b148ee0178d2cc00db9371df
       body: >
