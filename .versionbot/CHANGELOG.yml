@@ -1,4 +1,19 @@
 - commits:
+    - subject: Simplify API Header Authorization
+      hash: 6ba4a9cdd55f63ff5915732e6bb1cfe6fbaf5ee8
+      body: |
+        - use a convenience function to create headers
+        - use Bearer scheme for authorisation
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Rahul Thakoor <rahul@balena.io>
+        signed-off-by: Rahul Thakoor <rahul@balena.io>
+      author: Rahul Thakoor
+  version: 0.8.2
+  title: ""
+  date: 2024-05-09T15:22:27.762Z
+- commits:
     - subject: "stage1/block_device_info: Improve failure logs for partitions without
         filesystems"
       hash: 2062c29547fe3eb720d3d5976d5a1cbf5235cea4

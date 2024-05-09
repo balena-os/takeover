@@ -1373,7 +1373,7 @@ dependencies = [
 
 [[package]]
 name = "takeover"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "cfg-if 0.1.10",
  "clap",
