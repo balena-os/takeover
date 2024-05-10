@@ -19,8 +19,9 @@ use crate::{
     stage1::{
         api_calls::{get_os_image, get_os_versions, Versions},
         defs::{
-            DEV_TYPE_BBB, DEV_TYPE_BBG, DEV_TYPE_GEN_X86_64, DEV_TYPE_INTEL_NUC,
-            DEV_TYPE_JETSON_XAVIER, DEV_TYPE_RPI1, DEV_TYPE_RPI2, DEV_TYPE_RPI3, DEV_TYPE_RPI4_64,
+            DEV_TYPE_BBB, DEV_TYPE_BBG, DEV_TYPE_GEN_AMD64, DEV_TYPE_GEN_X86_64,
+            DEV_TYPE_INTEL_NUC, DEV_TYPE_JETSON_XAVIER, DEV_TYPE_RPI1, DEV_TYPE_RPI2,
+            DEV_TYPE_RPI3, DEV_TYPE_RPI4_64,
         },
         migrate_info::balena_cfg_json::BalenaCfgJson,
     },
@@ -30,20 +31,22 @@ use crate::{
 use flate2::{Compression, GzBuilder};
 use nix::mount::{mount, umount, MsFlags};
 
-pub const FLASHER_DEVICES: [&str; 5] = [
+pub const FLASHER_DEVICES: [&str; 6] = [
     DEV_TYPE_INTEL_NUC,
     DEV_TYPE_GEN_X86_64,
+    DEV_TYPE_GEN_AMD64,
     DEV_TYPE_BBG,
     DEV_TYPE_BBB,
     DEV_TYPE_JETSON_XAVIER,
 ];
-const SUPPORTED_DEVICES: [&str; 9] = [
+const SUPPORTED_DEVICES: [&str; 10] = [
     DEV_TYPE_RPI3,
     DEV_TYPE_RPI2,
     DEV_TYPE_RPI4_64,
     DEV_TYPE_RPI1,
     DEV_TYPE_INTEL_NUC,
     DEV_TYPE_GEN_X86_64,
+    DEV_TYPE_GEN_AMD64,
     DEV_TYPE_BBG,
     DEV_TYPE_BBB,
     DEV_TYPE_JETSON_XAVIER,
