@@ -1222,7 +1222,7 @@ fn flash_external(target_path: &Path, image_path: &Path, dd_cmd: &str) -> FlashS
                     tot_bytes,
                     format_size_with_unit(tot_bytes),
                     elapsed,
-                    format_size_with_unit(tot_bytes / elapsed),
+                    format_size_with_unit(tot_bytes / elapsed.max(1)),
                 );
             } else {
                 error!("Failed to retrieve dd stdin");

@@ -41,15 +41,15 @@ impl<T: Read> Read for StreamProgress<T> {
                         "{} of {} read in {} seconds @{}/sec ",
                         format_size_with_unit(self.bytes_read),
                         format_size_with_unit(size),
-                        Instant::now().duration_since(self.start_time).as_secs(),
-                        format_size_with_unit(self.bytes_read / elapsed),
+                        elapsed,
+                        format_size_with_unit(self.bytes_read / elapsed.max(1)),
                     )
                 } else {
                     format!(
                         "{} read in {} seconds @{}/sec ",
                         format_size_with_unit(self.bytes_read),
-                        Instant::now().duration_since(self.start_time).as_secs(),
-                        format_size_with_unit(self.bytes_read / elapsed),
+                        elapsed,
+                        format_size_with_unit(self.bytes_read / elapsed.max(1)),
                     )
                 };
 
@@ -77,15 +77,15 @@ impl<T: Read> Read for StreamProgress<T> {
                     "{} of {} read in {} seconds @{}/sec ",
                     format_size_with_unit(self.bytes_read),
                     format_size_with_unit(size),
-                    Instant::now().duration_since(self.start_time).as_secs(),
-                    format_size_with_unit(self.bytes_read / elapsed),
+                    elapsed,
+                    format_size_with_unit(self.bytes_read / elapsed.max(1)),
                 )
             } else {
                 format!(
                     "{} read in {} seconds @{}/sec ",
                     format_size_with_unit(self.bytes_read),
-                    Instant::now().duration_since(self.start_time).as_secs(),
-                    format_size_with_unit(self.bytes_read / elapsed),
+                    elapsed,
+                    format_size_with_unit(self.bytes_read / elapsed.max(1)),
                 )
             };
 
