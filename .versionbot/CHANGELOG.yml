@@ -1,4 +1,18 @@
 - commits:
+    - subject: Fix use of elapsed seconds
+      hash: afa139508cbd50767d0d31e26f1d3e94596504ab
+      body: |
+        Includes a divide by zero error.
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Ken Bannister <kb2ma@runbox.com>
+        signed-off-by: Ken Bannister <kb2ma@runbox.com>
+      author: Ken Bannister
+  version: 0.8.3
+  title: ""
+  date: 2024-07-01T13:27:27.162Z
+- commits:
     - subject: Simplify API Header Authorization
       hash: 6ba4a9cdd55f63ff5915732e6bb1cfe6fbaf5ee8
       body: |
