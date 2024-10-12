@@ -106,3 +106,5 @@ cfg_if::cfg_if! {
         pub(crate) type IoctlReq = u64;
     }
 }
+
+pub const FALLBACK_LOG_TEMP_DESTINATION: &str = "/tmp";

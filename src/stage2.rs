@@ -19,7 +19,7 @@ use libc::{ioctl, LINUX_REBOOT_CMD_RESTART, MS_RDONLY, MS_REMOUNT, SIGKILL, SIGT
 use log::{debug, error, info, trace, warn, Level};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
-use crate::common::defs::MTD_DEBUG_CMD;
+use crate::common::defs::{BALENA_DATA_MP, FALLBACK_LOG_TEMP_DESTINATION, MTD_DEBUG_CMD};
 use crate::common::stage2_config::LogDevice;
 
 use crate::common::{
@@ -280,7 +280,7 @@ pub(crate) fn read_stage2_config<P: AsRef<Path>>(path_prefix: Option<P>) -> Resu
     }
 }
 
-fn setup_logging(log_dev: Option<&LogDevice>) {
+fn setup_logging(log_dev: Option<&LogDevice>, fallback_log: bool) {
     if log_dev.is_some() {
         // Device should have been mounted by stage2-init
         match dir_exists("/mnt/log/") {
@@ -302,6 +302,22 @@ fn setup_logging(log_dev: Option<&LogDevice>) {
             }
             Err(why) => {
                 warn!("Failed to check for log directory, error: {:?}", why);
+            }
+        }
+    } else {
+        if fallback_log {
+            info!(
+                "Log fallback option passed, setting up temporary log destination to {}",
+                FALLBACK_LOG_TEMP_DESTINATION
+            );
+
+            let logfile = path_append(FALLBACK_LOG_TEMP_DESTINATION, "stage2.log");
+            match Logger::set_log_file(&LogDestination::Stderr, &logfile, false) {
+                Ok(_) => info!(
+                    "fallback-log::stage2: Now logging to '{}'",
+                    logfile.display()
+                ),
+                Err(why) => error!("Setup log failed, error: {:?}", why),
             }
         }
     }
@@ -1279,7 +1295,7 @@ pub fn stage2(opts: &Options) -> ! {
 
     info!("Stage 2 config was read successfully");
 
-    setup_logging(s2_config.log_dev());
+    setup_logging(s2_config.log_dev(), s2_config.fallback_log);
 
     match kill_procs(opts.s2_log_level()) {
         Ok(_) => (),
@@ -1357,9 +1373,110 @@ pub fn stage2(opts: &Options) -> ! {
     } else {
         info!("Migration completed successfully");
     }
-
     sync();
+
+    // if the fallback log option was selected, we transfer the logs from tmpfs to the new data partition
+    if s2_config.fallback_log {
+        match transfer_fallback_logs(&s2_config) {
+            Ok(_) => (),
+            Err(why) => {
+                error!("transfer_fallback_logs, error {}", why);
+            }
+        };
+    }
+
     reboot();
+}
+
+fn transfer_fallback_logs(s2_config: &Stage2Config) -> Result<()> {
+    info!("transfer_fallback_log entered!");
+
+    let device = &s2_config.flash_dev;
+
+    let (_boot_part, _root_a_part, data_part) = get_partition_infos(device)?;
+    let mut loop_device = LoopDevice::get_free(true)?;
+    info!("Create loop device: '{}'", loop_device.get_path().display());
+    let byte_offset = data_part.start_lba * DEF_BLOCK_SIZE as u64;
+    let size_limit = data_part.num_sectors * DEF_BLOCK_SIZE as u64;
+
+    debug!(
+        "Setting up device '{}' with offset {}, sizelimit {} on '{}'",
+        device.display(),
+        byte_offset,
+        size_limit,
+        loop_device.get_path().display()
+    );
+
+    loop_device
+        .setup(device, Some(byte_offset), Some(size_limit))
+        .unwrap();
+    info!(
+        "Setup device '{}' with offset {}, sizelimit {} on '{}'",
+        device.display(),
+        byte_offset,
+        size_limit,
+        loop_device.get_path().display()
+    );
+
+    mount(
+        Some(loop_device.get_path()),
+        BALENA_PART_MP,
+        Some(BALENA_DATA_FSTYPE.as_bytes()),
+        MsFlags::empty(),
+        NIX_NONE,
+    )
+    .upstream_with_context(&format!(
+        "Failed to mount '{}' to '{}'",
+        loop_device.get_path().display(),
+        BALENA_DATA_MP,
+    ))?;
+
+    info!(
+        "Mounted data partition as {} on {}",
+        loop_device.get_path().display(),
+        BALENA_PART_MP
+    );
+
+    // create balenahup dir on data partition
+    let log_destination = format!("{}/balenahup/takeover", BALENA_PART_MP);
+    create_dir_all(&log_destination)
+        .upstream_with_context("Failed to create log directory /balenahup/takeover")?;
+
+    let stage1_source_tmp_log = format!(
+        "{}/{}/stage1.log",
+        OLD_ROOT_MP, FALLBACK_LOG_TEMP_DESTINATION
+    );
+    copy_fallback_logs(&stage1_source_tmp_log, &log_destination, "stage1");
+
+    let stage2_init_source_tmp_log = format!("{}/stage2-init.log", FALLBACK_LOG_TEMP_DESTINATION);
+    copy_fallback_logs(&stage2_init_source_tmp_log, &log_destination, "stage2-init");
+
+    let stage2_source_tmp_log = format!("{}/stage2.log", FALLBACK_LOG_TEMP_DESTINATION);
+    copy_fallback_logs(&stage2_source_tmp_log, &log_destination, "stage2");
+    sync();
+
+    umount(BALENA_PART_MP).unwrap();
+
+    info!("Unmounted data partition from {}", BALENA_PART_MP);
+
+    loop_device.unset()?;
+    Ok(())
+}
+
+fn copy_fallback_logs(source_tmp_log: &str, log_destination: &str, stage: &str) {
+    match copy(
+        PathBuf::from(source_tmp_log),
+        path_append(&log_destination, format!("/{}.log", stage)),
+    ) {
+        Ok(_) => info!(
+            "copy_fallback_logs: copied {}.log from {} to {} on data partition",
+            stage, &source_tmp_log, &log_destination
+        ),
+        Err(why) => error!(
+            "copy_fallback_logs: Could not copy stage1 log from {} to {}: {:?}",
+            &source_tmp_log, &log_destination, why
+        ),
+    }
 }
 
 fn print_active_processes() -> Result<()> {

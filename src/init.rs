@@ -1,7 +1,7 @@
 use crate::{
     common::{
         call,
-        defs::{MOUNT_CMD, NIX_NONE, PIVOT_ROOT_CMD, TAKEOVER_DIR},
+        defs::{FALLBACK_LOG_TEMP_DESTINATION, MOUNT_CMD, NIX_NONE, PIVOT_ROOT_CMD, TAKEOVER_DIR},
         get_mountpoint, path_append, whereis, Error, Result, ToError,
     },
     stage2::{read_stage2_config, reboot},
@@ -256,22 +256,23 @@ pub fn init() -> ! {
     };
     info!("Stage 2 closed {} fd's", closed_fds);
 
-    let ext_log = if let Some(log_dev) = s2_config.log_dev() {
-        match setup_log(log_dev, TAKEOVER_DIR) {
-            Ok(_) => true,
-            Err(why) => {
-                error!("Setup log failed, error: {:?}", why);
-                false
+    if !s2_config.fallback_log {
+        let ext_log = if let Some(log_dev) = s2_config.log_dev() {
+            match setup_log(log_dev, TAKEOVER_DIR) {
+                Ok(_) => true,
+                Err(why) => {
+                    error!("Setup log failed, error: {:?}", why);
+                    false
+                }
             }
-        }
-    } else {
-        false
-    };
+        } else {
+            false
+        };
+        info!("Stage 2 setup_log success!, ext_log: {}", ext_log);
 
-    info!("Stage 2 setup_log success!, ext_log: {}", ext_log);
-
-    Logger::flush();
-    sync();
+        Logger::flush();
+        sync();
+    }
 
     match whereis(MOUNT_CMD) {
         Ok(mount_cmd) => {
@@ -314,6 +315,27 @@ pub fn init() -> ! {
             );
             reboot();
         }
+    }
+
+    // after pivot root -> new /tmp
+    // check if using fallback log mechanism
+    if s2_config.fallback_log {
+        info!(
+            "Log fallback option passed, setting up temporary log destination to {}",
+            FALLBACK_LOG_TEMP_DESTINATION
+        );
+
+        let logfile = path_append(FALLBACK_LOG_TEMP_DESTINATION, "stage2-init.log");
+        match Logger::set_log_file(&LogDestination::Stderr, &logfile, false) {
+            Ok(_) => info!(
+                "fallback-log::stage2-init: Now logging to '{}'",
+                logfile.display()
+            ),
+            Err(why) => error!("Setup log failed, error: {:?}", why),
+        }
+
+        Logger::flush();
+        sync();
     }
 
     let _child_pid = match Command::new(format!("/bin/{}", env!("CARGO_PKG_NAME")))

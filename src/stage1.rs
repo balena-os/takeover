@@ -58,7 +58,9 @@ use crate::{
     },
 };
 
-use crate::common::defs::{DD_CMD, EFIBOOTMGR_CMD, MTD_DEBUG_CMD, TAKEOVER_DIR};
+use crate::common::defs::{
+    DD_CMD, EFIBOOTMGR_CMD, FALLBACK_LOG_TEMP_DESTINATION, MTD_DEBUG_CMD, TAKEOVER_DIR,
+};
 use crate::common::dir_exists;
 use crate::common::stage2_config::LogDevice;
 use crate::common::system::{is_dir, mkdir, stat};
@@ -433,6 +435,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     let s2_cfg = Stage2Config {
         log_dev: log_device,
         log_level: opts.s2_log_level().to_string(),
+        fallback_log: opts.fallback_log(),
         flash_dev: flash_dev.get_dev_path(),
         pretend: opts.pretend(),
         umount_parts: get_umount_parts(flash_dev, &block_dev_info)?,
@@ -595,8 +598,26 @@ pub fn stage1(opts: &Options) -> Result<()> {
                 s1_log_path.display(),
             ))?;
     } else {
-        Logger::set_log_dest(&LogDestination::Stderr, NO_STREAM)
-            .upstream_with_context("Failed to set up logging")?;
+        // if fallback log mechanicsm selected, log to known directory
+        if opts.fallback_log() {
+            info!(
+                "Log fallback option passed, setting up temporary log destination to {}",
+                FALLBACK_LOG_TEMP_DESTINATION
+            );
+
+            let logfile = path_append(FALLBACK_LOG_TEMP_DESTINATION, "stage1.log");
+
+            Logger::set_log_file(&LogDestination::Stderr, &logfile, false).upstream_with_context(
+                &format!("Failed set log file to  '{}'", logfile.display()),
+            )?;
+            info!(
+                "fallback-log::stage1: Now logging to '{}'",
+                logfile.display()
+            );
+        } else {
+            Logger::set_log_dest(&LogDestination::Stderr, NO_STREAM)
+                .upstream_with_context("Failed to set up logging")?;
+        }
     }
 
     let mut mig_info = match MigrateInfo::new(opts) {
@@ -657,7 +678,6 @@ pub fn stage1(opts: &Options) -> Result<()> {
         match prepare(opts, &mut mig_info) {
             Ok(_) => {
                 info!("Takeover initiated successfully, please wait for the device to be reflashed and reboot");
-                Logger::flush();
                 sync();
                 sleep(Duration::from_secs(10));
                 Ok(())
