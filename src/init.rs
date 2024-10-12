@@ -1,10 +1,17 @@
 use crate::{
     common::{
         call,
-        defs::{MOUNT_CMD, NIX_NONE, PIVOT_ROOT_CMD, TAKEOVER_DIR},
-        get_mountpoint, path_append, whereis, Error, Result, ToError,
+        defs::{MOUNT_CMD, NIX_NONE, OLD_ROOT_MP, PIVOT_ROOT_CMD, TAKEOVER_DIR},
+        get_mountpoint,
+        logging::{
+            copy_file_to_destination_dir, open_fallback_log_file,
+            persist_fallback_log_to_data_partition,
+        },
+        path_append, reboot,
+        stage2_config::Stage2Config,
+        whereis, Error, Result, ToError,
     },
-    stage2::{read_stage2_config, reboot},
+    stage2::read_stage2_config,
     ErrorKind,
 };
 use log::{error, info, trace, warn, Level};
@@ -194,6 +201,7 @@ fn close_fds(takeover_dir: &str) -> Result<i32> {
             }
         };
     }
+
     Ok(close_count)
 }
 
@@ -209,24 +217,7 @@ pub fn init() -> ! {
     }
 
     info!("Init entered");
-
-    if unsafe { getpid() } != 1 {
-        error!("Process must be pid 1 to run init");
-        reboot();
-    }
-
-    info!("Init check pid success!");
-
     let takeover_path = PathBuf::from(TAKEOVER_DIR);
-
-    if let Err(why) = set_current_dir(&takeover_path) {
-        error!(
-            "Failed to change to directory '{}', error: {:?}",
-            takeover_path.display(),
-            why
-        );
-        reboot();
-    }
 
     let s2_config = match read_stage2_config(Some(&takeover_path)) {
         Ok(s2_config) => s2_config,
@@ -235,7 +226,24 @@ pub fn init() -> ! {
             reboot();
         }
     };
+
     info!("Stage 2 config was read successfully");
+
+    if unsafe { getpid() } != 1 {
+        error!("Process must be pid 1 to run init");
+        stage2_init_err_handler(true, &s2_config);
+    }
+
+    info!("Init check pid success!");
+
+    if let Err(why) = set_current_dir(&takeover_path) {
+        error!(
+            "Failed to change to directory '{}', error: {:?}",
+            takeover_path.display(),
+            why
+        );
+        stage2_init_err_handler(true, &s2_config);
+    }
 
     match Level::from_str(&s2_config.log_level) {
         Ok(level) => Logger::set_default_level(level),
@@ -251,28 +259,36 @@ pub fn init() -> ! {
         Ok(fds) => fds,
         Err(_) => {
             error!("Failed close open files");
-            reboot();
+            stage2_init_err_handler(true, &s2_config);
         }
     };
     info!("Stage 2 closed {} fd's", closed_fds);
 
-    let ext_log = if let Some(log_dev) = s2_config.log_dev() {
-        match setup_log(log_dev, TAKEOVER_DIR) {
-            Ok(_) => true,
-            Err(why) => {
-                error!("Setup log failed, error: {:?}", why);
-                false
+    // Logs are buffered prior to closing all open file descriptors
+    // After running `close_fds`, we check the logging options passed to takeover
+    // --fallback-log and --log-to are mutually exclusive
+    // We can setup external logging here
+    if !s2_config.fallback_log {
+        let ext_log = if let Some(log_dev) = s2_config.log_dev() {
+            match setup_log(log_dev, TAKEOVER_DIR) {
+                Ok(_) => true,
+                Err(why) => {
+                    error!("Setup log failed, error: {:?}", why);
+                    false
+                }
             }
-        }
-    } else {
-        false
-    };
+        } else {
+            false
+        };
+        info!("Stage 2 setup_log success!, ext_log: {}", ext_log);
 
-    info!("Stage 2 setup_log success!, ext_log: {}", ext_log);
+        Logger::flush();
+        sync();
+    }
 
-    Logger::flush();
-    sync();
-
+    /******************************************************************
+     * Pivot Root
+     ******************************************************************/
     match whereis(MOUNT_CMD) {
         Ok(mount_cmd) => {
             if let Err(why) = call_command!(
@@ -284,12 +300,12 @@ pub fn init() -> ! {
                     "Failed to call '{} --make-rprivate /' error: {}",
                     mount_cmd, why
                 );
-                reboot();
+                stage2_init_err_handler(true, &s2_config);
             }
         }
         Err(why) => {
             error!("Failed to locate '{}' command, error: {}", MOUNT_CMD, why);
-            reboot();
+            stage2_init_err_handler(true, &s2_config);
         }
     }
 
@@ -304,7 +320,7 @@ pub fn init() -> ! {
                     "Failed to call '{} . mnt/old_root' error: {}",
                     pivot_root_cmd, why
                 );
-                reboot();
+                stage2_init_err_handler(true, &s2_config);
             }
         }
         Err(why) => {
@@ -312,8 +328,28 @@ pub fn init() -> ! {
                 "Failed to locate '{}' command, error: {}",
                 PIVOT_ROOT_CMD, why
             );
-            reboot();
+            stage2_init_err_handler(true, &s2_config);
         }
+    }
+    /******************************************************************
+     * After this point, paths are relative to OLD_ROOT_MP
+     ******************************************************************/
+
+    // If fallback log option was passed
+    // We setup logging to file on tmpfs
+    // Before this point, stage2-init logs was sent to a buffer
+    if s2_config.fallback_log {
+        // copy the shared log file from OLD_ROOT_MP
+        let source_tmp_log_path =
+            format!("{}/tmp/{}", OLD_ROOT_MP, s2_config.fallback_log_filename);
+        let dest_dir_path = "/tmp";
+
+        match copy_file_to_destination_dir(&source_tmp_log_path, dest_dir_path) {
+            Ok(_) => info!("Copied logfile from {}", source_tmp_log_path),
+            Err(_) => error!("Could not copy logfile from {}", source_tmp_log_path),
+        }
+
+        setup_stage2_init_fallback_log(&s2_config.fallback_log_filename);
     }
 
     let _child_pid = match Command::new(format!("/bin/{}", env!("CARGO_PKG_NAME")))
@@ -323,7 +359,7 @@ pub fn init() -> ! {
         Ok(cmd_res) => cmd_res.id(),
         Err(why) => {
             error!("Failed to spawn stage2 worker process, error: {:?}", why);
-            reboot();
+            stage2_init_err_handler(false, &s2_config);
         }
     };
 
@@ -359,4 +395,65 @@ pub fn init() -> ! {
             }
         }
     }
+}
+
+// mod_logger needs to be called separately per module
+fn setup_stage2_init_fallback_log(fallback_log_filename: &str) {
+    info!(
+        "stage2-init:: Setting up temporary log destination to /tmp/{}",
+        fallback_log_filename
+    );
+    Logger::set_color(false);
+
+    let log_file = open_fallback_log_file(fallback_log_filename);
+
+    if log_file.is_some() {
+        // Logger::set_log_dest flushes the buffer before setting the log dest
+        // We do not use Logger::set_log_file because it truncates the file
+        // So we get the buffer before calling Logger::set_log_dest, and then write the
+        // buffered logs to the file
+        let buffered_logs = Logger::get_buffer();
+
+        match Logger::set_log_dest(&LogDestination::StreamStderr, log_file) {
+            Ok(_) => {
+                if let Some(buffer) = buffered_logs {
+                    // Attempt to convert Vec<u8> to String
+                    match String::from_utf8(buffer) {
+                        Ok(logs) => info!("\n{}", logs),
+                        Err(error) => error!("Error: {}", error),
+                    }
+                }
+                info!(
+                    "stage2-init:: Now logging to /tmp/{}",
+                    fallback_log_filename
+                );
+            }
+            Err(_) => {
+                error!(
+                    "Could not set logging to tmpfs at /tmp/{}",
+                    fallback_log_filename
+                )
+            }
+        }
+    }
+}
+
+// Helper function to handle errors during stage2-init process
+// * `pre_privot_root` - bool to indicate whether handling err
+//
+// prior to pivot_root command being called. This is relevant
+// because if using fallback log mechanism, logs are still in memory
+// before the calling pivot_root. We attempt to setup log to tmpfs
+// in that case.
+fn stage2_init_err_handler(pre_pivot_root: bool, s2_config: &Stage2Config) -> ! {
+    // if handling err before pivot_root has been called
+    // we attempt to setup stage2-init log to tmpfs
+    if pre_pivot_root {
+        setup_stage2_init_fallback_log(&s2_config.fallback_log_filename);
+    }
+
+    if s2_config.fallback_log {
+        let _ = persist_fallback_log_to_data_partition(s2_config, false);
+    }
+    reboot();
 }

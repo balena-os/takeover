@@ -60,6 +60,7 @@ use crate::{
 
 use crate::common::defs::{DD_CMD, EFIBOOTMGR_CMD, MTD_DEBUG_CMD, TAKEOVER_DIR};
 use crate::common::dir_exists;
+use crate::common::logging::open_fallback_log_file;
 use crate::common::stage2_config::LogDevice;
 use crate::common::system::{is_dir, mkdir, stat};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
@@ -433,6 +434,9 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     let s2_cfg = Stage2Config {
         log_dev: log_device,
         log_level: opts.s2_log_level().to_string(),
+        fallback_log: opts.fallback_log(),
+        fallback_log_filename: opts.fallback_log_filename().to_string(),
+        fallback_log_dirname: opts.fallback_log_dir().to_string(),
         flash_dev: flash_dev.get_dev_path(),
         pretend: opts.pretend(),
         umount_parts: get_umount_parts(flash_dev, &block_dev_info)?,
@@ -595,8 +599,37 @@ pub fn stage1(opts: &Options) -> Result<()> {
                 s1_log_path.display(),
             ))?;
     } else {
-        Logger::set_log_dest(&LogDestination::Stderr, NO_STREAM)
-            .upstream_with_context("Failed to set up logging")?;
+        // if fallback log mechanicsm selected, log to known directory
+        if opts.fallback_log() {
+            info!(
+                "stage1:: Setting up temporary log destination to /tmp/{}",
+                opts.fallback_log_filename()
+            );
+            Logger::set_color(false);
+
+            let log_file = open_fallback_log_file(opts.fallback_log_filename());
+
+            if log_file.is_some() {
+                match Logger::set_log_dest(&LogDestination::StreamStderr, log_file) {
+                    Ok(_) => (),
+                    Err(_) => {
+                        error!(
+                            "Could not set logging to tmpfs at /tmp/{}",
+                            opts.fallback_log_filename()
+                        )
+                    }
+                }
+            }
+            Logger::flush();
+            sync();
+            info!(
+                "stage1:: Now logging to /tmp/{}",
+                opts.fallback_log_filename()
+            );
+        } else {
+            Logger::set_log_dest(&LogDestination::Stderr, NO_STREAM)
+                .upstream_with_context("Failed to set up logging")?;
+        }
     }
 
     let mut mig_info = match MigrateInfo::new(opts) {
@@ -657,7 +690,6 @@ pub fn stage1(opts: &Options) -> Result<()> {
         match prepare(opts, &mut mig_info) {
             Ok(_) => {
                 info!("Takeover initiated successfully, please wait for the device to be reflashed and reboot");
-                Logger::flush();
                 sync();
                 sleep(Duration::from_secs(10));
                 Ok(())
