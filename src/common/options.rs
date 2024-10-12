@@ -141,6 +141,11 @@ pub struct Options {
     nwmgr_cfg: Option<Vec<PathBuf>>,
     #[clap(long, value_name = "DT_SLUG", help = "Device Type slug to change to")]
     change_dt_to: Option<String>,
+    #[clap(
+        long,
+        help = "Logs to RAM and then dumps logs to balenaOS disk after flashing"
+    )]
+    log_to_balenaos: bool,
 }
 
 impl Options {
@@ -284,5 +289,9 @@ impl Options {
 
     pub fn change_dt_to(&self) -> &Option<String> {
         &self.change_dt_to
+    }
+
+    pub fn log_to_balenaos(&self) -> bool {
+        self.log_to_balenaos
     }
 }

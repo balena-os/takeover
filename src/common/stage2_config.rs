@@ -21,6 +21,7 @@ pub(crate) struct LogDevice {
 pub(crate) struct Stage2Config {
     pub log_dev: Option<LogDevice>,
     pub log_level: String,
+    pub log_to_balenaos: bool,
     pub flash_dev: PathBuf,
     pub pretend: bool,
     pub umount_parts: Vec<UmountPart>,

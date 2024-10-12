@@ -1,4 +1,5 @@
 use finder::Finder;
+use mod_logger::Logger;
 use std::cmp::min;
 use std::ffi::{CStr, CString, OsString};
 use std::fs::{read_to_string, OpenOptions};
@@ -6,9 +7,12 @@ use std::io::Write;
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{exit, Command, ExitStatus, Stdio};
+use std::thread::sleep;
+use std::time::Duration;
 
-use log::{debug, error, trace, warn};
+use libc::LINUX_REBOOT_CMD_RESTART;
+use log::{debug, error, info, trace, warn};
 
 use regex::Regex;
 
@@ -16,6 +20,7 @@ pub(crate) mod stage2_config;
 
 pub(crate) mod defs;
 
+pub(crate) mod logging;
 pub(crate) mod system;
 use system::{is_dir, stat};
 
@@ -408,6 +413,16 @@ pub(crate) fn log(text: &str) {
         let _res = log_file.flush();
         sync()
     }
+}
+
+pub(crate) fn reboot() -> ! {
+    trace!("reboot entered");
+    Logger::flush();
+    sync();
+    sleep(Duration::from_secs(3));
+    info!("rebooting");
+    let _res = unsafe { libc::reboot(LINUX_REBOOT_CMD_RESTART) };
+    exit(1);
 }
 
 #[cfg(test)]

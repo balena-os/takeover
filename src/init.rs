@@ -2,9 +2,15 @@ use crate::{
     common::{
         call,
         defs::{MOUNT_CMD, NIX_NONE, PIVOT_ROOT_CMD, TAKEOVER_DIR},
-        get_mountpoint, path_append, whereis, Error, Result, ToError,
+        get_mountpoint,
+        logging::{
+            get_stage_tmpfs_logfile_path, stage2_init_post_pivot_root_err_handler,
+            stage2_init_post_pivot_root_tmpfs_log_handler, stage2_init_pre_pivot_root_err_handler,
+            Stage, LOG_TMPFS_DESTINATION,
+        },
+        path_append, reboot, whereis, Error, Result, ToError,
     },
-    stage2::{read_stage2_config, reboot},
+    stage2::read_stage2_config,
     ErrorKind,
 };
 use log::{error, info, trace, warn, Level};
@@ -194,6 +200,7 @@ fn close_fds(takeover_dir: &str) -> Result<i32> {
             }
         };
     }
+
     Ok(close_count)
 }
 
@@ -251,28 +258,36 @@ pub fn init() -> ! {
         Ok(fds) => fds,
         Err(_) => {
             error!("Failed close open files");
-            reboot();
+            stage2_init_pre_pivot_root_err_handler(s2_config.log_to_balenaos);
         }
     };
     info!("Stage 2 closed {} fd's", closed_fds);
 
-    let ext_log = if let Some(log_dev) = s2_config.log_dev() {
-        match setup_log(log_dev, TAKEOVER_DIR) {
-            Ok(_) => true,
-            Err(why) => {
-                error!("Setup log failed, error: {:?}", why);
-                false
+    // Logs are buffered prior to closing all open file descriptors
+    // After running `close_fds`, we check the logging options passed to takeover
+    // --log-to-balenaOS and --log-to are mutually exclusive
+    // We can setup external logging here
+    if !s2_config.log_to_balenaos {
+        let ext_log = if let Some(log_dev) = s2_config.log_dev() {
+            match setup_log(log_dev, TAKEOVER_DIR) {
+                Ok(_) => true,
+                Err(why) => {
+                    error!("Setup log failed, error: {:?}", why);
+                    false
+                }
             }
-        }
-    } else {
-        false
-    };
+        } else {
+            false
+        };
+        info!("Stage 2 setup_log success!, ext_log: {}", ext_log);
 
-    info!("Stage 2 setup_log success!, ext_log: {}", ext_log);
+        Logger::flush();
+        sync();
+    }
 
-    Logger::flush();
-    sync();
-
+    /******************************************************************
+     * Pivot Root
+     ******************************************************************/
     match whereis(MOUNT_CMD) {
         Ok(mount_cmd) => {
             if let Err(why) = call_command!(
@@ -284,12 +299,12 @@ pub fn init() -> ! {
                     "Failed to call '{} --make-rprivate /' error: {}",
                     mount_cmd, why
                 );
-                reboot();
+                stage2_init_pre_pivot_root_err_handler(s2_config.log_to_balenaos);
             }
         }
         Err(why) => {
             error!("Failed to locate '{}' command, error: {}", MOUNT_CMD, why);
-            reboot();
+            stage2_init_pre_pivot_root_err_handler(s2_config.log_to_balenaos);
         }
     }
 
@@ -304,7 +319,7 @@ pub fn init() -> ! {
                     "Failed to call '{} . mnt/old_root' error: {}",
                     pivot_root_cmd, why
                 );
-                reboot();
+                stage2_init_pre_pivot_root_err_handler(s2_config.log_to_balenaos);
             }
         }
         Err(why) => {
@@ -312,8 +327,18 @@ pub fn init() -> ! {
                 "Failed to locate '{}' command, error: {}",
                 PIVOT_ROOT_CMD, why
             );
-            reboot();
+            stage2_init_pre_pivot_root_err_handler(s2_config.log_to_balenaos);
         }
+    }
+    /******************************************************************
+     * After this point, paths are relative to OLD_ROOT_MP
+     ******************************************************************/
+
+    // If the on-device logging option was passed
+    // We setup logging to file on tmpfs
+    // Before this point, stage2-init logs was sent to a buffer
+    if s2_config.log_to_balenaos {
+        setup_stage2_init_tmpfs_log();
     }
 
     let _child_pid = match Command::new(format!("/bin/{}", env!("CARGO_PKG_NAME")))
@@ -323,11 +348,15 @@ pub fn init() -> ! {
         Ok(cmd_res) => cmd_res.id(),
         Err(why) => {
             error!("Failed to spawn stage2 worker process, error: {:?}", why);
-            reboot();
+            stage2_init_post_pivot_root_err_handler();
         }
     };
 
     info!("Stage 2 migrate worker spawned");
+
+    if s2_config.log_to_balenaos {
+        stage2_init_post_pivot_root_tmpfs_log_handler();
+    }
 
     unsafe {
         let mut signals: sigset_t = MaybeUninit::<sigset_t>::zeroed().assume_init();
@@ -359,4 +388,28 @@ pub fn init() -> ! {
             }
         }
     }
+}
+
+// mod_logger needs to be called separately per module
+fn setup_stage2_init_tmpfs_log() {
+    info!(
+        "Setting up temporary log destination to {}",
+        LOG_TMPFS_DESTINATION
+    );
+
+    let logfile = PathBuf::from(get_stage_tmpfs_logfile_path(Stage::S2Init));
+
+    match Logger::set_log_file(&LogDestination::Stderr, &logfile, false) {
+        Ok(_) => {
+            info!("Setup logging to tmpfs, destination: {}", logfile.display());
+        }
+        Err(why) => error!(
+            "Failed to setup logging to tmpfs, destination: {}, error: {:?}",
+            logfile.display(),
+            why
+        ),
+    }
+
+    Logger::flush();
+    sync();
 }

@@ -3,7 +3,7 @@ use std::fs::{
 };
 use std::io::{self, Read, Write};
 use std::os::unix::io::AsRawFd;
-use std::process::{exit, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -15,11 +15,18 @@ use nix::{
 use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
-use libc::{ioctl, LINUX_REBOOT_CMD_RESTART, MS_RDONLY, MS_REMOUNT, SIGKILL, SIGTERM};
+use libc::{ioctl, MS_RDONLY, MS_REMOUNT, SIGKILL, SIGTERM};
+
 use log::{debug, error, info, trace, warn, Level};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
 use crate::common::defs::MTD_DEBUG_CMD;
+use crate::common::logging::{
+    get_stage_tmpfs_logfile_path, stage2_post_unmount_err_handler,
+    stage2_post_unmount_tmpfs_log_handler, stage2_pre_unmount_err_handler, Stage,
+    LOG_TMPFS_DESTINATION,
+};
+use crate::common::reboot;
 use crate::common::stage2_config::LogDevice;
 
 use crate::common::{
@@ -58,16 +65,6 @@ const IOCTL_BLK_RRPART: IoctlReq = 0x1295;
 const TRANSFER_DIR: &str = "/transfer";
 
 const S2_XTRA_FS_SIZE: u64 = 10 * 1024 * 1024;
-
-pub(crate) fn reboot() -> ! {
-    trace!("reboot entered");
-    Logger::flush();
-    sync();
-    sleep(Duration::from_secs(3));
-    info!("rebooting");
-    let _res = unsafe { libc::reboot(LINUX_REBOOT_CMD_RESTART) };
-    exit(1);
-}
 
 fn get_required_space(s2_cfg: &Stage2Config) -> Result<u64> {
     let curr_file = path_append(OLD_ROOT_MP, &s2_cfg.image_path);
@@ -280,7 +277,7 @@ pub(crate) fn read_stage2_config<P: AsRef<Path>>(path_prefix: Option<P>) -> Resu
     }
 }
 
-fn setup_logging(log_dev: Option<&LogDevice>) {
+fn setup_logging(log_dev: Option<&LogDevice>, fallback_log: bool) {
     if log_dev.is_some() {
         // Device should have been mounted by stage2-init
         match dir_exists("/mnt/log/") {
@@ -303,6 +300,28 @@ fn setup_logging(log_dev: Option<&LogDevice>) {
             Err(why) => {
                 warn!("Failed to check for log directory, error: {:?}", why);
             }
+        }
+    } else if fallback_log {
+        /* match setup_log_to_tmpfs(Stage::Stage2) {
+            Ok(_) => (),
+            Err(why) => error!("setup_log_to_tmpfs failed, error {:?}", why),
+        } */
+        info!(
+            "Setting up temporary log destination to {}",
+            LOG_TMPFS_DESTINATION
+        );
+
+        let logfile = PathBuf::from(get_stage_tmpfs_logfile_path(Stage::Stage2));
+
+        match Logger::set_log_file(&LogDestination::Stderr, &logfile, false) {
+            Ok(_) => {
+                info!("Setup logging to tmpfs, destination: {}", logfile.display());
+            }
+            Err(why) => error!(
+                "Failed to setup logging to tmpfs, destination: {}, error: {:?}",
+                logfile.display(),
+                why
+            ),
         }
     }
 
@@ -508,7 +527,7 @@ fn transfer_boot_files<P: AsRef<Path>>(dev_root: P) -> Result<()> {
     Ok(())
 }
 
-fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo, PartInfo)> {
+pub fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo, PartInfo)> {
     let mut disk = Disk::from_drive_file(device, None)?;
 
     let mut boot_part: Option<PartInfo> = None;
@@ -1279,13 +1298,13 @@ pub fn stage2(opts: &Options) -> ! {
 
     info!("Stage 2 config was read successfully");
 
-    setup_logging(s2_config.log_dev());
+    setup_logging(s2_config.log_dev(), s2_config.log_to_balenaos);
 
     match kill_procs(opts.s2_log_level()) {
         Ok(_) => (),
         Err(why) => {
             error!("kill_procs failed, error {}", why);
-            reboot();
+            stage2_pre_unmount_err_handler(s2_config.log_to_balenaos);
         }
     };
 
@@ -1293,7 +1312,7 @@ pub fn stage2(opts: &Options) -> ! {
         Ok(_) => (),
         Err(why) => {
             error!("Failed to copy files to RAMFS, error: {:?}", why);
-            reboot();
+            stage2_pre_unmount_err_handler(s2_config.log_to_balenaos);
         }
     }
 
@@ -1301,13 +1320,13 @@ pub fn stage2(opts: &Options) -> ! {
         Ok(_) => (),
         Err(why) => {
             error!("unmount_partitions failed; {:?}", why);
-            reboot();
+            stage2_pre_unmount_err_handler(s2_config.log_to_balenaos);
         }
     }
 
     if s2_config.pretend {
         info!("Not flashing due to pretend mode");
-        reboot();
+        stage2_post_unmount_err_handler(&s2_config);
     }
 
     sync();
@@ -1323,7 +1342,7 @@ pub fn stage2(opts: &Options) -> ! {
         FlashState::Success => (),
         _ => {
             sleep(Duration::from_secs(10));
-            reboot();
+            stage2_post_unmount_err_handler(&s2_config);
         }
     }
 
@@ -1357,8 +1376,13 @@ pub fn stage2(opts: &Options) -> ! {
     } else {
         info!("Migration completed successfully");
     }
-
     sync();
+
+    // if the --log-to-balenaos option was selected, we transfer the logs from tmpfs to the new data partition
+    if s2_config.log_to_balenaos {
+        let _ = stage2_post_unmount_tmpfs_log_handler(&s2_config);
+    }
+
     reboot();
 }
 

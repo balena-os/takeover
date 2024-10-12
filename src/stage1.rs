@@ -60,6 +60,7 @@ use crate::{
 
 use crate::common::defs::{DD_CMD, EFIBOOTMGR_CMD, MTD_DEBUG_CMD, TAKEOVER_DIR};
 use crate::common::dir_exists;
+use crate::common::logging::{get_stage_tmpfs_logfile_path, Stage, LOG_TMPFS_DESTINATION};
 use crate::common::stage2_config::LogDevice;
 use crate::common::system::{is_dir, mkdir, stat};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
@@ -433,6 +434,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     let s2_cfg = Stage2Config {
         log_dev: log_device,
         log_level: opts.s2_log_level().to_string(),
+        log_to_balenaos: opts.log_to_balenaos(),
         flash_dev: flash_dev.get_dev_path(),
         pretend: opts.pretend(),
         umount_parts: get_umount_parts(flash_dev, &block_dev_info)?,
@@ -595,8 +597,29 @@ pub fn stage1(opts: &Options) -> Result<()> {
                 s1_log_path.display(),
             ))?;
     } else {
-        Logger::set_log_dest(&LogDestination::Stderr, NO_STREAM)
-            .upstream_with_context("Failed to set up logging")?;
+        // if log_to_balenaos mechanicsm selected, log to known directory
+        if opts.log_to_balenaos() {
+            info!(
+                "Setting up temporary log destination to {}",
+                LOG_TMPFS_DESTINATION
+            );
+
+            let logfile = PathBuf::from(get_stage_tmpfs_logfile_path(Stage::S1));
+            Logger::set_color(false);
+            match Logger::set_log_file(&LogDestination::Stderr, &logfile, false) {
+                Ok(_) => {
+                    info!("Setup logging to tmpfs, destination: {}", logfile.display());
+                }
+                Err(why) => error!(
+                    "Failed to setup logging to tmpfs, destination: {}, error: {:?}",
+                    logfile.display(),
+                    why
+                ),
+            }
+        } else {
+            Logger::set_log_dest(&LogDestination::Stderr, NO_STREAM)
+                .upstream_with_context("Failed to set up logging")?;
+        }
     }
 
     let mut mig_info = match MigrateInfo::new(opts) {
@@ -657,7 +680,6 @@ pub fn stage1(opts: &Options) -> Result<()> {
         match prepare(opts, &mut mig_info) {
             Ok(_) => {
                 info!("Takeover initiated successfully, please wait for the device to be reflashed and reboot");
-                Logger::flush();
                 sync();
                 sleep(Duration::from_secs(10));
                 Ok(())
