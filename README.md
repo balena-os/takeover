@@ -46,6 +46,8 @@ Options:
           Pretend mode, do not flash device
       --stage2
           Internal - stage2 invocation
+      --report-hup-progress
+          Internal - notify balena API on success/failure
       --tar-internal
           Use internal tar instead of external command
       --no-cleanup
