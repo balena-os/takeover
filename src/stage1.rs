@@ -25,7 +25,7 @@ use which::which;
 
 pub(crate) mod migrate_info;
 
-mod api_calls;
+pub(crate) mod api_calls;
 mod block_device_info;
 mod defs;
 mod device;
@@ -453,6 +453,10 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         device_type: mig_info.get_device_type_name().to_string(),
         tty: read_link("/proc/self/fd/1")
             .upstream_with_context("Failed to read tty from '/proc/self/fd/1'")?,
+        api_endpoint: mig_info.balena_cfg().get_api_endpoint()?,
+        api_key: mig_info.balena_cfg().get_api_key()?,
+        uuid: mig_info.balena_cfg().get_uuid()?,
+        report_hup_progress: opts.report_hup_progress()
     };
 
     let s2_cfg_path = takeover_dir.join(STAGE2_CONFIG_NAME);

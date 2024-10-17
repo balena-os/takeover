@@ -162,6 +162,11 @@ pub struct Options {
     nwmgr_cfg: Option<Vec<PathBuf>>,
     #[clap(long, value_name = "DT_SLUG", help = "Device Type slug to change to")]
     change_dt_to: Option<String>,
+    #[clap(
+        long,
+        help = "Report to balena host update processing"
+    )]
+    report_hup_progress: bool,
 }
 
 impl Options {
@@ -317,5 +322,9 @@ impl Options {
 
     pub fn fallback_log_dir(&self) -> &str {
         &self.fallback_log_dir
+    }
+
+    pub fn report_hup_progress(&self) -> bool {
+        self.report_hup_progress
     }
 }

@@ -24,6 +24,7 @@ use crate::common::defs::MTD_DEBUG_CMD;
 use crate::common::logging::{open_fallback_log_file, persist_fallback_log_to_data_partition};
 
 use crate::common::reboot;
+use crate::stage1::api_calls::notify_hup_progress;
 
 use crate::common::{
     call,
@@ -1384,14 +1385,26 @@ pub fn stage2(opts: &Options) -> ! {
     } else {
         info!("Migration completed successfully");
     }
-    sync();
 
-    // if the fallback log option was selected, we transfer the logs from tmpfs to the new data partition
+    // Notify balena API that takeover is complete.
+    if s2_config.report_hup_progress {
+        match notify_hup_progress(&s2_config.api_endpoint, &s2_config.api_key, &s2_config.uuid,
+                "100", "Update successful, rebooting") {
+            Ok(_) => {
+                info!("HUP progress notification OK");
+            }
+            Err(why) => {
+                error!("Failed HUP progress notification, error {}", why);
+            }
+        }
+    }
+
+    sync();
+     // if the fallback log option was selected, we transfer the logs from tmpfs to the new data partition
     if s2_config.fallback_log {
         info!("Saving tmpfs logs to data partition");
         let _ = persist_fallback_log_to_data_partition(&s2_config, true);
     }
-
     reboot();
 }
 
@@ -1435,6 +1448,19 @@ fn print_active_processes() -> Result<()> {
 }
 
 fn stage2_err_handler(s2_config: &Stage2Config) -> ! {
+    // Notify balena API that takeover failed.
+    if s2_config.report_hup_progress {
+        match notify_hup_progress(&s2_config.api_endpoint, &s2_config.api_key, &s2_config.uuid,
+                "100", "OS update failed") {
+            Ok(_) => {
+                info!("HUP progress notification OK");
+            }
+            Err(why) => {
+                error!("Failed HUP progress notification, error {}", why);
+            }
+        }
+    }
+
     if s2_config.fallback_log {
         let _ = persist_fallback_log_to_data_partition(s2_config, false);
     }
