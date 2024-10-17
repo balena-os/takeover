@@ -21,6 +21,7 @@ use mod_logger::{LogDestination, Logger, NO_STREAM};
 
 use crate::common::defs::MTD_DEBUG_CMD;
 use crate::common::stage2_config::LogDevice;
+use crate::stage1::api_calls::notify_hup_progress;
 
 use crate::common::{
     call,
@@ -56,6 +57,7 @@ const VALIDATE_BLOCK_SIZE: usize = 64 * 1024; // 4_194_304;
 const IOCTL_BLK_RRPART: IoctlReq = 0x1295;
 
 const TRANSFER_DIR: &str = "/transfer";
+const CERTS_DIR: &str = "/etc/ssl/certs";
 
 const S2_XTRA_FS_SIZE: u64 = 10 * 1024 * 1024;
 
@@ -250,6 +252,39 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<()> {
             }
         }
     }
+
+    // Copy files for reqwest -- SSL certificates and resolv.dnsmasq.
+    if !dir_exists(CERTS_DIR)? {
+        create_dir_all(CERTS_DIR).upstream_with_context(&format!(
+            "Failed to create certs directory: '{}'", CERTS_DIR
+        ))?;
+    }
+
+    let src_path = path_append(OLD_ROOT_MP, "/etc/ssl/certs/ca-certificates.crt");
+    let to_path = path_append(CERTS_DIR, "ca-certificates.crt");
+    copy(&src_path, &to_path).upstream_with_context(&format!(
+        "Failed to copy '{}' to {}",
+        src_path.display(),
+        &to_path.display()
+    ))?;
+    info!(
+        "Copied certs from {} to '{}'",
+        src_path.display(),
+        to_path.display()
+    );
+
+    let src_path = path_append(OLD_ROOT_MP, "/var/run/resolvconf/interface/NetworkManager");
+    let to_path = path_append("/etc", "resolv.conf");
+    copy(&src_path, &to_path).upstream_with_context(&format!(
+        "Failed to copy '{}' to {}",
+        src_path.display(),
+        &to_path.display()
+    ))?;
+    info!(
+        "Copied certs from {} to '{}'",
+        src_path.display(),
+        to_path.display()
+    );
 
     Ok(())
 }
@@ -1356,6 +1391,19 @@ pub fn stage2(opts: &Options) -> ! {
         error!("Failed to transfer files to balena OS, error: {:?}", why);
     } else {
         info!("Migration completed successfully");
+    }
+
+    // Notify API that takeover is complete. Requires network communication,
+    // including DNS lookup.
+    match notify_hup_progress(&s2_config.api_endpoint, &s2_config.api_key, &s2_config.uuid,
+            "100", "Update successful, rebooting") {
+        Ok(_) => {
+            info!("HUP progress notification OK");
+        }
+        Err(why) => {
+            error!("Failed HUP progress notification, error {}", why);
+            reboot();
+        }
     }
 
     sync();
