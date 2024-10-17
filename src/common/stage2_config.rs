@@ -31,6 +31,9 @@ pub(crate) struct Stage2Config {
     pub backup_path: Option<PathBuf>,
     pub device_type: String,
     pub tty: PathBuf,
+    pub api_endpoint: String,
+    pub api_key: String,
+    pub uuid: String
 }
 
 #[allow(dead_code)]
