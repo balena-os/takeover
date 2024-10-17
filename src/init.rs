@@ -28,6 +28,7 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use crate::common::stage2_config::LogDevice;
+use crate::stage1::api_calls::notify_hup_progress;
 use libc::{
     close, dup2, getpid, open, pipe, sigfillset, sigprocmask, sigset_t, wait, O_CREAT, O_TRUNC,
     O_WRONLY, SIG_BLOCK, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO,
@@ -272,6 +273,19 @@ pub fn init() -> ! {
 
     Logger::flush();
     sync();
+
+    // Notify API that Stage 2 is underway. Requires network communication,
+    // including DNS lookup.
+    match notify_hup_progress(&s2_config.api_endpoint, &s2_config.api_key, &s2_config.uuid,
+            "70", "Running OS update, stage 2") {
+        Ok(_) => {
+            info!("Stage 2 notify progress OK");
+        }
+        Err(why) => {
+            error!("Failed Stage 2 notify progress, error {}", why);
+            reboot();
+        }
+    }
 
     match whereis(MOUNT_CMD) {
         Ok(mount_cmd) => {

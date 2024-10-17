@@ -283,6 +283,46 @@ pub(crate) fn patch_device_type(
     }
 }
 
+// PATCH device state with HUP details
+pub(crate) fn notify_hup_progress(api_endpoint: &str, api_key: &str, uuid: &str, progress_pct: &str, progress_msg: &str) -> Result<()> {
+    let api_url = format!("{}/v6/device(uuid='{}')", api_endpoint, uuid);
+    let headers = get_header(api_key)?;
+    let patch_data = json!({
+        "provisioning_progress": progress_pct,
+        "provisioning_state": progress_msg,
+        "status": "configuring"
+    });
+
+    let res = Client::builder()
+        .default_headers(headers.clone())
+        .build()
+        .upstream_with_context("Failed to create https client")?
+        .patch(&api_url)
+        .json(&patch_data)
+        .send()
+        .upstream_with_context(&format!(
+            "Failed to send https request url: {}",
+            &api_url
+        ))?;
+    debug!("HUP progress result = {:?}", res);
+    let status = res.status();
+    let response = res
+        .text()
+        .upstream_with_context("Failed to read response")?;
+
+    if status.is_success() {
+        Ok(())
+    } else {
+        Err(Error::with_context(
+            ErrorKind::InvState,
+            &format!(
+                "Got an unexpected reply from the API server @ {} : {}",
+                &api_url, &response
+            ),
+        ))
+    }
+}
+
 fn is_device_image_flasher(api_endpoint: &str, api_key: &str, device: &str) -> Result<bool> {
     let headers = get_header(api_key)?;
 
