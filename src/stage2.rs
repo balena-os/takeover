@@ -19,7 +19,7 @@ use libc::{ioctl, LINUX_REBOOT_CMD_RESTART, MS_RDONLY, MS_REMOUNT, SIGKILL, SIGT
 use log::{debug, error, info, trace, warn, Level};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
-use crate::common::defs::MTD_DEBUG_CMD;
+use crate::common::defs::{ID_FILES_TO_COPY, MTD_DEBUG_CMD};
 use crate::common::stage2_config::LogDevice;
 
 use crate::common::{
@@ -251,7 +251,45 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<()> {
         }
     }
 
+    // if we are running a balenaOS -> balenaOS migration, we need to
+    // copy additional files to keep machine-id, SSH keys, etc
+    // TODO: check if source OS is balenaOS
+    bulk_copy_files(ID_FILES_TO_COPY, TRANSFER_DIR)?;
+
     Ok(())
+}
+
+fn bulk_copy_files(files_list: Vec<&str>, base_dir: &str) -> Result<()> {
+    Ok(for entry in files_list.into_iter() {
+        let (src, dst) = if let Some((left, right)) = entry.split_once(':') {
+            // Entry contains ":", right side is the destination relative to base_dir
+            let source = left.to_string();
+            let destination = PathBuf::from(base_dir).join(right);
+            (source, destination)
+        } else {
+            // No ":", copy file to a subdirectory under base_dir, preserving relative path
+            let source = entry.to_string();
+            let relative_path = Path::new(entry).strip_prefix("/").unwrap(); // Remove leading slash
+            let destination = PathBuf::from(base_dir).join(relative_path);
+            (source, destination)
+        };
+
+        // Create the parent directories if they don't exist
+        if !dir_exists(&dst)? {
+            create_dir_all(&dst).upstream_with_context(&format!(
+                "Failed to create directory: '{}'",
+                dst.display()
+            ))?;
+        }
+
+        // copy the file to destination
+        copy(src, dst).upstream_with_context(&format!(
+            "Failed to copy '{}' to '{}'",
+            src,
+            dst.display()
+        ))?;
+        info!("Copied '{}' to '{}'", src, dst.display());
+    })
 }
 
 pub(crate) fn read_stage2_config<P: AsRef<Path>>(path_prefix: Option<P>) -> Result<Stage2Config> {
