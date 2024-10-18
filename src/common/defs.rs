@@ -106,3 +106,28 @@ cfg_if::cfg_if! {
         pub(crate) type IoctlReq = u64;
     }
 }
+
+// Takeover can be used for a balenaOS to balenaOS migration.
+// In addition to config.json, we keep the following files to make sure
+// we keep the same machine-id, SSH identity, etc
+//
+// /etc/dropbear/dropbear_rsa_host_key
+// /etc/machine-id
+// /etc/supervisor.conf
+// /var/lib/systemd/random-seed
+// /var/lib/urandom/random-seed:/var/lib/systemd/random-seed
+// /var/lib/dropbear/authorized_keys
+// /var/lib/connman
+//
+// The list is taken from balenahub configuration
+// ref: https://github.com/balena-os/balenahup/blob/3ebe331b016a4fd7fdb183ef5ecf3081b376daf6/app/conf/resinhup.conf#L48
+
+pub const ID_FILES_TO_COPY: &[&str] = &[
+    "/etc/dropbear/dropbear_rsa_host_key",
+    "/etc/machine-id",
+    "/etc/supervisor.conf",
+    "/var/lib/systemd/random-seed",
+    "/var/lib/urandom/random-seed:/var/lib/systemd/random-seed",
+    "/var/lib/dropbear/authorized_keys",
+    "/var/lib/connman",
+];

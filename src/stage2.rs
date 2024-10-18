@@ -2,6 +2,7 @@ use std::fs::{
     copy, create_dir, create_dir_all, read_dir, read_to_string, remove_dir, File, OpenOptions,
 };
 use std::io::{self, Read, Write};
+use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::process::{exit, Command, Stdio};
 use std::thread::sleep;
@@ -19,7 +20,7 @@ use libc::{ioctl, LINUX_REBOOT_CMD_RESTART, MS_RDONLY, MS_REMOUNT, SIGKILL, SIGT
 use log::{debug, error, info, trace, warn, Level};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
-use crate::common::defs::MTD_DEBUG_CMD;
+use crate::common::defs::{ID_FILES_TO_COPY, MTD_DEBUG_CMD};
 use crate::common::stage2_config::LogDevice;
 
 use crate::common::{
@@ -251,7 +252,47 @@ fn copy_files(s2_cfg: &Stage2Config) -> Result<()> {
         }
     }
 
+    // if we are running a balenaOS -> balenaOS migration, we need to
+    // copy additional files to keep machine-id, SSH keys, etc
+    // TODO: check if source OS is balenaOS
+    bulk_copy_files(ID_FILES_TO_COPY, OLD_ROOT_MP, TRANSFER_DIR)?;
+    info!(
+        "Additional balenaOS files (machine-id, ssh-key, etc) transferred to {}",
+        &TRANSFER_DIR
+    );
+
     Ok(())
+}
+
+fn bulk_copy_files(files_list: &[&str], src_base_dir: &str, dst_base_dir: &str) -> Result<()> {
+    Ok(for entry in files_list.into_iter() {
+        let (src, dst) = if let Some((left, right)) = entry.split_once(':') {
+            // Entry contains ":", right side is the destination relative to base_dir, left is source
+            let source = path_append(src_base_dir, left);
+            let destination = path_append(dst_base_dir, right);
+            (source, destination)
+        } else {
+            // No ":", copy file to a subdirectory under base_dir, preserving relative path
+            let source = path_append(src_base_dir, *entry); 
+            let destination = path_append(dst_base_dir, *entry);
+            (source, destination)
+        };
+
+        // Create the parent directories if they don't exist
+        if file_exists(&src) {
+            if !dir_exists(&dst)? {
+                create_dir_all(&dst)
+                    .upstream_with_context(&format!("Failed to create directory: '{}'", dst))?;
+            }
+
+            // copy the file to destination
+            copy(&src, &dst)
+                .upstream_with_context(&format!("Failed to copy '{}' to '{}'", &src, &dst))?;
+            info!("Copied '{}' to '{}'", &src.display(), &dst);
+        } else {
+            warn!("File not found: {}", &src);
+        }
+    })
 }
 
 pub(crate) fn read_stage2_config<P: AsRef<Path>>(path_prefix: Option<P>) -> Result<Stage2Config> {
