@@ -434,7 +434,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     let s2_cfg = Stage2Config {
         log_dev: log_device,
         log_level: opts.s2_log_level().to_string(),
-        log_to_balenaos: opts.log_to_balenaos(),
+        fallback_log: opts.fallback_log(),
         flash_dev: flash_dev.get_dev_path(),
         pretend: opts.pretend(),
         umount_parts: get_umount_parts(flash_dev, &block_dev_info)?,
@@ -600,8 +600,8 @@ pub fn stage1(opts: &Options) -> Result<()> {
                 s1_log_path.display(),
             ))?;
     } else {
-        // if log_to_balenaos mechanicsm selected, log to known directory
-        if opts.log_to_balenaos() {
+        // if fallback_log mechanicsm selected, log to known directory
+        if opts.fallback_log() {
             info!(
                 "Setting up temporary log destination to {}",
                 LOG_TMPFS_DESTINATION

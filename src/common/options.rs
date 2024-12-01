@@ -145,7 +145,17 @@ pub struct Options {
         long,
         help = "Logs to RAM and then dumps logs to balenaOS disk after flashing"
     )]
-    log_to_balenaos: bool,
+    fallback_log: bool,
+    #[clap(
+        long,
+        help = "File name for fallback log"
+    )]
+    fallback_log_file: Option<PathBuf>,
+    #[clap(
+        long,
+        help = "Report to balena HUP processing"
+    )]
+    report_hup_progress: bool,
 }
 
 impl Options {
@@ -291,7 +301,15 @@ impl Options {
         &self.change_dt_to
     }
 
-    pub fn log_to_balenaos(&self) -> bool {
-        self.log_to_balenaos
+    pub fn fallback_log(&self) -> bool {
+        self.fallback_log
+    }
+
+    pub fn fallback_log_file(&self) -> &Option<PathBuf> {
+        &self.fallback_log_file
+    }
+
+    pub fn report_hup_progress(&self) -> bool {
+        self.report_hup_progress
     }
 }

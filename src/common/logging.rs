@@ -123,8 +123,8 @@ pub fn stage2_init_pre_pivot_root_tmpfs_log_handler() {
 }
 
 // Error handling if an error occurs in stage2-init prior to calling pivot_root
-pub fn stage2_init_pre_pivot_root_err_handler(log_to_balenaos: bool) -> ! {
-    if log_to_balenaos {
+pub fn stage2_init_pre_pivot_root_err_handler(fallback_log: bool) -> ! {
+    if fallback_log {
         stage2_init_pre_pivot_root_tmpfs_log_handler();
     }
 
@@ -176,8 +176,8 @@ pub fn stage2_pre_unmount_tmpfs_log_handler() {
     copy_tmpfs_log_to_data_partition(stage2_logfile.as_str(), destination.as_str());
 }
 // Error handling if an error occurs in stage2 worker process before unmounting partitions
-pub fn stage2_pre_unmount_err_handler(log_to_balenaos: bool) -> ! {
-    if log_to_balenaos {
+pub fn stage2_pre_unmount_err_handler(fallback_log: bool) -> ! {
+    if fallback_log {
         stage2_pre_unmount_tmpfs_log_handler();
     }
 
@@ -262,7 +262,7 @@ pub fn stage2_post_unmount_tmpfs_log_handler(s2_config: &Stage2Config) -> Result
 // Error handling if an error occurs in stage2 worker process after unmounting partitions
 pub fn stage2_post_unmount_err_handler(s2_config: &Stage2Config) -> ! {
     // if --log-to-balenaos was not passed, we simply reboot
-    if s2_config.log_to_balenaos {
+    if s2_config.fallback_log {
         match stage2_post_unmount_tmpfs_log_handler(s2_config) {
             Ok(_) => (),
             Err(_) => reboot(),

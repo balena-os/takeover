@@ -1333,13 +1333,13 @@ pub fn stage2(opts: &Options) -> ! {
 
     info!("Stage 2 config was read successfully");
 
-    setup_logging(s2_config.log_dev(), s2_config.log_to_balenaos);
+    setup_logging(s2_config.log_dev(), s2_config.fallback_log);
 
     match kill_procs(opts.s2_log_level()) {
         Ok(_) => (),
         Err(why) => {
             error!("kill_procs failed, error {}", why);
-            stage2_pre_unmount_err_handler(s2_config.log_to_balenaos);
+            stage2_pre_unmount_err_handler(s2_config.fallback_log);
         }
     };
 
@@ -1347,7 +1347,7 @@ pub fn stage2(opts: &Options) -> ! {
         Ok(_) => (),
         Err(why) => {
             error!("Failed to copy files to RAMFS, error: {:?}", why);
-            stage2_pre_unmount_err_handler(s2_config.log_to_balenaos);
+            stage2_pre_unmount_err_handler(s2_config.fallback_log);
         }
     }
 
@@ -1355,7 +1355,7 @@ pub fn stage2(opts: &Options) -> ! {
         Ok(_) => (),
         Err(why) => {
             error!("unmount_partitions failed; {:?}", why);
-            stage2_pre_unmount_err_handler(s2_config.log_to_balenaos);
+            stage2_pre_unmount_err_handler(s2_config.fallback_log);
         }
     }
 
@@ -1422,7 +1422,7 @@ pub fn stage2(opts: &Options) -> ! {
         Err(why) => {
             error!("Failed HUP progress notification, error {}", why);
 	    // if the --log-to-balenaos option was selected, we transfer the logs from tmpfs to the new data partition
-	    if s2_config.log_to_balenaos {
+	    if s2_config.fallback_log {
 		sync();
 	        let _ = stage2_post_unmount_tmpfs_log_handler(&s2_config);
 	    }
@@ -1433,7 +1433,7 @@ pub fn stage2(opts: &Options) -> ! {
     sync();
 
     // if the --log-to-balenaos option was selected, we transfer the logs from tmpfs to the new data partition
-    if s2_config.log_to_balenaos {
+    if s2_config.fallback_log {
         let _ = stage2_post_unmount_tmpfs_log_handler(&s2_config);
     }
 

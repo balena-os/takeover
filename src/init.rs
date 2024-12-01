@@ -258,7 +258,7 @@ pub fn init() -> ! {
         Ok(fds) => fds,
         Err(_) => {
             error!("Failed close open files");
-            stage2_init_pre_pivot_root_err_handler(s2_config.log_to_balenaos);
+            stage2_init_pre_pivot_root_err_handler(s2_config.fallback_log);
         }
     };
     info!("Stage 2 closed {} fd's", closed_fds);
@@ -267,7 +267,7 @@ pub fn init() -> ! {
     // After running `close_fds`, we check the logging options passed to takeover
     // --log-to-balenaOS and --log-to are mutually exclusive
     // We can setup external logging here
-    if !s2_config.log_to_balenaos {
+    if !s2_config.fallback_log {
         let ext_log = if let Some(log_dev) = s2_config.log_dev() {
             match setup_log(log_dev, TAKEOVER_DIR) {
                 Ok(_) => true,
@@ -299,12 +299,12 @@ pub fn init() -> ! {
                     "Failed to call '{} --make-rprivate /' error: {}",
                     mount_cmd, why
                 );
-                stage2_init_pre_pivot_root_err_handler(s2_config.log_to_balenaos);
+                stage2_init_pre_pivot_root_err_handler(s2_config.fallback_log);
             }
         }
         Err(why) => {
             error!("Failed to locate '{}' command, error: {}", MOUNT_CMD, why);
-            stage2_init_pre_pivot_root_err_handler(s2_config.log_to_balenaos);
+            stage2_init_pre_pivot_root_err_handler(s2_config.fallback_log);
         }
     }
 
@@ -319,7 +319,7 @@ pub fn init() -> ! {
                     "Failed to call '{} . mnt/old_root' error: {}",
                     pivot_root_cmd, why
                 );
-                stage2_init_pre_pivot_root_err_handler(s2_config.log_to_balenaos);
+                stage2_init_pre_pivot_root_err_handler(s2_config.fallback_log);
             }
         }
         Err(why) => {
@@ -327,7 +327,7 @@ pub fn init() -> ! {
                 "Failed to locate '{}' command, error: {}",
                 PIVOT_ROOT_CMD, why
             );
-            stage2_init_pre_pivot_root_err_handler(s2_config.log_to_balenaos);
+            stage2_init_pre_pivot_root_err_handler(s2_config.fallback_log);
         }
     }
     /******************************************************************
@@ -337,7 +337,7 @@ pub fn init() -> ! {
     // If the on-device logging option was passed
     // We setup logging to file on tmpfs
     // Before this point, stage2-init logs was sent to a buffer
-    if s2_config.log_to_balenaos {
+    if s2_config.fallback_log {
         setup_stage2_init_tmpfs_log();
     }
 
@@ -354,7 +354,7 @@ pub fn init() -> ! {
 
     info!("Stage 2 migrate worker spawned");
 
-    if s2_config.log_to_balenaos {
+    if s2_config.fallback_log {
         stage2_init_post_pivot_root_tmpfs_log_handler();
     }
 
