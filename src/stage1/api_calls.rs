@@ -284,7 +284,13 @@ pub(crate) fn patch_device_type(
 }
 
 // PATCH device state with HUP details
-pub(crate) fn notify_hup_progress(api_endpoint: &str, api_key: &str, uuid: &str, progress_pct: &str, progress_msg: &str) -> Result<()> {
+pub(crate) fn notify_hup_progress(
+    api_endpoint: &str,
+    api_key: &str,
+    uuid: &str,
+    progress_pct: &str,
+    progress_msg: &str,
+) -> Result<()> {
     let api_url = format!("{}/v6/device(uuid='{}')", api_endpoint, uuid);
     let headers = get_header(api_key)?;
     let patch_data = json!({
@@ -300,10 +306,7 @@ pub(crate) fn notify_hup_progress(api_endpoint: &str, api_key: &str, uuid: &str,
         .patch(&api_url)
         .json(&patch_data)
         .send()
-        .upstream_with_context(&format!(
-            "Failed to send https request url: {}",
-            &api_url
-        ))?;
+        .upstream_with_context(&format!("Failed to send https request url: {}", &api_url))?;
     debug!("HUP progress result = {:?}", res);
     let status = res.status();
     let response = res

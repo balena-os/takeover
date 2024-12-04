@@ -1388,8 +1388,13 @@ pub fn stage2(opts: &Options) -> ! {
 
     // Notify balena API that takeover is complete.
     if s2_config.report_hup_progress {
-        match notify_hup_progress(&s2_config.api_endpoint, &s2_config.api_key, &s2_config.uuid,
-                "100", "Update successful, rebooting") {
+        match notify_hup_progress(
+            &s2_config.api_endpoint,
+            &s2_config.api_key,
+            &s2_config.uuid,
+            "100",
+            "Update successful, rebooting",
+        ) {
             Ok(_) => {
                 info!("HUP progress notification OK");
             }
@@ -1400,7 +1405,7 @@ pub fn stage2(opts: &Options) -> ! {
     }
 
     sync();
-     // if the fallback log option was selected, we transfer the logs from tmpfs to the new data partition
+    // if the fallback log option was selected, we transfer the logs from tmpfs to the new data partition
     if s2_config.fallback_log {
         info!("Saving tmpfs logs to data partition");
         let _ = persist_fallback_log_to_data_partition(&s2_config, true);
@@ -1450,8 +1455,13 @@ fn print_active_processes() -> Result<()> {
 fn stage2_err_handler(s2_config: &Stage2Config) -> ! {
     // Notify balena API that takeover failed.
     if s2_config.report_hup_progress {
-        match notify_hup_progress(&s2_config.api_endpoint, &s2_config.api_key, &s2_config.uuid,
-                "100", "OS update failed") {
+        match notify_hup_progress(
+            &s2_config.api_endpoint,
+            &s2_config.api_key,
+            &s2_config.uuid,
+            "100",
+            "OS update failed",
+        ) {
             Ok(_) => {
                 info!("HUP progress notification OK");
             }

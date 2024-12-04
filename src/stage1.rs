@@ -456,7 +456,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         api_endpoint: mig_info.balena_cfg().get_api_endpoint()?,
         api_key: mig_info.balena_cfg().get_api_key()?,
         uuid: mig_info.balena_cfg().get_uuid()?,
-        report_hup_progress: opts.report_hup_progress()
+        report_hup_progress: opts.report_hup_progress(),
     };
 
     let s2_cfg_path = takeover_dir.join(STAGE2_CONFIG_NAME);

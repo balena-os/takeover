@@ -2,17 +2,17 @@ use crate::{
     common::{
         call,
         defs::{MOUNT_CMD, NIX_NONE, OLD_ROOT_MP, PIVOT_ROOT_CMD, TAKEOVER_DIR},
-        get_mountpoint,
+        dir_exists, get_mountpoint,
         logging::{
             copy_file_to_destination_dir, open_fallback_log_file,
             persist_fallback_log_to_data_partition,
         },
-        path_append, reboot, dir_exists,
+        path_append, reboot,
         stage2_config::Stage2Config,
         whereis, Error, Result, ToError,
     },
-    stage2::read_stage2_config,
     stage1::api_calls::notify_hup_progress,
+    stage2::read_stage2_config,
     ErrorKind,
 };
 use log::{error, info, trace, warn, Level};
@@ -25,9 +25,7 @@ use nix::{
 };
 use std::env::set_current_dir;
 use std::ffi::CString;
-use std::fs::{
-    copy, create_dir_all,
-};
+use std::fs::{copy, create_dir_all};
 use std::io;
 use std::mem::MaybeUninit;
 use std::os::raw::c_int;
@@ -455,7 +453,8 @@ fn setup_stage2_init_fallback_log(fallback_log_filename: &str) {
 fn setup_networking() -> Result<()> {
     if !dir_exists(CERTS_DIR)? {
         create_dir_all(CERTS_DIR).upstream_with_context(&format!(
-            "Failed to create certs directory: '{}'", CERTS_DIR
+            "Failed to create certs directory: '{}'",
+            CERTS_DIR
         ))?;
     }
 
@@ -501,11 +500,16 @@ fn stage2_init_err_handler(pre_pivot_root: bool, s2_config: &Stage2Config) -> ! 
     if pre_pivot_root {
         setup_stage2_init_fallback_log(&s2_config.fallback_log_filename);
     }
-    
+
     // Notify balena API that takeover failed.
     if s2_config.report_hup_progress {
-        match notify_hup_progress(&s2_config.api_endpoint, &s2_config.api_key, &s2_config.uuid,
-                "100", "OS update failed") {
+        match notify_hup_progress(
+            &s2_config.api_endpoint,
+            &s2_config.api_key,
+            &s2_config.uuid,
+            "100",
+            "OS update failed",
+        ) {
             Ok(_) => {
                 info!("HUP progress notification OK");
             }
