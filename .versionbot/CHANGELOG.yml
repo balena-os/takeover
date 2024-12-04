@@ -1,4 +1,48 @@
 - commits:
+    - subject: Allow logging to internal disk as a workaround
+      hash: 02d978ccef3eb952c7a9ca0a099f6af746129f49
+      body: |
+        The recommended way to persistent logging during the takeover process is
+        to provide an external disk or internal disk that's not the target for
+        balenaOS. This PR adds a fallback mechanism that keeps the log in RAM
+        and then dumps the logs to the disk running the os. This can be helpful
+        when running a takeover remotely. This mechanism is being added to allow
+        running as part of a balenaOS to balenaOS update whereby the disk
+        partition layout changes across OS versions updates.
+
+        *Note:* the current mechanism is only tested from balenaOS to balenaOS
+        migration.
+
+        - Adds a new CLI option `--fallback_log`. This is not compatible with
+          other logging options takeover provides
+        - Adds a new CLI option `--fallback_log_filename`. Allows overriding the
+          fallback log file name. Defaults to `fallback.log`
+        - Adds a new CLI option `--fallback_log_dir`. Allows overriding the
+          directory name where fallback log is persisted. Defaults to
+          `fallback_log`
+        - Dumps partial logs captured if the takeover process fails at any point
+          during the different stages
+        - Logs are persisted on the data partition. The logs are at
+          `/mnt/data/balenahup`
+
+        We use mod_logger `set_log_dest` rather than `set_log_file` because
+        `set_log_file` truncates existing files and in our implementation, we
+        want to keep using the same file across the different stages of the
+        migration. `set_log_dest` flushes the
+        buffer(https://docs.rs/mod_logger/0.8.4/src/mod_logger/lib.rs.html#222)
+        before actually writing to the stream provided, so we manually get the
+        buffered memory logs at the start of stage2-init and stage2 worker
+        process and then attempt to write it to the log file once it is set up.
+      footer:
+        Change-type: minor
+        change-type: minor
+        Signed-off-by: Rahul Thakoor <rahul@balena.io>
+        signed-off-by: Rahul Thakoor <rahul@balena.io>
+      author: Rahul Thakoor
+  version: 0.9.0
+  title: ""
+  date: 2024-12-04T13:29:29.161Z
+- commits:
     - subject: Fix use of elapsed seconds
       hash: afa139508cbd50767d0d31e26f1d3e94596504ab
       body: |
@@ -379,29 +423,19 @@
 - commits:
     - subject: Enable the crt-static target feature
       hash: 072addb7f2abdd451296a5fd24d51360bb22fb1f
-      body: >
+      body: |
         We were relying on the fact that our current targets link the C runtime
-
         statically. However, this may be different for other targets and could
-
         even change in the future (e.g., see
-
         https://github.com/rust-lang/compiler-team/issues/422).
 
-
         With this commit we adopt the current recommendation, which is enabling
-
         the crt-static target feature when building. See
-
         https://doc.rust-lang.org/reference/linkage.html#static-and-dynamic-c-runtimes
-
         for details.
 
-
         Given the current defaults for Rust targets, this change should be a
-
         no-op, but this shall make us safer and more resilient to Rust changes
-
         in the long run.
       footer:
         Signed-off-by: Leandro Motta Barros <leandro@balena.io>
