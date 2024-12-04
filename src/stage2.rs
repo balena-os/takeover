@@ -24,9 +24,9 @@ use crate::common::defs::MTD_DEBUG_CMD;
 use crate::common::logging::{open_fallback_log_file, persist_fallback_log_to_data_partition};
 
 use crate::common::reboot;
-use crate::stage1::api_calls::notify_hup_progress;
 
 use crate::common::{
+    api_calls::notify_hup_progress,
     call,
     defs::{
         IoctlReq, BACKUP_ARCH_NAME, BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART,

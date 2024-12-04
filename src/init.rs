@@ -1,5 +1,6 @@
 use crate::{
     common::{
+        api_calls::notify_hup_progress,
         call,
         defs::{MOUNT_CMD, NIX_NONE, OLD_ROOT_MP, PIVOT_ROOT_CMD, TAKEOVER_DIR},
         dir_exists, get_mountpoint,
@@ -11,7 +12,6 @@ use crate::{
         stage2_config::Stage2Config,
         whereis, Error, Result, ToError,
     },
-    stage1::api_calls::notify_hup_progress,
     stage2::read_stage2_config,
     ErrorKind,
 };

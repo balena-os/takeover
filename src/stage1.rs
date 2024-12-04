@@ -25,7 +25,6 @@ use which::which;
 
 pub(crate) mod migrate_info;
 
-pub(crate) mod api_calls;
 mod block_device_info;
 mod defs;
 mod device;
