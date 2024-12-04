@@ -35,6 +35,7 @@ use crate::common::defs::{OLD_ROOT_MP, PIDOF_CMD, WHEREIS_CMD};
 use nix::unistd::sync;
 pub use options::Options;
 
+pub(crate) mod api_calls;
 pub(crate) mod debug;
 pub(crate) mod disk_util;
 pub(crate) mod stream_progress;
