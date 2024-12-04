@@ -18,35 +18,70 @@ balena application.
 > takeover --help
 
 Options:
-  -w, --work-dir <DIRECTORY>         Path to working directory
-  -i, --image <IMAGE>                Path to balena-os image
-  -v, --version <VERSION>            Version of balena-os image to download
-  -c, --config <CONFIG_JSON>         Path to balena config.json
-      --log-level <LOG_LEVEL>        Set log level, one of [error,warn,info,debug,trace] [default: info]
-      --log-file <LOG_FILE>          Set stage1 log file name
-      --backup-cfg <BACKUP-CONFIG>   Backup configuration file
-      --s2-log-level <S2_LOG_LEVEL>  Set stage2 log level, one of [error,warn,info,debug,trace]
-      --no-ack                       Scripted mode - no interactive acknowledgement of takeover
-      --pretend                      Pretend mode, do not flash device
-      --stage2                       Internal - stage2 invocation
-      --tar-internal                 Use internal tar instead of external command
-      --no-cleanup                   Debug - do not cleanup after stage1 failure
-      --no-os-check                  Do not check if OS is supported
-      --no-dt-check                  Do not check if the target device type is valid
-      --no-api-check                 Do not check if balena API is available
-      --no-vpn-check                 Do not check if balena VPN is available
-      --no-efi-setup                 Do not setup EFI boot
-      --no-nwmgr-check               Do not check network manager files exist
-      --no-keep-name                 Do not migrate host-name
-  -d, --download-only                Download image only, do not check device and migrate
-      --check-timeout <TIMEOUT>      API/VPN check timeout in seconds.
-  -l, --log-to <LOG_DEVICE>          Write stage2 log to LOG_DEVICE
-  -f, --flash-to <INSTALL_DEVICE>    Use INSTALL_DEVICE to flash balena to
-      --no-wifis                     Do not create network manager configurations for configured wifis
-      --wifi <SSID>                  Create a network manager configuration for configured wifi with SSID
-      --nwmgr-cfg <NWMGR_FILE>       Supply a network manager file to inject into balena-os
-      --change-dt-to <DT_SLUG>       Device Type slug to change to
-  -h, --help                         Print help
+  -w, --work-dir <DIRECTORY>
+          Path to working directory
+  -i, --image <IMAGE>
+          Path to balena-os image
+  -v, --version <VERSION>
+          Version of balena-os image to download
+  -c, --config <CONFIG_JSON>
+          Path to balena config.json
+      --log-level <LOG_LEVEL>
+          Set log level, one of [error,warn,info,debug,trace] [default: info]
+      --log-file <LOG_FILE>
+          Set stage1 log file name
+      --fallback-log
+          Logs to RAM and then dumps logs to balenaOS disk after flashing
+      --fallback-log-filename <FALLBACK_LOG_FILENAME>
+          Set the name of the fallback log [default: fallback.log]
+      --fallback-log-dir <FALLBACK_LOG_DIR>
+          Set the directory name where fallback logs will be persisted on data partition [default: fallback_log]
+      --backup-cfg <BACKUP-CONFIG>
+          Backup configuration file
+      --s2-log-level <S2_LOG_LEVEL>
+          Set stage2 log level, one of [error,warn,info,debug,trace]
+      --no-ack
+          Scripted mode - no interactive acknowledgement of takeover
+      --pretend
+          Pretend mode, do not flash device
+      --stage2
+          Internal - stage2 invocation
+      --tar-internal
+          Use internal tar instead of external command
+      --no-cleanup
+          Debug - do not cleanup after stage1 failure
+      --no-os-check
+          Do not check if OS is supported
+      --no-dt-check
+          Do not check if the target device type is valid
+      --no-api-check
+          Do not check if balena API is available
+      --no-vpn-check
+          Do not check if balena VPN is available
+      --no-efi-setup
+          Do not setup EFI boot
+      --no-nwmgr-check
+          Do not check network manager files exist
+      --no-keep-name
+          Do not migrate host-name
+  -d, --download-only
+          Download image only, do not check device and migrate
+      --check-timeout <TIMEOUT>
+          API/VPN check timeout in seconds.
+  -l, --log-to <LOG_DEVICE>
+          Write stage2 log to LOG_DEVICE
+  -f, --flash-to <INSTALL_DEVICE>
+          Use INSTALL_DEVICE to flash balena to
+      --no-wifis
+          Do not create network manager configurations for configured wifis
+      --wifi <SSID>
+          Create a network manager configuration for configured wifi with SSID
+      --nwmgr-cfg <NWMGR_FILE>
+          Supply a network manager file to inject into balena-os
+      --change-dt-to <DT_SLUG>
+          Device Type slug to change to
+  -h, --help
+          Print help
 ```
 
 To download a config.json, please direct your browser to  the [balena dashboard](https://balena.io), logging in to to your user 
@@ -131,25 +166,52 @@ By default *takeover* will migrate the devices hostname. This can be disabled us
 
 ### Logging
 By default *takeover* runs at *info* log level. It will log to the console. 
-You can modify the stage1 log-level by using the ```--log-level``` option. Available log levels 
-are *error*, *warn*, *info*, *debug*, and *trace*. 
+You can modify the stage1 log-level by using the ```--log-level``` option. Available log levels are:
+- `error`
+- `warn`
+- `info`
+- `debug`
+- `trace`
+ 
 Stage1 is the first part of migration - mainly the preparation of the migration process. Everything happening in stage1 
 can be logged to the console.
  
 At the end of stage1 *takeover* switches the file system root to a RAMFS file system and replaces the init process. 
 This part of migration is called stage2. In stage2 the console does not receive output from *takeover* any more and 
-ssh-sessions will usually be disconnected. 
-Logging to the harddisk does not make sense, as that device will be overwritten with balena-os during the migration process. 
+ssh-sessions will usually be disconnected. In stage2, the disk running the original OS is overwritten. The log device should be formatted with one  *vfat*, *ext3* or *ext4* file system.
+
+#### Logging to an external disk or secondary internal disk
+The recommended method to capture logs during the migration process is to provide log device/disk which is independent from the disk that balena will be installed on. Usually a secondary (internal) disk or a USB stick works well.
+
 For this reason you can specify a log device using the ```-l / --log-to``` option. 
 You should use a device that is independent from the disk that balena will be installed on. Usually a secondary disk 
-or a USB stick works well. The log device should be formatted with a *vfat*, *ext3* or *ext4* file system.
-It also makes sense to adapt the stage2 log level to see a maximum of information. This can be done using the 
-```-s / --s2-log-level``` option. Log levels are as given above. 
+or a USB stick works well. The log device should be formatted with one fhe following file systems:
+- `vfat`
+- `ext3` 
+- `ext4`
 
-Example, writing a stage2 log to /dev/sda1 with stage2 log level *debug*:
+You can specify a log device using the `-l / --log-to` option. 
+It also makes sense to adapt the stage2 log level to see a maximum of information. This can be done using the ```-s / --s2-log-level``` option. Log levels are as given above. 
+
+Example, writing a stage2 log to /dev/sda1 with stage2 log level `debug`:
 ```shell script
 sudo ./takeover -c config.json -l /dev/sda1 --s2-log-level debug -i balena-cloud-intel-nuc-2.50.1+rev1.dev.img.gz 
 ```
+
+#### Logging to the target disk that will run balenaOS
+
+There are certain scenarios whereby it is not practical to add an external disk or the device being migrated does not have a secondary disk. E.g migrating a device which in the field remotely.
+
+`takeover` provides a fallback logging mechanism that logs to RAMFS during the migration process and then persists the logs to disk in case of failure or successful migration.
+Logs will be at `/mnt/data/fallback_log/fallback.log` by default. 
+
+You can use option `--fallback-log` to enable this mechanism.
+Optionally, the following options can be used in conjuction with `--fallback-log`:
+- `--fallback-log-filename` : Set the name of the fallback logfile. Default is `fallback.log`
+- `--fallback-log-dir` : Set the directory name where fallback log is persisted on data partition. Default is `fallback_log`.
+**_Note_**:
+- The current mechanism persists the fallback logs from `tmpfs` to the data partition (`/mnt/data`)
+- Given that the migration process might be interrupted owing to errors, logs will be persisted on the _old_ os assuming the flashing process failed
 
 ### Configuring a Backup
 

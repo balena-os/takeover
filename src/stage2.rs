@@ -3,7 +3,7 @@ use std::fs::{
 };
 use std::io::{self, Read, Write};
 use std::os::unix::io::AsRawFd;
-use std::process::{exit, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -15,12 +15,15 @@ use nix::{
 use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
-use libc::{ioctl, LINUX_REBOOT_CMD_RESTART, MS_RDONLY, MS_REMOUNT, SIGKILL, SIGTERM};
+use libc::{ioctl, MS_RDONLY, MS_REMOUNT, SIGKILL, SIGTERM};
+
 use log::{debug, error, info, trace, warn, Level};
 use mod_logger::{LogDestination, Logger, NO_STREAM};
 
 use crate::common::defs::MTD_DEBUG_CMD;
-use crate::common::stage2_config::LogDevice;
+use crate::common::logging::{open_fallback_log_file, persist_fallback_log_to_data_partition};
+
+use crate::common::reboot;
 
 use crate::common::{
     call,
@@ -58,16 +61,6 @@ const IOCTL_BLK_RRPART: IoctlReq = 0x1295;
 const TRANSFER_DIR: &str = "/transfer";
 
 const S2_XTRA_FS_SIZE: u64 = 10 * 1024 * 1024;
-
-pub(crate) fn reboot() -> ! {
-    trace!("reboot entered");
-    Logger::flush();
-    sync();
-    sleep(Duration::from_secs(3));
-    info!("rebooting");
-    let _res = unsafe { libc::reboot(LINUX_REBOOT_CMD_RESTART) };
-    exit(1);
-}
 
 fn get_required_space(s2_cfg: &Stage2Config) -> Result<u64> {
     let curr_file = path_append(OLD_ROOT_MP, &s2_cfg.image_path);
@@ -280,8 +273,8 @@ pub(crate) fn read_stage2_config<P: AsRef<Path>>(path_prefix: Option<P>) -> Resu
     }
 }
 
-fn setup_logging(log_dev: Option<&LogDevice>) {
-    if log_dev.is_some() {
+fn setup_logging(s2_config: &Stage2Config) {
+    if s2_config.log_dev.is_some() {
         // Device should have been mounted by stage2-init
         match dir_exists("/mnt/log/") {
             Ok(exists) => {
@@ -304,10 +297,43 @@ fn setup_logging(log_dev: Option<&LogDevice>) {
                 warn!("Failed to check for log directory, error: {:?}", why);
             }
         }
-    }
+    } else if s2_config.fallback_log {
+        info!(
+            "stage2:: Setting up temporary log destination to /tmp/{}",
+            s2_config.fallback_log_filename
+        );
 
-    Logger::flush();
-    sync();
+        let log_file = open_fallback_log_file(&s2_config.fallback_log_filename);
+
+        if log_file.is_some() {
+            // Logger::set_log_dest flushes the buffer before setting the log dest
+            // We do not use Logger::set_log_file because it truncates the file
+            // So we get the buffer before calling Logger::set_log_dest, and then write the
+            // buffered logs to the file
+            let buffered_logs = Logger::get_buffer();
+            match Logger::set_log_dest(&LogDestination::StreamStderr, log_file) {
+                Ok(_) => {
+                    if let Some(buffer) = buffered_logs {
+                        // Attempt to convert Vec<u8> to String
+                        match String::from_utf8(buffer) {
+                            Ok(logs) => info!("\n{}", logs),
+                            Err(error) => error!("Error: {}", error),
+                        }
+                    }
+                    info!(
+                        "stage2:: Now logging to /tmp/{}",
+                        s2_config.fallback_log_filename
+                    );
+                }
+                Err(_) => {
+                    error!(
+                        "Could not set logging to tmpfs at /tmp/{}",
+                        s2_config.fallback_log_filename
+                    )
+                }
+            }
+        }
+    }
 }
 
 fn kill_procs(log_level: Level) -> Result<()> {
@@ -508,7 +534,7 @@ fn transfer_boot_files<P: AsRef<Path>>(dev_root: P) -> Result<()> {
     Ok(())
 }
 
-fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo, PartInfo)> {
+pub fn get_partition_infos(device: &Path) -> Result<(PartInfo, PartInfo, PartInfo)> {
     let mut disk = Disk::from_drive_file(device, None)?;
 
     let mut boot_part: Option<PartInfo> = None;
@@ -1279,13 +1305,13 @@ pub fn stage2(opts: &Options) -> ! {
 
     info!("Stage 2 config was read successfully");
 
-    setup_logging(s2_config.log_dev());
+    setup_logging(&s2_config);
 
     match kill_procs(opts.s2_log_level()) {
         Ok(_) => (),
         Err(why) => {
             error!("kill_procs failed, error {}", why);
-            reboot();
+            stage2_err_handler(&s2_config);
         }
     };
 
@@ -1293,7 +1319,7 @@ pub fn stage2(opts: &Options) -> ! {
         Ok(_) => (),
         Err(why) => {
             error!("Failed to copy files to RAMFS, error: {:?}", why);
-            reboot();
+            stage2_err_handler(&s2_config);
         }
     }
 
@@ -1301,12 +1327,13 @@ pub fn stage2(opts: &Options) -> ! {
         Ok(_) => (),
         Err(why) => {
             error!("unmount_partitions failed; {:?}", why);
-            reboot();
+            stage2_err_handler(&s2_config);
         }
     }
 
     if s2_config.pretend {
         info!("Not flashing due to pretend mode");
+        let _ = persist_fallback_log_to_data_partition(&s2_config, false);
         reboot();
     }
 
@@ -1323,7 +1350,7 @@ pub fn stage2(opts: &Options) -> ! {
         FlashState::Success => (),
         _ => {
             sleep(Duration::from_secs(10));
-            reboot();
+            stage2_err_handler(&s2_config);
         }
     }
 
@@ -1357,8 +1384,14 @@ pub fn stage2(opts: &Options) -> ! {
     } else {
         info!("Migration completed successfully");
     }
-
     sync();
+
+    // if the fallback log option was selected, we transfer the logs from tmpfs to the new data partition
+    if s2_config.fallback_log {
+        info!("Saving tmpfs logs to data partition");
+        let _ = persist_fallback_log_to_data_partition(&s2_config, true);
+    }
+
     reboot();
 }
 
@@ -1399,4 +1432,12 @@ fn print_active_processes() -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn stage2_err_handler(s2_config: &Stage2Config) -> ! {
+    if s2_config.fallback_log {
+        let _ = persist_fallback_log_to_data_partition(s2_config, false);
+    }
+
+    reboot();
 }

@@ -55,6 +55,27 @@ pub struct Options {
     log_file: Option<PathBuf>,
     #[clap(
         long,
+        help = "Logs to RAM and then dumps logs to balenaOS disk after flashing"
+    )]
+    fallback_log: bool,
+    #[clap(
+        long,
+        value_name = "FALLBACK_LOG_FILENAME",
+        value_parser,
+        default_value = "fallback.log",
+        help = "Set the name of the fallback log"
+    )]
+    fallback_log_filename: String,
+    #[clap(
+        long,
+        value_name = "FALLBACK_LOG_DIR",
+        value_parser,
+        default_value = "fallback_log",
+        help = "Set the directory name where fallback logs will be persisted on data partition"
+    )]
+    fallback_log_dir: String,
+    #[clap(
+        long,
         value_name = "BACKUP-CONFIG",
         value_parser,
         help = "Backup configuration file"
@@ -284,5 +305,17 @@ impl Options {
 
     pub fn change_dt_to(&self) -> &Option<String> {
         &self.change_dt_to
+    }
+
+    pub fn fallback_log(&self) -> bool {
+        self.fallback_log
+    }
+
+    pub fn fallback_log_filename(&self) -> &str {
+        &self.fallback_log_filename
+    }
+
+    pub fn fallback_log_dir(&self) -> &str {
+        &self.fallback_log_dir
     }
 }
