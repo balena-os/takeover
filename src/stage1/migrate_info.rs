@@ -9,10 +9,11 @@ use crate::common::defs::{
     BACKUP_ARCH_NAME, BALENA_NETWORK_MANAGER_BIND_MOUNT, BALENA_OS_BOOT_MP, BALENA_OS_NAME,
     BALENA_SYSTEM_CONNECTIONS_BOOT_PATH, BALENA_SYSTEM_PROXY_BOOT_PATH, SYSTEM_CONNECTIONS_DIR,
 };
-use crate::common::path_append;
-use crate::stage1::api_calls::patch_device_type;
 use crate::{
-    common::{file_exists, get_os_name, options::Options, Error, ErrorKind, Result, ToError},
+    common::{
+        api_calls::patch_device_type, file_exists, get_os_name, options::Options, path_append,
+        Error, ErrorKind, Result, ToError,
+    },
     stage1::{
         backup::config::backup_cfg_from_file,
         backup::{create, create_ext},

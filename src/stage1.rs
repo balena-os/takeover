@@ -25,7 +25,6 @@ use which::which;
 
 pub(crate) mod migrate_info;
 
-mod api_calls;
 mod block_device_info;
 mod defs;
 mod device;
@@ -453,6 +452,15 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         device_type: mig_info.get_device_type_name().to_string(),
         tty: read_link("/proc/self/fd/1")
             .upstream_with_context("Failed to read tty from '/proc/self/fd/1'")?,
+        api_endpoint: mig_info.balena_cfg().get_api_endpoint()?,
+        api_key: mig_info.balena_cfg().get_api_key()?,
+        // uuid defined only for balenaOS->balenaOS migration, so not always an
+        // error at this level; user can check for empty string and handle accordingly.
+        uuid: mig_info
+            .balena_cfg()
+            .get_uuid()
+            .unwrap_or_else(|_| "".to_owned()),
+        report_hup_progress: opts.report_hup_progress(),
     };
 
     let s2_cfg_path = takeover_dir.join(STAGE2_CONFIG_NAME);
@@ -466,7 +474,10 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         ))?;
 
     let s2_cfg_txt = s2_cfg.serialize()?;
-    debug!("Stage 2 config: \n{}", s2_cfg_txt);
+    debug!(
+        "Stage 2 config: \n{}",
+        Stage2Config::sanitize_text(&s2_cfg_txt)
+    );
 
     s2_cfg_file
         .write(s2_cfg_txt.as_bytes())
