@@ -1,4 +1,28 @@
 - commits:
+    - subject: Move api_calls module from stage1 to common
+      hash: 051420776dff47f0affd9994e5d46a18aa059925
+      body: |
+        New hup_progress api call is used in stage2 and init.
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Ken Bannister <kb2ma@runbox.com>
+        signed-off-by: Ken Bannister <kb2ma@runbox.com>
+      author: Ken Bannister
+    - subject: Send progress messages to API if run within HUP context
+      hash: 0cdd6f876ca5288028c4c30b4f85b82cfec66a9e
+      body: |
+        Used with balenaOS to balenaOS takeover
+      footer:
+        Change-type: minor
+        change-type: minor
+        Signed-off-by: Ken Bannister <kb2ma@runbox.com>
+        signed-off-by: Ken Bannister <kb2ma@runbox.com>
+      author: Ken Bannister
+  version: 0.10.0
+  title: ""
+  date: 2024-12-10T06:38:29.176Z
+- commits:
     - subject: Allow logging to internal disk as a workaround
       hash: 02d978ccef3eb952c7a9ca0a099f6af746129f49
       body: |
