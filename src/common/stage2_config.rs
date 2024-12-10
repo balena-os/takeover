@@ -33,6 +33,10 @@ pub(crate) struct Stage2Config {
     pub backup_path: Option<PathBuf>,
     pub device_type: String,
     pub tty: PathBuf,
+    pub api_endpoint: String,
+    pub api_key: String,
+    pub uuid: String,
+    pub report_hup_progress: bool,
 }
 
 #[allow(dead_code)]
@@ -55,5 +59,20 @@ impl Stage2Config {
 
     pub fn flash_dev(&self) -> &PathBuf {
         &self.flash_dev
+    }
+
+    /// Remove value for api_key from serialization output. Useful for logging.
+    /// Expects input is a multiline string.
+    pub fn sanitize_text(serialized: &str) -> String {
+        let mut clean_txt = String::new();
+        for element in serialized.lines() {
+            if element.starts_with("api_key") {
+                clean_txt.push_str("api_key: <hidden>");
+            } else {
+                clean_txt.push_str(element);
+            }
+            clean_txt.push('\n');
+        }
+        clean_txt
     }
 }

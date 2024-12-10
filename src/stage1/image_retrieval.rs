@@ -7,9 +7,13 @@ use log::{debug, error, info, warn, Level};
 use semver::{Version, VersionReq};
 
 use crate::{
-    common::{path_append, stream_progress::StreamProgress, Error, Options, Result, ToError},
-    stage1::{
+    common::{
         api_calls::{get_os_image, get_os_versions, Versions},
+        path_append,
+        stream_progress::StreamProgress,
+        Error, Options, Result, ToError,
+    },
+    stage1::{
         defs::{
             DEV_TYPE_BBB, DEV_TYPE_BBG, DEV_TYPE_GEN_X86_64, DEV_TYPE_INTEL_NUC,
             DEV_TYPE_JETSON_XAVIER, DEV_TYPE_RPI1, DEV_TYPE_RPI2, DEV_TYPE_RPI3, DEV_TYPE_RPI4_64,

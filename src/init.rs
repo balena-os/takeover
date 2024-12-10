@@ -1,8 +1,9 @@
 use crate::{
     common::{
+        api_calls::notify_hup_progress,
         call,
         defs::{MOUNT_CMD, NIX_NONE, OLD_ROOT_MP, PIVOT_ROOT_CMD, TAKEOVER_DIR},
-        get_mountpoint,
+        dir_exists, get_mountpoint,
         logging::{
             copy_file_to_destination_dir, open_fallback_log_file,
             persist_fallback_log_to_data_partition,
@@ -24,7 +25,7 @@ use nix::{
 };
 use std::env::set_current_dir;
 use std::ffi::CString;
-use std::fs::create_dir_all;
+use std::fs::{copy, create_dir_all};
 use std::io;
 use std::mem::MaybeUninit;
 use std::os::raw::c_int;
@@ -41,6 +42,7 @@ use libc::{
 };
 
 const INITIAL_LOG_LEVEL: Level = Level::Trace;
+const CERTS_DIR: &str = "/etc/ssl/certs";
 
 fn setup_log(log_dev: &LogDevice, takeover_dir: &str) -> Result<()> {
     trace!(
@@ -351,6 +353,13 @@ pub fn init() -> ! {
 
         setup_stage2_init_fallback_log(&s2_config.fallback_log_filename);
     }
+    // Required to send HUP progress messages to balena API.
+    match setup_networking() {
+        Ok(_) => info!("Networking setup success"),
+        Err(why) => {
+            warn!("Networking unavailable, setup error: {:?}", why);
+        }
+    }
 
     let _child_pid = match Command::new(format!("/bin/{}", env!("CARGO_PKG_NAME")))
         .args(["--stage2", "--s2-log-level", &s2_config.log_level])
@@ -438,6 +447,46 @@ fn setup_stage2_init_fallback_log(fallback_log_filename: &str) {
     }
 }
 
+// Copy files required for reqwest based networking operation, as used to
+// send HUP progress messages to balenaCloud. Files must be available relative
+// to new root directory. Includes SSL certificates and resolv.dnsmasq.
+fn setup_networking() -> Result<()> {
+    if !dir_exists(CERTS_DIR)? {
+        create_dir_all(CERTS_DIR).upstream_with_context(&format!(
+            "Failed to create certs directory: '{}'",
+            CERTS_DIR
+        ))?;
+    }
+
+    let src_path = path_append(OLD_ROOT_MP, "/etc/ssl/certs/ca-certificates.crt");
+    let to_path = path_append(CERTS_DIR, "ca-certificates.crt");
+    copy(&src_path, &to_path).upstream_with_context(&format!(
+        "Failed to copy '{}' to {}",
+        src_path.display(),
+        &to_path.display()
+    ))?;
+    info!(
+        "Copied certs from {} to '{}'",
+        src_path.display(),
+        to_path.display()
+    );
+
+    let src_path = path_append(OLD_ROOT_MP, "/var/run/resolvconf/interface/NetworkManager");
+    let to_path = path_append("/etc", "resolv.conf");
+    copy(&src_path, &to_path).upstream_with_context(&format!(
+        "Failed to copy '{}' to {}",
+        src_path.display(),
+        &to_path.display()
+    ))?;
+    info!(
+        "Copied DNS resolver from {} to '{}'",
+        src_path.display(),
+        to_path.display()
+    );
+
+    Ok(())
+}
+
 // Helper function to handle errors during stage2-init process
 // * `pre_privot_root` - bool to indicate whether handling err
 //
@@ -450,6 +499,24 @@ fn stage2_init_err_handler(pre_pivot_root: bool, s2_config: &Stage2Config) -> ! 
     // we attempt to setup stage2-init log to tmpfs
     if pre_pivot_root {
         setup_stage2_init_fallback_log(&s2_config.fallback_log_filename);
+    }
+
+    // Notify balena API that takeover failed.
+    if s2_config.report_hup_progress {
+        match notify_hup_progress(
+            &s2_config.api_endpoint,
+            &s2_config.api_key,
+            &s2_config.uuid,
+            "100",
+            "OS update failed",
+        ) {
+            Ok(_) => {
+                info!("HUP progress notification OK");
+            }
+            Err(why) => {
+                error!("Failed HUP progress notification, error {}", why);
+            }
+        }
     }
 
     if s2_config.fallback_log {
