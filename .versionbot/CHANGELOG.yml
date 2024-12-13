@@ -1,4 +1,17 @@
 - commits:
+    - subject: Allow for system-proxy boot directory absent in balenaOS source
+      hash: 28abb936dde81b3eaa7cfefaed71cb3ca7d6a81b
+      body: ""
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Ken Bannister <kb2ma@runbox.com>
+        signed-off-by: Ken Bannister <kb2ma@runbox.com>
+      author: Ken Bannister
+  version: 0.10.1
+  title: ""
+  date: 2024-12-13T08:34:43.758Z
+- commits:
     - subject: Move api_calls module from stage1 to common
       hash: 051420776dff47f0affd9994e5d46a18aa059925
       body: |
