@@ -207,14 +207,31 @@ impl MigrateInfo {
         // If migrating from balenaOS, copy all files from /mnt/boot/system-proxy
         if os_name.starts_with(BALENA_OS_NAME) {
             debug!("migrating from balenaOS - marking system-proxy files for copying");
-            let system_proxy_dir_entries = read_dir(BALENA_SYSTEM_PROXY_BOOT_PATH)
-                .upstream_with_context(&format!(
-                    "Getting system proxy connections from '{}'",
-                    BALENA_SYSTEM_PROXY_BOOT_PATH
-                ))?;
+            // system-proxy directory added to balenaOS in v2.108.30, so may be absent
+            let found_path = match Path::new(BALENA_SYSTEM_PROXY_BOOT_PATH).try_exists() {
+                Ok(res) => {
+                    if !res {
+                        warn!("system-proxy directory not found; continuing")
+                    }
+                    res
+                }
+                Err(why) => {
+                    return Err(Error::with_context(
+                        ErrorKind::InvState,
+                        &format!("Can't access system-proxy directory: {}", why),
+                    ));
+                }
+            };
+            if found_path {
+                let system_proxy_dir_entries = read_dir(BALENA_SYSTEM_PROXY_BOOT_PATH)
+                    .upstream_with_context(&format!(
+                        "Getting system proxy connections from '{}'",
+                        BALENA_SYSTEM_PROXY_BOOT_PATH
+                    ))?;
 
-            for sys_proxy_path in system_proxy_dir_entries {
-                system_proxy_files.push(sys_proxy_path?.path());
+                for sys_proxy_path in system_proxy_dir_entries {
+                    system_proxy_files.push(sys_proxy_path?.path());
+                }
             }
         }
 
