@@ -461,6 +461,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
             .get_uuid()
             .unwrap_or_else(|_| "".to_owned()),
         report_hup_progress: opts.report_hup_progress(),
+        change_dt_to: opts.change_dt_to().clone(),
     };
 
     let s2_cfg_path = takeover_dir.join(STAGE2_CONFIG_NAME);

@@ -11,8 +11,7 @@ use crate::common::defs::{
 };
 use crate::{
     common::{
-        api_calls::patch_device_type, file_exists, get_os_name, options::Options, path_append,
-        Error, ErrorKind, Result, ToError,
+        file_exists, get_os_name, options::Options, path_append, Error, ErrorKind, Result, ToError,
     },
     stage1::{
         backup::config::backup_cfg_from_file,
@@ -261,25 +260,11 @@ impl MigrateInfo {
             config.set_host_name(&hostname);
         }
 
-        // If --change-dt_to was passed, override the deviceType in config.json
-        // and PATCH the API to new device type
+        // If --change-dt_to was passed, override the deviceType in config.json.
+        // Also must patch the API, but *after* migration completes.
         if let Some(change_to) = opts.change_dt_to() {
             info!("Changing deviceType in config.json to: '{}' because --change_dt_to option was passed", change_to);
             config.override_device_type(change_to);
-
-            let uuid = config.get_uuid()?;
-            let api_key = config.get_api_key()?;
-            let api_endpoint = config.get_api_endpoint()?;
-            debug!("Device UUID: {uuid} API Key : {api_key}");
-
-            info!("Changing device {uuid} device type to {change_to}...");
-
-            match patch_device_type(&api_endpoint, &api_key, change_to, &uuid) {
-                Ok(_) => {
-                    info!("Successfully changed device type to: {change_to} for device {uuid}")
-                }
-                Err(why) => error!("Failed to change device type, error: {:?}", why),
-            }
         }
 
         Ok(MigrateInfo {

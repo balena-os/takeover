@@ -37,6 +37,7 @@ pub(crate) struct Stage2Config {
     pub api_key: String,
     pub uuid: String,
     pub report_hup_progress: bool,
+    pub change_dt_to: Option<String>,
 }
 
 #[allow(dead_code)]
