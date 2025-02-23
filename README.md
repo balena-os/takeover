@@ -1,12 +1,41 @@
-# takeover
+Takeover is a CLI tool to migrate existing live Linux devices to balenaOS. It has been used to migrate from RaspberryPi OS, Ubuntu/Debian, and others.
 
-Brownfield device migration using *takeover* strategy.
+**Warning: *takeover* overwrites the currently running operating system with balenaOS.** Test on a lab device before running on your current fleet. Plan ahead to save or transfer any important data. 
 
-**Warning**: The *takeover* command will attempt to install balena-os over your existing operating system. 
-Make sure you do not accidentally call the command on the wrong host and test your setup before migrating a host.
+We can't guarantee that takeover will work for your fleet. However, we provide a `--pretend` option to help you test it out. _Our goal is to make it easy to migrate to balenaOS!_ Contact us in the [balena Forums](https://forums.balena.io/) with any questions.
 
-The easiest way to test your setup is to run *takeover* with the ```--pretend``` option. This will test all stages of
-migration except for the actual flashing of the image, rebooting your system in the process.         
+The section below covers the most used scenarios and is the best place to start. Also see the separate [advanced options](docs/advanced.md) and [development/architecture](docs/development.md) docs.
+
+# Getting Started
+Takeover is a single executable with many options. The sections below group these options by functionality, like downloading the image or configuration.
+
+First download the latest takeover executable for the target host architecture, [available](https://github.com/balena-os/takeover/releases/latest) from the repository.
+
+## Common options
+
+The only required option is `-c` for the balenaOS `config.json`. This file includes important configuration like the fleet for the device.
+
+Pretend mode allows you to run takeover until just before flashing balenaOS, and it also reboots the device when complete.
+```
+-c, --config <CONFIG_JSON>
+    Path to balena config.json
+--pretend
+    Pretend mode, do not flash device
+```
+
+You can use the balenaCLI tool to [generate](https://docs.balena.io/reference/balena-cli/latest/#config-generate) a configuration for the target fleet, or you can download one from the [Add Device](https://docs.balena.io/learn/getting-started/var-som-mx6/rust/#add-a-device-and-download-os) dialog in the dashboard.
+
+## balenaOS image
+Takeover defaults to downloading the latest balenaOS image, or you may specify a particular version. You also can avoid downloading altogether and separately provide an image. You also may only download an image without running the takeover process itself.
+
+```
+-v, --version <VERSION>
+    Version of balena-os image to download
+-i, --image <IMAGE>
+    Path to balenaOS image
+-d, --download-only
+    Download image only, do not check device and migrate
+```
 
 ## Howto 
 
@@ -318,128 +347,3 @@ E.g:
 
 You can find the device type slug for each device type in [our docs](https://docs.balena.io/reference/base-images/devicetypes/) in the `BALENA_MACHINE_NAME` column.
 
-## Compiling *takeover*
-
-First off, if you are an end user you probably don't need to compile *takeover* yourself. Just visit our [releases page
-on Github](https://github.com/balena-os/takeover/releases) and download a precompiled binary for the desired
-architecture.
-
-That said, if you want to build *takeover*, the easiest route (and the one we recommend!) is to use Rust's [`cross`
-tool](https://github.com/cross-rs/cross). `cross` (along with the `Cross.toml` file we provide) will take care of the
-two main technicalities of the compilation:
-
-1. You need to compile for the architecture of the device you want to migrate away from.
-2. You need to compile to a statically linked binary.
-
-Once you have `cross` and its dependencies installed (see [instructions
-here](https://github.com/cross-rs/cross?tab=readme-ov-file#dependencies)), compiling *takeover* should be just a matter
-of running `cross build` passing the desired target platform. Here are some examples:
-
-```shell
-# To build a version of takeover that will run on an ARM device running a 32-bit
-# operating system. This would be the typical case for a Raspberry Pi running a
-# 32-bit version of Raspberry Pi OS.
-cross build --release --target "armv7-unknown-linux-musleabihf"
-
-# For an ARM device running a 64-bit operating system. Typical for a Raspberry
-# Pi running a 64-bit OS.
-cross build --release --target "aarch64-unknown-linux-musl"
-
-# For a device with an Intel CPU running a 64-bit operating system.
-cross build --release --target "x86_64-unknown-linux-musl"
-```
-
-## How it works
-
-The takeover process occurs in 2 stages, namely:
-
-- Stage1: Gathers information about the device and the current operating system and prepares the system for Stage2
-- Stage2: the `takeover` process is re-run as `init` (PID 1) and spawns a worker process that kills running processes, copies required files to RAMFS, unmounts partitions and handles the flashing of balenaOS
-
-````mermaid
-
-flowchart TD
-    A(Start) --> B[[Stage1]]
-    B --> C[[Stage2]]
-    C--> E(End)
-
-````
-
-### Stage1
----
-
-````mermaid
-
-flowchart TB
-    A(Start)
-    subgraph S1 [Stage1]
-    direction TB
-        S1A[[Gather Migration Info]]
-        S1B[[Prepare for takeover]]
-    S1A --> S1B    
-    end
-    A --> S1
-    S1 --> C[[Stage2]]
-    C--> E(End)
-
-````
-
-Stage1 consists of 2 main processes:
-
-#### 1. Gather Migration Info
-
-- Check device type (can be skipped by passing option `--no_dt_check`)
-- Read `config.json`
-- Run checks
-  - check if device type set in `config.json` is supported by the detected device type
-  - check if can connect to API endpoint set in  `config.json`
-  - check if can connect to VPN endpoint set in `config.json`
-- Download latest balenaOS image if an image is not provided
-- Create corresponding network manager connection files
-- Backup files if required
-- Replicate `hostname` if required
-
-#### 2. Prepare for takeover
-   
-- Disable swap
-- Copy files/binaries to RAMFS
-- Setup new init process (`takeover` is bind-mounted over original `init` executable )
-- Setup Stage2 log device if required
-- Write Stage2 config file
-- Restart init daemon -> since `takeover` is bind-mounted over `init`, `takeover` is actually ran as the init process (PID 1)
-
-### Stage2
----
-
-````mermaid
-flowchart TB
-    A(Start)-->S1[[Stage1]]
-    subgraph S2 [Stage2]
-    direction TB
-        S2A[[Run as Init]]
-        S2B[[Stage2 Worker]]
-    S2A --> S2B    
-    end
-S1 --> S2
-S2 --> E(End)
-````
-Stage2 also consists of 2 main processes:
-
-#### Run as Init
-
-- Close open files
-- Setup stage2 logging to an external device
-- Set mount propagation to private for rootfs -> mounts and unmounts within this mount point will not propagate to other mount points, and mounts and unmounts in other mount points will not propagate to this mount point. This effectively isolates the mount point from changes in other namespaces.
-- change root filesystem via `pivot_root`
-- Spawn Stage2 worker process
-
-#### Stage2 Migration Worker
-- setup Stage2 logging to external device if configured
-- Kill running processes
-- Copy required files to RAMFS
-- unmount partitions
-- Flash balenaOS image to disk
-- Validate if image was written successfully
-- Transfer files to respective destinations (`config.json`, system connection files)
-- Setup EFI if required
-- Restore backup files is required 
