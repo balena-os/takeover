@@ -26,7 +26,7 @@ use crate::common::logging::{open_fallback_log_file, persist_fallback_log_to_dat
 use crate::common::reboot;
 
 use crate::common::{
-    api_calls::notify_hup_progress,
+    api_calls::{notify_hup_progress, patch_device_type},
     call,
     defs::{
         IoctlReq, BACKUP_ARCH_NAME, BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART,
@@ -1401,6 +1401,23 @@ pub fn stage2(opts: &Options) -> ! {
             Err(why) => {
                 error!("Failed HUP progress notification, error {}", why);
             }
+        }
+    }
+    // Update device API with new device type if changed.
+    if let Some(change_to) = &s2_config.change_dt_to {
+        match patch_device_type(
+            &s2_config.api_endpoint,
+            &s2_config.api_key,
+            change_to,
+            &s2_config.uuid,
+        ) {
+            Ok(_) => {
+                info!(
+                    "Successfully patched device type to: {} for device {}",
+                    change_to, &s2_config.uuid
+                )
+            }
+            Err(why) => error!("Failed to patch device type, error: {:?}", why),
         }
     }
 
