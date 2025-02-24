@@ -1,4 +1,17 @@
 - commits:
+    - subject: If change device type, patch API after takeover completes
+      hash: f54e40d40c1f6456d7d16bcf722c95c51a5f1585
+      body: ""
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Ken Bannister <kb2ma@runbox.com>
+        signed-off-by: Ken Bannister <kb2ma@runbox.com>
+      author: Ken Bannister
+  version: 0.10.2
+  title: ""
+  date: 2025-02-24T13:13:58.485Z
+- commits:
     - subject: Allow for system-proxy boot directory absent in balenaOS source
       hash: 28abb936dde81b3eaa7cfefaed71cb3ca7d6a81b
       body: ""
