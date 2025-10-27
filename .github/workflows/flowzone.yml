@@ -23,7 +23,6 @@ jobs:
     secrets: inherit
     with:
       rust_binaries: true
-      rust_toolchain: 1.76
       cargo_targets: |
         aarch64-unknown-linux-musl,
         armv7-unknown-linux-musleabihf,
