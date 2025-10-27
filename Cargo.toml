@@ -5,6 +5,7 @@ version = "0.10.2"
 authors = ["balena.io"]
 edition = "2018"
 publish = false
+rust-version = "1.76"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
