@@ -1,4 +1,20 @@
 - commits:
+    - subject: Fix build pipeline
+      hash: f4b5dc8b64b0dd4c320621c68bbbb832fc5cd6de
+      body: |
+        - remove toolchain field from github action because flowzone no longer
+          supports it
+        - specify rust version in Cargo.toml
+      footer:
+        Signed-off-by: Rahul Thakoor <rahul@balena.io>
+        signed-off-by: Rahul Thakoor <rahul@balena.io>
+        Change-type: patch
+        change-type: patch
+      author: Rahul Thakoor
+  version: 0.10.3
+  title: ""
+  date: 2025-10-27T23:22:20.917Z
+- commits:
     - subject: If change device type, patch API after takeover completes
       hash: f54e40d40c1f6456d7d16bcf722c95c51a5f1585
       body: ""

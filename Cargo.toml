@@ -1,19 +1,17 @@
 [package]
 name = "takeover"
 description = "Brownfield device migration tool to balenaOS and balenaCloud"
-version = "0.10.2"
-authors = ["balena.io"]
+version = "0.10.3"
+authors = [ "balena.io" ]
 edition = "2018"
 publish = false
 rust-version = "1.76"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
+[profile]
 [profile.release]
 opt-level = "s"
 
 [dependencies]
-
 [dependencies.libc]
 version = "0.2.70"
 
@@ -25,7 +23,7 @@ version = "1.0.0"
 
 [dependencies.reqwest]
 version = "0.11.24"
-features = ["blocking", "json"]
+features = [ "blocking", "json" ]
 
 [dependencies.url]
 version = "2.5.0"
@@ -35,28 +33,28 @@ version = "1.0"
 
 [dependencies.clap]
 version = "4.5.0"
-features = ["derive"]
+features = [ "derive" ]
 
 [dependencies.log]
 version = "0.4.8"
-features = ["std"]
+features = [ "std" ]
 
 [dependencies.regex]
- version = "1.10.3"
+version = "1.10.3"
 
 [dependencies.nix]
 version = "0.27.1"
-features = ["fs", "mount"]
+features = [ "fs", "mount" ]
 
 [dependencies.semver]
- version = "0.9.0"
+version = "0.9.0"
 
 [dependencies.serde]
- version = "1.0.110"
- features = ["derive"]
+version = "1.0.110"
+features = [ "derive" ]
 
 [dependencies.serde_yaml]
- version = "0.8.12"
+version = "0.8.12"
 
 [dependencies.serde_json]
 version = "1.0.53"
@@ -84,23 +82,19 @@ version = "6.0.0"
 
 [dependencies.openssl]
 version = "0.10.63"
-features = ["vendored"]
+features = [ "vendored" ]
 
 [dependencies.lddtree]
 version = "0.3.4"
+
+[dependencies.gptman]
+version = "1.0.2"
+
+[dependencies.futures]
+version = "0.3.30"
 
 [features]
 raspberrypi3 = []
 raspberrypi4-64 = []
 intel-nuc = []
 jetson-xavier = []
-
-[dependencies.gptman]
-version = "1.0.2"
-
-# Required to get past "ambiguous name" errors in pin-project-internal v0.4.17.
-# See https://github.com/taiki-e/pin-project/issues/337
-# Problem was triggered by addition of gptman.
-# This package seems foundational and important to keep updated.
-[dependencies.futures]
-version = "0.3.30"
