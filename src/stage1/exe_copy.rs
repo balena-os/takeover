@@ -1,4 +1,4 @@
-use crate::common::system::stat;
+use crate::common::system::{is_lnk, lstat, stat};
 use crate::common::{dir_exists, path_append, whereis, Error, ErrorKind, Result, ToError};
 
 use lddtree::DependencyAnalyzer;
@@ -7,10 +7,18 @@ use std::collections::HashSet;
 use std::fs::{copy, create_dir, create_dir_all, read_link};
 use std::path::{Path, PathBuf};
 
+/// Copies a list of executables for takeover tooling to a provided directory,
+/// including the dependent libraries. We expect takeover will pivot the provided
+/// directory to be the root directory, and so the executables must run in that
+/// context.
 pub(crate) struct ExeCopy {
     req_space: u64,
     libraries: HashSet<String>,
     executables: HashSet<String>,
+    /// If true, don't create a top level "lib" directory when copy_files() because
+    /// the root filesystem merges (symlinks) the /lib directory to /usr/lib.
+    /// Instead copies to "/usr/lib" in add_lib().
+    is_merged_lib: bool,
 }
 
 impl ExeCopy {
@@ -33,10 +41,14 @@ impl ExeCopy {
             )?);
         }
 
+        let lib_stat = lstat("/lib").upstream_with_context("Failed to lstat /lib")?;
+        debug!("/lib is a symlink? {}", is_lnk(&lib_stat));
+
         let mut efi_files = ExeCopy {
             req_space: 0,
             libraries: HashSet::new(),
             executables,
+            is_merged_lib: is_lnk(&lib_stat),
         };
 
         efi_files.get_libs_for()?;
@@ -74,9 +86,17 @@ impl ExeCopy {
 
     fn add_lib(&mut self, lib_path: &str) -> Result<bool> {
         trace!("add_lib: entered with '{}'", lib_path);
-        match stat(lib_path) {
+
+        // If merged /lib + /usr/lib, must divert a target for /lib to /usr/lib.
+        let mut save_path = String::from("");
+        if self.is_merged_lib && lib_path.starts_with("/lib/") {
+            save_path.push_str("/usr");
+        }
+        save_path.push_str(lib_path);
+
+        match stat(&save_path) {
             Ok(stat) => {
-                if self.libraries.insert(lib_path.to_owned()) {
+                if self.libraries.insert(save_path.to_owned()) {
                     self.req_space += stat.st_size as u64;
                     Ok(true)
                 } else {
@@ -85,7 +105,7 @@ impl ExeCopy {
             }
             Err(why) => Err(Error::with_all(
                 ErrorKind::FileNotFound,
-                &format!("The file could not be found: '{}'", lib_path),
+                &format!("The file could not be found: '{}'", save_path),
                 Box::new(why),
             )),
         }

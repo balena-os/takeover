@@ -35,7 +35,7 @@ use std::str::FromStr;
 use std::thread::sleep;
 use std::time::Duration;
 
-use crate::common::stage2_config::LogDevice;
+use crate::common::{stage2_config::LogDevice, system::symlink};
 use libc::{
     close, dup2, getpid, open, pipe, sigfillset, sigprocmask, sigset_t, wait, O_CREAT, O_TRUNC,
     O_WRONLY, SIG_BLOCK, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO,
@@ -353,6 +353,28 @@ pub fn init() -> ! {
 
         setup_stage2_init_fallback_log(&s2_config.fallback_log_filename);
     }
+
+    // Must manually create /lib symlink if source OS implements merged /lib
+    // + /usr/lib directories. These directories are used by libraries required
+    // by takeover tooling itself (specifically, for dd).
+    match dir_exists("/lib") {
+        Ok(exists) => {
+            if !exists {
+                match symlink("/usr/lib", "/lib") {
+                    Ok(_) => info!("Created /lib -> /usr/lib symlink for takeover tools"),
+                    Err(why) => {
+                        error!("Can't create /lib symlink: {:?}", why);
+                        stage2_init_err_handler(false, &s2_config);
+                    }
+                }
+            }
+        }
+        Err(why) => {
+            error!("Failed /lib check: {:?}", why);
+            stage2_init_err_handler(false, &s2_config);
+        }
+    }
+
     // Required to send HUP progress messages to balena API.
     match setup_networking() {
         Ok(_) => info!("Networking setup success"),
