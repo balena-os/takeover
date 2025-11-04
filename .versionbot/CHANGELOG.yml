@@ -1,4 +1,19 @@
 - commits:
+    - subject: Adapt takeover tooling setup for merged /lib
+      hash: 89867d54eea5159d1c3b00df68d8ff6b0fe9a4f8
+      body: |
+        Copy libraries to takeover_dir/usr/lib during setup, and create
+        /lib as a symlink after pivot root.
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Ken Bannister <kb2ma@runbox.com>
+        signed-off-by: Ken Bannister <kb2ma@runbox.com>
+      author: Ken Bannister
+  version: 0.10.4
+  title: ""
+  date: 2025-11-04T14:21:25.452Z
+- commits:
     - subject: Fix build pipeline
       hash: f4b5dc8b64b0dd4c320621c68bbbb832fc5cd6de
       body: |
