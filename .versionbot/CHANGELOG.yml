@@ -1,4 +1,17 @@
 - commits:
+    - subject: Create LICENSE.md
+      hash: 574a27988072936d66556341f561aa479753ada6
+      body: ""
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Rahul Thakoor <rahul@balena.io>
+        signed-off-by: Rahul Thakoor <rahul@balena.io>
+      author: Rahul Thakoor
+  version: 0.10.5
+  title: ""
+  date: 2025-11-04T14:53:59.517Z
+- commits:
     - subject: Adapt takeover tooling setup for merged /lib
       hash: 89867d54eea5159d1c3b00df68d8ff6b0fe9a4f8
       body: |
