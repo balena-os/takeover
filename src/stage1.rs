@@ -413,7 +413,14 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
             ));
         }
     } else {
-        block_dev_info.get_root_device()
+        if let Some(root_device) = block_dev_info.get_root_device() {
+            root_device
+        } else {
+            return Err(Error::with_context(
+                ErrorKind::InvState,
+                "Could not find root device"
+            ));
+        }
     };
 
     if !file_exists(flash_dev.as_ref().get_dev_path()) {

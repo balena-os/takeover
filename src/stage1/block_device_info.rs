@@ -106,7 +106,7 @@ impl FromStr for DeviceNum {
 
 #[derive(Clone)]
 pub(crate) struct BlockDeviceInfo {
-    root_device: Rc<dyn BlockDevice>,
+    root_device: Option<Rc<dyn BlockDevice>>,
     root_partition: Option<Rc<dyn BlockDevice>>,
     devices: DeviceMap,
 }
@@ -227,17 +227,25 @@ impl BlockDeviceInfo {
         if let Some(root_device) = root_device {
             if let Some(root_partition) = root_partition {
                 return Ok(BlockDeviceInfo {
-                    root_device,
+                    root_device: Some(root_device),
                     root_partition: Some(root_partition),
                     devices: device_map,
                 });
+            } else {
+                // Preserving original logic, which fails if root_partition
+                // not defined.
+                return Err(Error::with_context(
+                    ErrorKind::InvState,
+                    "Failed to create BlockDeviceInfo",
+                ));
             }
+        } else {
+            return Ok(BlockDeviceInfo {
+                root_device: None,
+                root_partition: None,
+                devices: device_map,
+            });
         }
-
-        Err(Error::with_context(
-            ErrorKind::InvState,
-            "Failed to find root device",
-        ))
     }
 
     fn read_partitions<P: AsRef<Path>>(
@@ -324,7 +332,7 @@ impl BlockDeviceInfo {
         Ok(())
     }
 
-    pub fn get_root_device(&self) -> &Rc<dyn BlockDevice> {
+    pub fn get_root_device(&self) -> &Option<Rc<dyn BlockDevice>> {
         &self.root_device
     }
 
