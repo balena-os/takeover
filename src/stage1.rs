@@ -19,7 +19,7 @@ use nix::{
 };
 
 use libc::MS_BIND;
-use log::{debug, error, info, warn, Level};
+use log::{debug, error, info, trace, warn, Level};
 
 use which::which;
 
@@ -145,6 +145,10 @@ fn prepare_configs<P1: AsRef<Path>>(
     Ok(())
 }
 
+/// Determines the partitions that must be unmounted in stage 2.
+///
+/// Includes mounted partitions whose parent is the provided flash device.
+/// Sorts partitions so a longer mount path is before a shorter containing path.
 fn get_umount_parts(
     flash_dev: &Rc<dyn BlockDevice>,
     block_dev_info: &BlockDeviceInfo,
@@ -156,10 +160,18 @@ fn get_umount_parts(
             // this is a partition rather than a device
             if parent.get_name() == flash_dev.get_name() {
                 // it is a partition of the flash device
+                trace!(
+                    "umount_parts: review partition {:?}, whose parent is the flash device",
+                    device
+                );
                 if let Some(mount) = device.get_mountpoint() {
                     let mut inserted = false;
                     for (idx, mpoint) in umount_parts.iter().enumerate() {
                         if mpoint.mountpoint.starts_with(mount.get_mountpoint()) {
+                            trace!(
+                                "umount_parts: insert partition before umount_part {:?}",
+                                mpoint
+                            );
                             umount_parts.insert(
                                 idx,
                                 UmountPart {
@@ -173,6 +185,7 @@ fn get_umount_parts(
                         }
                     }
                     if !inserted {
+                        trace!("umount_part append: {:?}", device);
                         umount_parts.push(UmountPart {
                             dev_name: device.get_dev_path().to_path_buf(),
                             mountpoint: PathBuf::from(mount.get_mountpoint()),
@@ -398,6 +411,9 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     let new_init_path = path_append(&takeover_dir, format!("/bin/{}", env!("CARGO_PKG_NAME")));
     // Assets::write_stage2_script(&takeover_dir, &new_init_path, &tty, opts.get_s2_log_level())?;
 
+    // Returned block device info struct may leave root device/partition undefined.
+    // In this case the user must specify the flash device below via the flash_to
+    // option.
     let block_dev_info = get_block_dev_info()?;
 
     let flash_dev = if let Some(flash_dev) = opts.flash_to() {
@@ -418,7 +434,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         } else {
             return Err(Error::with_context(
                 ErrorKind::InvState,
-                "Could not find root device"
+                "Could not find root device",
             ));
         }
     };

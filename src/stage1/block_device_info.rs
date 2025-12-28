@@ -1,7 +1,7 @@
 use crate::common::{path_append, Error, Result, ToError};
 
 use lazy_static::lazy_static;
-use log::{debug, trace};
+use log::{debug, info, trace};
 use nix::sys::stat::{major, minor, stat};
 use regex::Regex;
 use std::collections::HashMap;
@@ -104,6 +104,9 @@ impl FromStr for DeviceNum {
     }
 }
 
+/// Information about block devices for a host, including an optional "root" device.
+/// The 'devices' member may include partitions for devices as well as the devices
+/// themselves.
 #[derive(Clone)]
 pub(crate) struct BlockDeviceInfo {
     root_device: Option<Rc<dyn BlockDevice>>,
@@ -112,20 +115,31 @@ pub(crate) struct BlockDeviceInfo {
 }
 
 impl BlockDeviceInfo {
-    /// Create a BlockDeviceInfo based on the storage device used for the root directory.
+    /// Create a BlockDeviceInfo where the root device is for the root directory,
+    /// if usable.
     pub fn new() -> Result<BlockDeviceInfo> {
         BlockDeviceInfo::new_for_dir("/")
     }
 
-    /// Create a BlockDeviceInfo based on the storage device used for the provided
-    /// directory.
+    /// Create a BlockDeviceInfo where the root device is for the provided directory,
+    /// if usable.
+    ///
+    /// Reviews all devices as found in `/sys/block`. The device major number must
+    /// be included in BLOC_DEV_SUPP_MAJ_NUMBERS. For the devices member of the
+    /// info struct, includes the partitions for devices as well as the devices
+    /// themselves.
+    /// Typically finds the device and partition for the provided directory, and
+    /// specifies them in the returned struct. However may not find them, for
+    /// example when root directory is on a partition managed by LVM. In this
+    /// case the root device and partition in the returned struct will be None.
     pub fn new_for_dir(dir: &str) -> Result<BlockDeviceInfo> {
         let stat_res = stat(dir).upstream_with_context(&format!("Failed to stat for {}", dir))?;
         let root_number = DeviceNum::new(stat_res.st_dev);
+        // Collect mapping of /dev mounts
         let mounts = Mount::from_mtab()?;
 
         debug!(
-            "new: Root device number is: {}:{}",
+            "block_device_info: Root device number is: {}:{}",
             root_number.major(),
             root_number.minor()
         );
@@ -136,6 +150,7 @@ impl BlockDeviceInfo {
             sys_path.display()
         ))?;
 
+        debug!("block_device_info: Reading /sys/block devices...");
         let mut device_map: DeviceMap = DeviceMap::new();
         for entry in read_dir {
             match entry {
@@ -144,7 +159,7 @@ impl BlockDeviceInfo {
                     let curr_dev = BlockDeviceInfo::path_filename_as_string(&curr_path)?;
                     let curr_number = BlockDeviceInfo::get_maj_minor(&curr_path)?;
                     trace!(
-                        "new: Looking at path '{}', device '{}' number: {}",
+                        "block_device_info: Looking at path '{}', device '{}' number: {}",
                         curr_path.display(),
                         curr_dev,
                         curr_number,
@@ -210,6 +225,8 @@ impl BlockDeviceInfo {
         let mut root_device: Option<Rc<dyn BlockDevice>> = None;
         let mut root_partition: Option<Rc<dyn BlockDevice>> = None;
 
+        // Find the partition in the device map whose device major:minor matches
+        // the major:minor for the directory provided to this method.
         for device_rc in device_map.values_mut() {
             let device = device_rc.as_ref();
             if device.get_device_num() == &root_number {
@@ -217,6 +234,8 @@ impl BlockDeviceInfo {
                     root_device = Some(parent.clone());
                     root_partition = Some(device_rc.clone())
                 } else {
+                    // If we find the root device, we must find the root partition
+                    // as well since the provided dir uses that partition.
                     root_device = Some(device_rc.clone());
                     root_partition = None;
                 }
@@ -232,14 +251,19 @@ impl BlockDeviceInfo {
                     devices: device_map,
                 });
             } else {
-                // Preserving original logic, which fails if root_partition
-                // not defined.
                 return Err(Error::with_context(
                     ErrorKind::InvState,
-                    "Failed to create BlockDeviceInfo",
+                    &format!(
+                        "Failed to create BlockDeviceInfo; could not find partition for root dir {}",
+                        dir,
+                    ),
                 ));
             }
         } else {
+            info!(
+                "Could not find root device for major/minor: {:?}",
+                &root_number
+            );
             return Ok(BlockDeviceInfo {
                 root_device: None,
                 root_partition: None,
@@ -248,6 +272,12 @@ impl BlockDeviceInfo {
         }
     }
 
+    /// Reads the partitions for the given device, encoded as a path in /dev,
+    /// and adds the partitions to the provided device_map.
+    ///
+    /// Example:
+    ///   dev_path: /dev/nvme0n1
+    ///   partitions: nvme0n1p1, nvme0n1p2, nvme0n1p3
     fn read_partitions<P: AsRef<Path>>(
         device: &Rc<dyn BlockDevice>,
         mounts: &MountTab,
@@ -309,8 +339,8 @@ impl BlockDeviceInfo {
                         )?) as Rc<dyn BlockDevice>;
 
                         debug!(
-                            "found  partition '{:?}' in '{}'",
-                            partition.get_name(),
+                            "found partition '{:?}' in '{}'",
+                            partition,
                             currdir.display(),
                         );
                         device_map.insert(dev_path, partition);
