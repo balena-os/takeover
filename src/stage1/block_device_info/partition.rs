@@ -119,6 +119,12 @@ impl PartitionInfo {
     }
 }
 
+/// A partition of a storage Device.
+///
+/// A partition's parent may be another partition, or it may be a Device. For
+/// example the parent of '/dev/boot/efi' is '/dev/boot', but the parent of
+/// /dev/boot is some Device, probably representing a storage device like
+/// 'nvme0n1'.
 #[derive(Clone)]
 pub(crate) struct Partition {
     name: String,

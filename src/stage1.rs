@@ -19,7 +19,7 @@ use nix::{
 };
 
 use libc::MS_BIND;
-use log::{debug, error, info, warn, Level};
+use log::{debug, error, info, trace, warn, Level};
 
 use which::which;
 
@@ -145,9 +145,15 @@ fn prepare_configs<P1: AsRef<Path>>(
     Ok(())
 }
 
+/// Determines the partitions that must be unmounted in stage 2.
+///
+/// Includes mounted partitions whose parent is the provided flash device.
+/// Sorts partitions so a longer mount path precedes a shorter containing path,
+/// which is important for unmounting. For example, "/boot" sorts before "/".
 fn get_umount_parts(
     flash_dev: &Rc<dyn BlockDevice>,
     block_dev_info: &BlockDeviceInfo,
+    is_lvm_root: bool,
 ) -> Result<Vec<UmountPart>> {
     let mut umount_parts: Vec<UmountPart> = Vec::new();
 
@@ -156,10 +162,18 @@ fn get_umount_parts(
             // this is a partition rather than a device
             if parent.get_name() == flash_dev.get_name() {
                 // it is a partition of the flash device
+                trace!(
+                    "umount_parts: review partition {:?}, whose parent is the flash device",
+                    device
+                );
                 if let Some(mount) = device.get_mountpoint() {
                     let mut inserted = false;
                     for (idx, mpoint) in umount_parts.iter().enumerate() {
                         if mpoint.mountpoint.starts_with(mount.get_mountpoint()) {
+                            trace!(
+                                "umount_parts: insert partition before umount_part {:?}",
+                                mpoint
+                            );
                             umount_parts.insert(
                                 idx,
                                 UmountPart {
@@ -173,6 +187,7 @@ fn get_umount_parts(
                         }
                     }
                     if !inserted {
+                        trace!("umount_parts: append {:?}", device);
                         umount_parts.push(UmountPart {
                             dev_name: device.get_dev_path().to_path_buf(),
                             mountpoint: PathBuf::from(mount.get_mountpoint()),
@@ -184,6 +199,19 @@ fn get_umount_parts(
         }
     }
     umount_parts.reverse();
+    if is_lvm_root {
+        // Unmount LVM root logical volume last.
+        if let Some(mp) = block_dev_info.get_root_device().get_mountpoint() {
+            umount_parts.push(UmountPart {
+                dev_name: block_dev_info
+                    .get_root_device()
+                    .get_dev_path()
+                    .to_path_buf(),
+                mountpoint: PathBuf::from(mp.get_mountpoint()),
+                fs_type: mp.get_fs_type().to_string(),
+            });
+        }
+    }
     Ok(umount_parts)
 }
 
@@ -398,7 +426,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
     let new_init_path = path_append(&takeover_dir, format!("/bin/{}", env!("CARGO_PKG_NAME")));
     // Assets::write_stage2_script(&takeover_dir, &new_init_path, &tty, opts.get_s2_log_level())?;
 
-    let block_dev_info = get_block_dev_info()?;
+    let block_dev_info = get_block_dev_info(opts.is_lvm_root())?;
 
     let flash_dev = if let Some(flash_dev) = opts.flash_to() {
         if let Some(flash_dev) = block_dev_info.get_devices().get(flash_dev) {
@@ -413,7 +441,16 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
             ));
         }
     } else {
-        block_dev_info.get_root_device()
+        // If LVM root, the root device is a logical volume, so not acceptable
+        // as a balenaOS target.
+        if opts.is_lvm_root() {
+            return Err(Error::with_context(
+                ErrorKind::InvState,
+                "Must specify flash device if LVM based root directory",
+            ));
+        } else {
+            block_dev_info.get_root_device()
+        }
     };
 
     if !file_exists(flash_dev.as_ref().get_dev_path()) {
@@ -438,7 +475,7 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
         fallback_log_dirname: opts.fallback_log_dir().to_string(),
         flash_dev: flash_dev.get_dev_path(),
         pretend: opts.pretend(),
-        umount_parts: get_umount_parts(flash_dev, &block_dev_info)?,
+        umount_parts: get_umount_parts(flash_dev, &block_dev_info, opts.is_lvm_root())?,
         work_dir: opts
             .work_dir()
             .canonicalize()
@@ -525,12 +562,15 @@ fn prepare(opts: &Options, mig_info: &mut MigrateInfo) -> Result<()> {
 }
 
 /// Returns information about the block devices on the system.
-fn get_block_dev_info() -> Result<BlockDeviceInfo> {
+///
+/// Importantly uses the root directory to identify the partitions that must be
+/// unmounted to allow flashing to that same storage device.
+fn get_block_dev_info(is_lvm_root: bool) -> Result<BlockDeviceInfo> {
     let block_dev_info = if get_os_name()?.starts_with(BALENA_OS_NAME) {
         // can't use default root dir due to overlayfs
-        BlockDeviceInfo::new_for_dir(BALENA_DATA_MP)?
+        BlockDeviceInfo::new_for_dir(BALENA_DATA_MP, is_lvm_root)?
     } else {
-        BlockDeviceInfo::new()?
+        BlockDeviceInfo::new(is_lvm_root)?
     };
     Ok(block_dev_info)
 }

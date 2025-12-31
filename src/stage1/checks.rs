@@ -12,7 +12,7 @@ pub(crate) fn do_early_checks(opts: &Options) -> Result<()> {
         return Err(Error::displayed());
     }
 
-    let block_dev_info = get_block_dev_info()?;
+    let block_dev_info = get_block_dev_info(opts.is_lvm_root())?;
 
     if !check_log_device(opts, &block_dev_info) {
         error!("the requested log device is not suitable for writing stage2 logs");
