@@ -274,8 +274,11 @@ pub(crate) fn patch_device_type(
             Err(Error::with_context(
                 ErrorKind::InvState,
                 &format!(
-                    "Balena API request failed with status: {}",
-                    patch_res.status()
+                    "Balena API request failed with status: {}, text: {}",
+                    patch_res.status(),
+                    patch_res
+                        .text()
+                        .unwrap_or("error reading response text".to_string())
                 ),
             ))
         }
