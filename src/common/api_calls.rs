@@ -241,9 +241,16 @@ pub(crate) fn patch_device_type(
         debug!("device type {dt_slug} has id: {id}");
 
         // PATCH deviceType
-        let patch_url = format!("{api_endpoint}/v6/device(uuid='{uuid}')");
+        // Clear the current supervisor version and pinned target supervisor release.
+        // Then on initial target state patch after reboot, it will use the Supervisor
+        // version from the OS for both of these properties. We must ensure the
+        // pinned version matches the current version to avoid an automated update
+        // later by the host OS.
+        let patch_url = format!("{api_endpoint}/v7/device(uuid='{uuid}')");
         let patch_data = json!({
-            "is_of__device_type": id
+            "is_of__device_type": id,
+            "supervisor_version": null,
+            "should_be_managed_by__release": null
         });
 
         let patch_res = Client::builder()
