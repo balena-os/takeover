@@ -1,6 +1,6 @@
 use std::io::Read;
 
-use log::debug;
+use log::{debug, warn};
 
 use reqwest::{blocking::Client, header};
 use serde::{Deserialize, Serialize};
@@ -192,94 +192,104 @@ pub(crate) fn get_os_image(
     Ok(Box::new(res))
 }
 
-pub(crate) fn patch_device_type(
+/// Update device API for an existing balenaOS device:
+///   * Clear OS and Supervisor versions so they update from the OS on reboot,
+///     including the pinned values to avoid downgrades.
+///   * Set optional device type from the provided slug
+pub(crate) fn patch_device_model(
     api_endpoint: &str,
     api_key: &str,
-    dt_slug: &str,
     uuid: &str,
+    dt_slug: &Option<String>,
 ) -> Result<()> {
-    let headers = get_header(api_key)?;
-
-    // Before we can patch the deviceType, we need to get the deviceId corresponding to the slug
-    let dt_id_request_url = get_device_type_info_url(api_endpoint, "id", dt_slug);
-
-    debug!(
-        "patch_device_type: dt_id_request_url: '{}'",
-        dt_id_request_url
-    );
-
-    let res = Client::builder()
-        .default_headers(headers.clone())
+    // Create reusable client
+    let client = Client::builder()
+        .default_headers(get_header(api_key)?)
         .build()
-        .upstream_with_context("Failed to create https client")?
-        .get(&dt_id_request_url)
-        .send()
-        .upstream_with_context(&format!(
-            "Failed to send https request url: '{}'",
+        .upstream_with_context("Failed to create https client")?;
+
+    // To set device type, we first must retrieve the ID corresponding to the slug.
+    let mut dt_id: Option<u32> = None; // type of DeviceTypeIdApiResponse.id is u32
+    if let Some(new_dt_slug) = dt_slug {
+        let dt_id_request_url = get_device_type_info_url(api_endpoint, "id", new_dt_slug);
+
+        debug!(
+            "patch_device_type: dt_id_request_url: '{}'",
             dt_id_request_url
-        ))?;
+        );
 
-    debug!("dt_id_request Result = {:?}", res);
-
-    let status = res.status();
-    if status.is_success() {
-        // The API call returns a response with the following structure:
-        // {
-        //     "d": [
-        //         {
-        //             "id": 24
-        //         }
-        //     ]
-        // }
-        // Deserialize the JSON string into the ApiResponse struct
-        let parsed_id_resp = res
-            .json::<DeviceTypeIdApiResponse>()
-            .upstream_with_context("Failed to parse request results")?;
-
-        // Extract the device type id
-        let id = &parsed_id_resp.d[0].id;
-        debug!("device type {dt_slug} has id: {id}");
-
-        // PATCH deviceType
-        let patch_url = format!("{api_endpoint}/v6/device(uuid='{uuid}')");
-        let patch_data = json!({
-            "is_of__device_type": id
-        });
-
-        let patch_res = Client::builder()
-            .default_headers(headers)
-            .build()
-            .upstream_with_context("Failed to create https client")?
-            .patch(&patch_url)
-            .json(&patch_data)
+        let res = client
+            .get(&dt_id_request_url)
             .send()
             .upstream_with_context(&format!(
                 "Failed to send https request url: '{}'",
-                patch_url
+                dt_id_request_url
             ))?;
 
-        debug!("PATCH request Result = {:?}", patch_res);
+        debug!("dt_id_request Result = {:?}", res);
 
-        if patch_res.status().is_success() {
-            debug!("Device type successfully patched to {dt_slug}");
-            Ok(())
+        let status = res.status();
+        if status.is_success() {
+            // The API call returns a response with the following structure:
+            // {
+            //     "d": [
+            //         {
+            //             "id": 24
+            //         }
+            //     ]
+            // }
+            // Deserialize the JSON string into the ApiResponse struct
+            let parsed_id_resp = res
+                .json::<DeviceTypeIdApiResponse>()
+                .upstream_with_context("Failed to parse request results")?;
+
+            // Extract the device type id
+            dt_id = Some(parsed_id_resp.d[0].id);
+            debug!("device type {new_dt_slug} has id: {dt_id:?}");
         } else {
-            Err(Error::with_context(
-                ErrorKind::InvState,
-                &format!(
-                    "Balena API request failed with status: {}",
-                    patch_res.status()
-                ),
-            ))
-        }
-    } else {
-        Err(Error::with_context(
-            ErrorKind::InvState,
-            &format!(
+            // Proceed with patch below; we just won't set the device type
+            warn!(
                 "Balena API GET Device Type id request failed with status: {}",
                 status
-            ),
-        ))
+            );
+        }
+    }
+
+    // PATCH device model
+    let patch_url = format!("{api_endpoint}/v7/device(uuid='{uuid}')");
+    let mut values = serde_json::Map::new();
+
+    values.insert("os_version".to_string(), json!(null));
+    values.insert("should_be_operated_by__release".to_string(), json!(null));
+    values.insert("supervisor_version".to_string(), json!(null));
+    values.insert("should_be_managed_by__release".to_string(), json!(null));
+    if let Some(id) = dt_id {
+        values.insert("is_of__device_type".to_string(), json!(id));
+    }
+
+    let patch_res = client
+        .patch(&patch_url)
+        .json(&values)
+        .send()
+        .upstream_with_context(&format!(
+            "Failed to send https request url: '{}'",
+            patch_url
+        ))?;
+
+    debug!("PATCH request Result = {:?}", patch_res);
+
+    if patch_res.status().is_success() {
+        debug!("Device model successfully patched");
+        Ok(())
+    } else {
+        let mut err_text = format!(
+            "Balena API request failed with status: {}",
+            patch_res.status()
+        );
+        if let Ok(res_text) = patch_res.text() {
+            err_text.push_str(&format!(", text: {res_text}"));
+        }
+        Err(Error::with_context(ErrorKind::InvState, &err_text))
     }
 }
 
