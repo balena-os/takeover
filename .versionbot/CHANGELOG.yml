@@ -1,4 +1,26 @@
 - commits:
+    - subject: Extend API call patch_device_type() to patch_device_model()
+      hash: 485fe44b25c902db4f29f5900651c7d2be87a83f
+      body: >
+        Call whenever config.json indicates a balenaOS device, by presence of
+        UUID.
+
+
+        * Null out values for current OS version and pinned version
+
+        * Null out values for current Supervisor version and pinned version
+
+        * Allow device type change to be optional
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Ken Bannister <kb2ma@runbox.com>
+        signed-off-by: Ken Bannister <kb2ma@runbox.com>
+      author: Ken Bannister
+  version: 0.10.7
+  title: ""
+  date: 2026-01-20T18:34:36.181Z
+- commits:
     - subject: Rename license file to reflect content format
       hash: e2b7d0e4e4846db076aaa068c199bb4d164ed03c
       body: ""

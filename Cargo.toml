@@ -1,17 +1,15 @@
 [package]
 name = "takeover"
 description = "Brownfield device migration tool to balenaOS and balenaCloud"
-version = "0.10.6"
+version = "0.10.7"
 authors = [ "balena.io" ]
 edition = "2018"
 publish = false
 rust-version = "1.76"
 
-[profile]
 [profile.release]
 opt-level = "s"
 
-[dependencies]
 [dependencies.libc]
 version = "0.2.70"
 
