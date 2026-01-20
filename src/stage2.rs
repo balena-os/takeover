@@ -26,7 +26,7 @@ use crate::common::logging::{open_fallback_log_file, persist_fallback_log_to_dat
 use crate::common::reboot;
 
 use crate::common::{
-    api_calls::{notify_hup_progress, patch_device_type},
+    api_calls::{notify_hup_progress, patch_device_model},
     call,
     defs::{
         IoctlReq, BACKUP_ARCH_NAME, BALENA_BOOT_FSTYPE, BALENA_BOOT_MP, BALENA_BOOT_PART,
@@ -1403,21 +1403,28 @@ pub fn stage2(opts: &Options) -> ! {
             }
         }
     }
-    // Update device API with new device type if changed.
-    if let Some(change_to) = &s2_config.change_dt_to {
-        match patch_device_type(
+
+    // Update device API model for an existing balenaOS device since takeover
+    // operates like HUP in this case. Device type change is optional.
+    if !&s2_config.uuid.is_empty() {
+        match patch_device_model(
             &s2_config.api_endpoint,
             &s2_config.api_key,
-            change_to,
             &s2_config.uuid,
+            &s2_config.change_dt_to,
         ) {
             Ok(_) => {
                 info!(
-                    "Successfully patched device type to: {} for device {}",
-                    change_to, &s2_config.uuid
+                    "Patched device API model for device {}; device type: {}",
+                    &s2_config.uuid,
+                    if let Some(dt_name) = &s2_config.change_dt_to {
+                        dt_name
+                    } else {
+                        "unchanged"
+                    }
                 )
             }
-            Err(why) => error!("Failed to patch device type, error: {:?}", why),
+            Err(why) => error!("Failed to patch device model, error: {:?}", why),
         }
     }
 
