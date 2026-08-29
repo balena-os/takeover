@@ -308,6 +308,8 @@ not allow you to do that -- unless you force it by using
 
 ### `--change_dt_to`
 
+**Note:** This option requires a simple DHCP or static Ethernet configuration due to limited networking capability after flashing with the new OS.
+
 There are certain scenarios where devices are migrated from one device type to another. E.g From an Intel NUC (`intel-nuc`) to Generic x86_64 (`generic-amd64`). Passing `--change-dt-to` followed by the device type slug will change the device type of the device in balenaCloud.
 
 E.g:
