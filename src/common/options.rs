@@ -164,6 +164,8 @@ pub struct Options {
     change_dt_to: Option<String>,
     #[clap(long, help = "Report to balena host update processing")]
     report_hup_progress: bool,
+    #[clap(long, help = "Root directory is mounted on a single LVM volume")]
+    is_lvm_root: bool,
 }
 
 impl Options {
@@ -323,5 +325,9 @@ impl Options {
 
     pub fn report_hup_progress(&self) -> bool {
         self.report_hup_progress
+    }
+
+    pub fn is_lvm_root(&self) -> bool {
+        self.is_lvm_root
     }
 }
