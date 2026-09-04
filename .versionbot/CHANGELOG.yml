@@ -1,4 +1,18 @@
 - commits:
+    - subject: "Update doc for --change-dt-to: supports only simple Ethernet
+        connectivity"
+      hash: 550f83d38cd04cc89a7486bfb07c2caa2ded62ec
+      body: ""
+      footer:
+        Change-type: patch
+        change-type: patch
+        Signed-off-by: Ken Bannister <kb2ma@runbox.com>
+        signed-off-by: Ken Bannister <kb2ma@runbox.com>
+      author: Ken Bannister
+  version: 0.10.8
+  title: ""
+  date: 2026-09-04T15:45:14.460Z
+- commits:
     - subject: Extend API call patch_device_type() to patch_device_model()
       hash: 485fe44b25c902db4f29f5900651c7d2be87a83f
       body: >
