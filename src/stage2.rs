@@ -4,7 +4,7 @@ use std::fs::{
 use std::io::{self, Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::process::{Command, Stdio};
-use std::thread::sleep;
+use std::thread::{self, sleep};
 use std::time::{Duration, Instant};
 
 use nix::{
@@ -1197,86 +1197,114 @@ fn flash_external(target_path: &Path, image_path: &Path, dd_cmd: &str) -> FlashS
             &format!("bs={}", DD_BLOCK_SIZE),
         ])
         .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
     {
         Ok(mut dd_cmd) => {
-            if let Some(stdin) = dd_cmd.stdin.as_mut() {
+            let mut dd_stdin = dd_cmd.stdin.take().expect("Failed to get stdin handle");
+            let mut dd_stdout = dd_cmd.stdout.take().expect("Failed to get stdout handle");
+            let mut dd_stderr = dd_cmd.stderr.take().expect("Failed to get stderr handle");
+
+            let write_thread = thread::spawn(move || -> io::Result<u64> {
                 let mut buffer: [u8; DD_BLOCK_SIZE] = [0; DD_BLOCK_SIZE];
                 let mut tot_bytes: u64 = 0;
-                let start_time = Instant::now();
-                fail_res = FlashState::FailNonRecoverable;
 
                 loop {
-                    // fill buffer
                     match fill_buffer(&mut buffer, &mut decoder) {
                         Ok(buff_fill) => {
                             if buff_fill > 0 {
-                                match stdin.write_all(&buffer) {
+                                match dd_stdin.write_all(&buffer[..buff_fill]) {
                                     Ok(_) => {
                                         tot_bytes += buff_fill as u64;
                                         if buff_fill < DD_BLOCK_SIZE {
-                                            break;
+                                            break; // End of compressed file
                                         }
                                     }
                                     Err(why) => {
-                                        error!("Failed to write to dd stdin at offset 0x{:x}:{} error {:?}",
-                                               tot_bytes,
-                                               format_size_with_unit(tot_bytes),
-                                               why);
-                                        return fail_res;
+                                        return Err(why); // This is where the BrokenPipe will happen
                                     }
                                 }
                             } else {
-                                break;
+                                break; // End of compressed file
                             }
                         }
                         Err(why) => {
-                            error!(
-                                "Failed to read compressed data from '{}' at offset 0x{:x}:{}, error: {}:?",
-                                image_path.display(),
-                                tot_bytes,
-                                format_size_with_unit(tot_bytes),
-                                why
+                            let read_err = io::Error::new(
+                                io::ErrorKind::Other,
+                                format!("Decoder error: {:?}", why),
                             );
-                            return fail_res;
+                            return Err(read_err);
                         }
-                    };
-                }
-
-                let elapsed = Instant::now().duration_since(start_time).as_secs();
-                info!(
-                    "Wrote {} bytes, {} to dd in {} seconds @ {}/sec",
-                    tot_bytes,
-                    format_size_with_unit(tot_bytes),
-                    elapsed,
-                    format_size_with_unit(tot_bytes / elapsed.max(1)),
-                );
-            } else {
-                error!("Failed to retrieve dd stdin");
-                return FlashState::FailRecoverable;
-            }
-
-            match dd_cmd.wait() {
-                Ok(status) => {
-                    if status.success() {
-                        info!("dd terminated successfully");
-                        FlashState::Success
-                    } else {
-                        error!("dd terminated with exit code: {:?}", status.code());
-                        FlashState::FailNonRecoverable
                     }
                 }
-                Err(why) => {
-                    error!(
-                        "Failure waiting for dd command termination, error: {:?}",
-                        why
-                    );
+                Ok(tot_bytes)
+            });
+
+            let stdout_thread = thread::spawn(move || {
+                let mut s = String::new();
+                dd_stdout.read_to_string(&mut s).unwrap();
+                s
+            });
+            let stderr_thread = thread::spawn(move || {
+                let mut s = String::new();
+                dd_stderr.read_to_string(&mut s).unwrap();
+                s
+            });
+
+            let status = dd_cmd.wait().expect("dd command failed to run");
+            let write_result = write_thread.join().unwrap();
+            let stdout_output = stdout_thread.join().unwrap();
+            let stderr_output = stderr_thread.join().unwrap();
+
+            // --- Analysis ---
+            // This match expression is the last expression in the Ok(dd_cmd)
+            // arm, so it MUST evaluate to a FlashState.
+            match write_result {
+                Ok(bytes_written) => {
+                    if status.success() {
+                        info!(
+                            "Flash successful: wrote {} bytes.",
+                            format_size_with_unit(bytes_written)
+                        );
+                        debug!("dd stdout: {}", stdout_output);
+                        debug!("dd stderr: {}", stderr_output);
+                        
+                        // *** FIX: Return the success state ***
+                        FlashState::Success 
+                    } else {
+                        error!("dd command failed AFTER write completed with status: {}", status);
+                        error!("--- DD STDERR (ROOT CAUSE) ---");
+                        error!("{}", stderr_output);
+                        error!("--- DD STDOUT ---");
+                        error!("{}", stdout_output);
+                        
+                        // *** FIX: Return the fail state ***
+                        fail_res
+                    }
+                }
+                Err(e) => {
+                    if e.kind() == io::ErrorKind::BrokenPipe {
+                        error!("Failed to write to dd: Broken Pipe.");
+                        error!("This means dd exited unexpectedly *while* we were writing.");
+                        error!("dd exit status was: {}", status);
+                        error!("--- DD STDERR ---");
+                        error!("{}", stderr_output);
+                        error!("--- DD STDOUT ---");
+                        error!("{}", stdout_output);
+                    } else {
+                        error!("Failed to read/decompress image: {:?}", e);
+                    }
+                    
+                    // *** FIX: Return the fail state ***
                     fail_res
                 }
             }
         }
         Err(why) => {
-            error!("Failed to execute '{}', error: {:?}", DD_CMD, why);
+            error!("Failed to *spawn* dd command: {:?}", why);
+            
+            // *** FIX: Return the fail state ***
             fail_res
         }
     }
